@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+    "ignoreDeprecations": "6.0",
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
     "target": "es2023",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
@@ -19,7 +20,17 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+
+    // --- Configurações adicionadas/modificadas para resolução de módulos ---
+    "baseUrl": ".", // Define a base para a resolução de módulos como a raiz do projeto
+    "paths": {
+      "~api/*": ["./src/api/*"] // Mapeia "~api/client" para "./src/api/client"
+    },
+    "esModuleInterop": true, // Permite interoperabilidade entre módulos CommonJS e ES Modules
+    "forceConsistentCasingInFileNames": true // Garante consistência no uso de maiúsculas/minúsculas em nomes de arquivos
+    // --- Fim das configurações adicionadas/modificadas ---
   },
-  "include": ["src"]
+  "include": ["src/**/*.ts", "src/**/*.tsx"], // Inclui todos os arquivos .ts e .tsx em src e subpastas
+  "exclude": ["node_modules", "dist"] // Exclui pastas de módulos e build
 }

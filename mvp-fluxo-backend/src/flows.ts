@@ -36,3 +36,22 @@ export async function createFlow(data: {
     client.release();
   }
 }
+
+export async function updateFlow(
+  flowId: string,
+  tenantId: string,
+  data: { name: string; channel: string }
+): Promise<Flow | null> {
+  const client = await pool.connect();
+  try {
+    const result = await client.query<Flow>(
+      `UPDATE flows SET name = $1, channel = $2
+       WHERE id = $3 AND tenant_id = $4
+       RETURNING *`,
+      [data.name, data.channel, flowId, tenantId]
+    );
+    return result.rows[0] ?? null;
+  } finally {
+    client.release();
+  }
+}

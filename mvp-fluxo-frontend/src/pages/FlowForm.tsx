@@ -1,20 +1,18 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import api from "../api/client";
+import api from "../api/client"; // Importa o cliente axios configurado
+
+// REMOVA ESTA LINHA: const tenantId = "1be433d5-f15b-4764-9a85-e88f3bc88732";
 
 interface Flow {
   id: string;
   name: string;
-  description: string | null;
+  description?: string; // Adicionado para corresponder ao formData
   channel: string;
-  is_active: boolean;
-  created_at: string;
 }
 
-const tenantId = "1be433d5-f15b-4764-9a85-e88f3bc88732";
-
 export default function FlowForm() {
-  const { flowId } = useParams<{ flowId?: string }>();
+  const { id: flowId } = useParams<{ id?: string }>();
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(!!flowId);
@@ -32,13 +30,9 @@ export default function FlowForm() {
 
     setLoading(true);
     api
-      .get(`/tenants/${tenantId}/flows`)
+      .get(`/flows/${flowId}`)
       .then((res) => {
-        const data = res.data?.data || res.data || [];
-        const flow = Array.isArray(data)
-          ? data.find((f: Flow) => f.id === flowId)
-          : null;
-
+        const flow = res.data?.data as Flow | undefined;
         if (flow) {
           setFormData({
             name: flow.name,
@@ -54,7 +48,7 @@ export default function FlowForm() {
         setError("Erro ao carregar os dados do fluxo.");
       })
       .finally(() => setLoading(false));
-  }, [flowId]);
+  }, [flowId]); // Dependência de flowId
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
@@ -79,20 +73,24 @@ export default function FlowForm() {
 
     try {
       if (flowId) {
-        await api.put(`/tenants/${tenantId}/flows/${flowId}`, {
+        // A chamada de API agora não precisa do tenantId na URL.
+        // O interceptor do axios adicionará o `x-tenant-id` e o prefixo `/api`.
+        await api.put(`/flows/${flowId}`, {
           name: formData.name,
           description: formData.description || null,
           channel: formData.channel,
         });
       } else {
-        await api.post(`/tenants/${tenantId}/flows`, {
+        // A chamada de API agora não precisa do tenantId na URL.
+        // O interceptor do axios adicionará o `x-tenant-id` e o prefixo `/api`.
+        await api.post(`/flows`, {
           name: formData.name,
           description: formData.description || null,
           channel: formData.channel,
         });
       }
 
-      navigate("/");
+      navigate("/dashboard");
     } catch (err) {
       console.error("Erro ao salvar fluxo:", err);
       setError("Erro ao salvar o fluxo. Tente novamente.");
@@ -185,7 +183,7 @@ export default function FlowForm() {
           <div className="flex gap-4">
             <button
               type="button"
-              onClick={() => navigate("/")}
+              onClick={() => navigate("/dashboard")}
               disabled={submitting}
               className="flex-1 px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
             >

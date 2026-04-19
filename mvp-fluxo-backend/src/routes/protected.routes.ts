@@ -11,7 +11,7 @@ import { authMiddleware } from '../middlewares/auth.middleware';
 // Adaptei os handlers para usar request.tenant.id e request.user.id
 // Você precisará garantir que listFlowsByTenant, createFlow, etc.,
 // aceitem esses parâmetros ou que você crie wrappers para eles.
-import { listFlowsByTenant, createFlow } from "../flows";
+import { listFlowsByTenant, createFlow, updateFlow } from "../flows";
 import { listNodesByFlow, createNode, updateNode, deleteNode } from "../nodes";
 
 // Declaração do plugin Fastify
@@ -89,6 +89,33 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       request.log.error(err);
       reply.code(500);
       return { error: "Erro ao criar flow" };
+    }
+  });
+
+  fastify.put<{
+    Params: { flowId: string };
+    Body: { name: string; channel: string };
+  }>("/flows/:flowId", async (request, reply) => {
+    const { flowId } = request.params;
+    const { name, channel } = request.body;
+    const tenantId = request.tenant.id;
+
+    if (!name || !channel) {
+      reply.code(400);
+      return { error: "Campos 'name' e 'channel' são obrigatórios." };
+    }
+
+    try {
+      const flow = await updateFlow(flowId, tenantId, { name, channel });
+      if (!flow) {
+        reply.code(404);
+        return { error: "Flow não encontrado ou não pertence a este tenant" };
+      }
+      return { data: flow };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500);
+      return { error: "Erro ao atualizar flow" };
     }
   });
 

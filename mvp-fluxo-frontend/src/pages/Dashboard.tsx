@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import api from "../api/client";
+import api from "../api/client"; // Importa o cliente axios configurado
 
-const tenantId = "1be433d5-f15b-4764-9a85-e88f3bc88732";
+// REMOVA ESTA LINHA: const tenantId = "1be433d5-f15b-4764-9a85-e88f3bc88732";
 
 interface Flow {
   id: string;
@@ -20,14 +20,17 @@ export default function Dashboard() {
     setLoading(true);
     setError(null);
 
+    // A chamada de API agora não precisa do tenantId na URL.
+    // O interceptor do axios em `api/client.ts` adicionará o `x-tenant-id` e o prefixo `/api`.
     api
-      .get(`/tenants/${tenantId}/flows`)
+      .get("/flows") // Endpoint agora é apenas "/flows"
       .then((res) => {
         console.log("=== RESPOSTA /flows ===", res.data);
 
         const data = res.data;
         let list: Flow[] = [];
 
+        // Adaptação para diferentes formatos de resposta do backend
         if (Array.isArray(data)) {
           list = data;
         } else if (data && Array.isArray(data.data)) {
@@ -43,12 +46,12 @@ export default function Dashboard() {
       .catch((err) => {
         console.error("Erro ao carregar flows:", err);
         setError(
-          "Não foi possível carregar os fluxos. Verifique se o backend está rodando."
+          "Não foi possível carregar os fluxos. Verifique se o backend está rodando e se você está autenticado."
         );
         setFlows([]);
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, []); // O array de dependências está vazio, pois o tenantId não é mais uma dependência direta aqui.
 
   const totalFlows = flows.length;
   const activeFlows = flows.filter((f) => f.is_active).length;
@@ -107,7 +110,7 @@ export default function Dashboard() {
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <h2 className="text-lg font-semibold text-primary">Fluxos</h2>
           <a
-            href="/flows/novo/editor"
+            href="/flows/new"
             className="bg-accent text-white text-sm px-4 py-2 rounded-lg hover:bg-accent-dark transition-colors"
           >
             + Novo Fluxo
@@ -160,7 +163,7 @@ export default function Dashboard() {
                     </td>
                     <td className="px-6 py-4">
                       <a
-                        href={`/flows/${flow.id}/canvas`}
+                        href={`/flows/${flow.id}`}
                         className="text-accent hover:text-accent-dark font-medium transition-colors"
                       >
                         Editar →
