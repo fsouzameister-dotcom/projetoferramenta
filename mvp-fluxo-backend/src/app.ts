@@ -3,7 +3,7 @@ import cors from "@fastify/cors";
 import * as jwt from "jsonwebtoken";
 import * as bcrypt from "bcrypt";
 
-import { JWT_SECRET, getCorsOrigin } from "./config";
+import { JWT_SECRET, getCorsOrigin, resolveLoginTenantId } from "./config";
 import { pool } from "./db";
 import protectedRoutes from "./routes/protected.routes";
 
@@ -28,16 +28,23 @@ export async function buildApp(options: BuildAppOptions = {}) {
   });
 
   app.post("/login", async (request, reply) => {
-    const { email, password, tenantId } = request.body as {
+    const { email, password, tenantId: tenantFromBody } = request.body as {
       email?: string;
       password?: string;
       tenantId?: string;
     };
 
-    if (!email || !password || !tenantId) {
-      reply
-        .code(400)
-        .send({ message: "Email, password, and tenantId are required" });
+    if (!email || !password) {
+      reply.code(400).send({ message: "Email e senha são obrigatórios" });
+      return;
+    }
+
+    const tenantId = resolveLoginTenantId(tenantFromBody);
+    if (!tenantId) {
+      reply.code(400).send({
+        message:
+          "tenantId é obrigatório em produção. Em desenvolvimento, defina DEFAULT_LOGIN_TENANT_ID no .env ou passe tenantId no body.",
+      });
       return;
     }
 
@@ -71,10 +78,14 @@ export async function buildApp(options: BuildAppOptions = {}) {
           email: user.email,
         },
         JWT_SECRET,
-        { expiresIn: "1h" }
+        { expiresIn: "24h" }
       );
 
-      return reply.send({ message: "Login successful", token });
+      return reply.send({
+        message: "Login successful",
+        token,
+        tenant_id: user.tenant_id,
+      });
     } catch (error) {
       console.error("Error during login:", error);
       reply.code(500).send({ message: "Internal server error" });

@@ -111,10 +111,10 @@ export default function FlowForm() {
     <div className="p-8">
       <div className="max-w-2xl mx-auto">
         <div className="mb-8">
-          <h1 className="text-2xl font-bold text-primary">
+          <h1 className="text-2xl font-bold text-white">
             {flowId ? "Editar Fluxo" : "Criar Novo Fluxo"}
           </h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <p className="text-sm text-gray-300 mt-1">
             {flowId
               ? "Atualize as informações do seu fluxo"
               : "Preencha os dados para criar um novo fluxo"}
@@ -139,7 +139,7 @@ export default function FlowForm() {
               value={formData.name}
               onChange={handleChange}
               placeholder="Ex: Fluxo de Boas-vindas"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+              className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
               disabled={submitting}
             />
           </div>
@@ -155,7 +155,7 @@ export default function FlowForm() {
               onChange={handleChange}
               placeholder="Descreva o propósito deste fluxo (opcional)"
               rows={4}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+              className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
               disabled={submitting}
             />
           </div>
@@ -169,7 +169,7 @@ export default function FlowForm() {
               name="channel"
               value={formData.channel}
               onChange={handleChange}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+              className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
               disabled={submitting}
             >
               <option value="whatsapp">WhatsApp</option>

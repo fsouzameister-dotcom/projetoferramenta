@@ -7,6 +7,8 @@ import ReactFlow, {
   MiniMap,
   Controls,
   Background,
+  applyNodeChanges,
+  type NodeChange,
   type Node,
   type Connection,
   BackgroundVariant,
@@ -42,6 +44,7 @@ interface TestResult {
 }
 
 const paletteItems = [
+  { id: "inicio", name: "Início", icon: "▶️" },
   { id: "conversa", name: "Conversa", icon: "💬" },
   { id: "funcao", name: "Função", icon: "⚡" },
   { id: "transferir_chamada", name: "Transferir Chamada", icon: "📞" },
@@ -56,7 +59,6 @@ const paletteItems = [
   { id: "capturar_entrada", name: "Capturar Entrada", icon: "📥" },
   { id: "decisao", name: "Decisão", icon: "⚖️" },
   { id: "encerramento", name: "Encerramento", icon: "⏹️" },
-  { id: "inicio", name: "Início", icon: "▶️" },
 ];
 
 export default function FlowEditor() {
@@ -66,7 +68,7 @@ export default function FlowEditor() {
   const flowId = rawFlowId?.split(":")[0] || "";
 
   const [flowData, setFlowData] = useState<FlowData | null>(null);
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
+  const [nodes, setNodes] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -81,6 +83,28 @@ export default function FlowEditor() {
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [showTestResult, setShowTestResult] = useState(false);
   const [flowVariables, setFlowVariables] = useState<Record<string, any>>({});
+  const [savingFlow, setSavingFlow] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+  const resolvePersistedPosition = (node: NodeDataType) => {
+    const fromColumn = node.position;
+    const fromConfig = node.config?.ui?.position;
+    if (
+      fromColumn &&
+      typeof fromColumn.x === "number" &&
+      typeof fromColumn.y === "number"
+    ) {
+      return fromColumn;
+    }
+    if (
+      fromConfig &&
+      typeof fromConfig.x === "number" &&
+      typeof fromConfig.y === "number"
+    ) {
+      return fromConfig;
+    }
+    return { x: Math.random() * 400 + 200, y: Math.random() * 300 + 100 };
+  };
 
   useEffect(() => {
     if (!flowId) return;
@@ -106,16 +130,18 @@ export default function FlowEditor() {
         }
 
         setFlowData(flow);
-        const initialNodes = (nodesRes.data?.data || nodesRes.data || []).map((node: NodeDataType) => ({
-          id: node.id,
-          type: node.type,
-          position: node.position || { x: Math.random() * 400 + 200, y: Math.random() * 300 + 100 }, // Posição padrão se não houver
-          data: {
-            ...node, // Passa todos os dados do nó para o data do ReactFlow
-            label: node.name,
-            onSelect: handleNodeClick,
-          },
-        }));
+        const initialNodes = (nodesRes.data?.data || nodesRes.data || []).map(
+          (node: NodeDataType) => ({
+            id: node.id,
+            type: node.type,
+            position: resolvePersistedPosition(node),
+            data: {
+              ...node,
+              label: node.name,
+              onSelect: handleNodeClick,
+            },
+          })
+        );
 
         // Reconstruir as arestas (edges) a partir dos nós
         const initialEdges: any[] = [];
@@ -156,6 +182,7 @@ export default function FlowEditor() {
 
         setNodes(initialNodes);
         setEdges(initialEdges);
+        setHasUnsavedChanges(false);
         setError(null);
       })
       .catch((err) => {
@@ -171,6 +198,28 @@ export default function FlowEditor() {
       setSelectedNodeId(nodeId);
       setSelectedNodeType(node.type ?? null);
     }
+  };
+
+  const onNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      const shouldMarkUnsaved = changes.some((change) => {
+        if (change.type === "position" || change.type === "remove" || change.type === "add") {
+          return true;
+        }
+        return false;
+      });
+      if (shouldMarkUnsaved) {
+        setHasUnsavedChanges(true);
+      }
+      setNodes((nds) => applyNodeChanges(changes, nds));
+    },
+    [setNodes]
+  );
+
+  const handleNodeDoubleClick = (_event: unknown, node: Node) => {
+    setSelectedNodeId(node.id);
+    setSelectedNodeType(node.type ?? null);
+    handleEditNode(node.id);
   };
 
   const handleAddNode = async (nodeType: string) => {
@@ -198,10 +247,56 @@ export default function FlowEditor() {
           },
         };
         setNodes((nds) => [...nds, newReactFlowNode]);
+        setHasUnsavedChanges(true);
       }
     } catch (err) {
       console.error("Erro ao criar node:", err);
       alert("Erro ao criar node");
+    }
+  };
+
+  const handleSaveFlow = async () => {
+    if (!flowId || nodes.length === 0) return;
+    setSavingFlow(true);
+    try {
+      await Promise.all(
+        nodes.map((node) =>
+          api.put(`/flows/${flowId}/nodes/${node.id}`, {
+            name: node.data.label,
+            config: {
+              ...(node.data.config || {}),
+              ui: {
+                ...((node.data.config && node.data.config.ui) || {}),
+                position: node.position,
+              },
+            },
+          })
+        )
+      );
+
+      setNodes((nds) =>
+        nds.map((node) => ({
+          ...node,
+          data: {
+            ...node.data,
+            config: {
+              ...(node.data.config || {}),
+              ui: {
+                ...((node.data.config && node.data.config.ui) || {}),
+                position: node.position,
+              },
+            },
+          },
+        }))
+      );
+
+      setHasUnsavedChanges(false);
+      alert("Fluxo salvo com sucesso.");
+    } catch (err) {
+      console.error("Erro ao salvar fluxo:", err);
+      alert("Erro ao salvar fluxo.");
+    } finally {
+      setSavingFlow(false);
     }
   };
 
@@ -224,6 +319,7 @@ export default function FlowEditor() {
       setEdges((eds) => eds.filter((edge) => edge.source !== nodeId && edge.target !== nodeId));
       setSelectedNodeId(null);
       setSelectedNodeType(null);
+      setHasUnsavedChanges(true);
     } catch (err) {
       console.error("Erro ao deletar node:", err);
       alert("Erro ao deletar node");
@@ -256,6 +352,7 @@ export default function FlowEditor() {
             : n
         )
       );
+      setHasUnsavedChanges(true);
       setEditingNodeId(null);
       setEditNodeName("");
       setEditNodeContent("");
@@ -367,6 +464,7 @@ export default function FlowEditor() {
     async (params: Connection) => {
       const newEdge = { ...params, animated: true };
       setEdges((eds) => addEdge(newEdge, eds));
+      setHasUnsavedChanges(true);
 
       // Atualizar o nó de origem com o next_node_id
       const sourceNode = nodes.find((n) => n.id === params.source);
@@ -407,6 +505,7 @@ export default function FlowEditor() {
                 : n
             )
           );
+          setHasUnsavedChanges(true);
         } catch (err) {
           console.error("Erro ao atualizar node com nova conexão:", err);
           alert("Erro ao salvar conexão.");
@@ -464,6 +563,7 @@ export default function FlowEditor() {
       setEdges((eds) =>
         eds.filter((edge) => !edgesToDelete.some((e) => e.id === edge.id))
       );
+      setHasUnsavedChanges(true);
     },
     [nodes, flowId, setNodes, setEdges]
   );
@@ -498,32 +598,53 @@ export default function FlowEditor() {
   return (
     <div className="flex h-screen bg-white">
       {/* Painel Esquerdo */}
-      <div className="w-64 bg-white shadow-lg p-6 overflow-y-auto border-r border-gray-200 flex flex-col">
-        <div className="mb-4">
+      <div className="w-64 bg-white shadow-lg p-4 overflow-y-auto border-r border-gray-200 flex flex-col">
+        <div className="mb-3">
           <button
             onClick={() => navigate("/flows")}
-            className="text-xs text-teal-600 hover:underline mb-2 flex items-center gap-1"
+            className="text-[11px] text-teal-600 hover:underline mb-1 flex items-center gap-1"
           >
             ← Voltar para Fluxos
           </button>
-          <h2 className="text-xl font-semibold text-gray-800">
+          <h2 className="text-lg font-semibold text-gray-800">
             {flowData?.name || "Editor de Fluxo"}
           </h2>
-          <p className="text-sm text-gray-500">
+          <p className="text-xs text-gray-500">
             {flowData?.channel ? `Canal: ${flowData.channel}` : ""}
+          </p>
+          <button
+            onClick={handleSaveFlow}
+            disabled={savingFlow}
+            className="mt-2 w-full px-3 py-1.5 bg-teal-600 text-white text-sm rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-60"
+          >
+            {savingFlow ? "Salvando fluxo..." : "Salvar fluxo"}
+          </button>
+          <p
+            className={`mt-2 text-xs ${
+              hasUnsavedChanges ? "text-amber-600" : "text-emerald-600"
+            }`}
+          >
+            {hasUnsavedChanges ? "Alterações não salvas" : "Tudo salvo"}
           </p>
         </div>
 
-        <h3 className="text-md font-semibold text-gray-700 mb-3">Paleta de Nós</h3>
-        <div className="grid grid-cols-2 gap-3">
+        <h3 className="text-sm font-semibold text-gray-700 mb-2">Paleta de Nós</h3>
+        <p className="text-[11px] text-gray-500 mb-2">
+          Clique para adicionar. Dê duplo clique no node para editar.
+        </p>
+        <div className="space-y-1.5">
           {paletteItems.map((item) => (
             <button
               key={item.id}
               onClick={() => handleAddNode(item.id)}
-              className="flex flex-col items-center justify-center p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 text-sm text-gray-700 transition-colors"
+              className="group w-full flex items-center gap-2 p-1.5 bg-[#111827] hover:bg-[#0f172a] rounded-md border border-[#1f2937] text-left transition-all"
             >
-              <span className="text-xl mb-1">{item.icon}</span>
-              {item.name}
+              <span className="w-6 h-6 rounded-full bg-[#0b1220] border border-[#334155] text-sm flex items-center justify-center group-hover:scale-105 transition-transform">
+                {item.icon}
+              </span>
+              <span className="text-xs font-medium text-white leading-tight">
+                {item.name}
+              </span>
             </button>
           ))}
         </div>
@@ -536,6 +657,7 @@ export default function FlowEditor() {
           edges={edges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
+          onNodeDoubleClick={handleNodeDoubleClick}
           onConnect={onConnect}
           onEdgesDelete={onEdgesDelete} // Adicionado: Lidar com a exclusão de arestas
           nodeTypes={nodeTypes}

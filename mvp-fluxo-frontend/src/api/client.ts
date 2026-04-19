@@ -30,13 +30,16 @@ api.interceptors.request.use(
 export function loginRequest(body: {
   email: string;
   password: string;
-  tenantId: string;
+  /** Opcional em produção; em dev o backend usa DEFAULT_LOGIN_TENANT_ID. */
+  tenantId?: string;
 }) {
-  return axios.post<{ message?: string; token: string }>(
-    `${API_ORIGIN}/login`,
-    body,
-    { headers: { "Content-Type": "application/json" } }
-  );
+  return axios.post<{
+    message?: string;
+    token: string;
+    tenant_id: string;
+  }>(`${API_ORIGIN}/login`, body, {
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
 export default api;

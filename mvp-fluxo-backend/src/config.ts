@@ -20,14 +20,38 @@ export const PG_USER = required("PG_USER");
 export const PG_PASSWORD = required("PG_PASSWORD");
 export const PG_DATABASE = required("PG_DATABASE");
 
-/** Produção exige origem explícita; em dev usa localhost do Vite por padrão. */
-export function getCorsOrigin(): string {
+/**
+ * Produção: origem explícita obrigatória.
+ * Desenvolvimento: se CORS_ORIGIN não vier definida, aceita qualquer porta em
+ * localhost/127.0.0.1 (ex.: Vite cai em 5174 se 5173 estiver ocupada).
+ */
+export function getCorsOrigin(): string | RegExp {
   if (process.env.NODE_ENV === "production") {
     return required("CORS_ORIGIN");
   }
-  return process.env.CORS_ORIGIN?.trim() || "http://localhost:5173";
+  const explicit = process.env.CORS_ORIGIN?.trim();
+  if (explicit) {
+    return explicit;
+  }
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 }
 
 export const REDIS_HOST =
   process.env.REDIS_HOST?.trim() || "127.0.0.1";
 export const REDIS_PORT = parseInt(process.env.REDIS_PORT || "6379", 10);
+
+/**
+ * Em desenvolvimento, login pode omitir tenantId no body se DEFAULT_LOGIN_TENANT_ID
+ * estiver definido (ex.: após `npm run seed:dev`). Em produção, tenantId no body é obrigatório.
+ */
+export function resolveLoginTenantId(bodyTenantId?: string): string | null {
+  const fromBody = bodyTenantId?.trim();
+  if (fromBody) {
+    return fromBody;
+  }
+  if (process.env.NODE_ENV === "production") {
+    return null;
+  }
+  const def = process.env.DEFAULT_LOGIN_TENANT_ID?.trim();
+  return def || null;
+}

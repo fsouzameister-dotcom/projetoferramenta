@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
-import api from "../api/client"; // Importa o cliente axios configurado
-
-// REMOVA ESTA LINHA: const tenantId = "1be433d5-f15b-4764-9a85-e88f3bc88732";
+import api from "../api/client";
 
 interface Flow {
   id: string;
@@ -15,8 +13,23 @@ export default function Dashboard() {
   const [flows, setFlows] = useState<Flow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [apiOnline, setApiOnline] = useState<boolean | null>(null);
+  const [channelFilter, setChannelFilter] = useState("todos");
+  const [campaignFilter, setCampaignFilter] = useState("todas");
 
   useEffect(() => {
+    const apiOrigin =
+      import.meta.env.VITE_API_URL?.replace(/\/$/, "") ??
+      "http://localhost:3000";
+
+    fetch(`${apiOrigin}/health`)
+      .then((res) => {
+        setApiOnline(res.ok);
+      })
+      .catch(() => {
+        setApiOnline(false);
+      });
+
     setLoading(true);
     setError(null);
 
@@ -45,44 +58,114 @@ export default function Dashboard() {
       })
       .catch((err) => {
         console.error("Erro ao carregar flows:", err);
-        setError(
-          "Não foi possível carregar os fluxos. Verifique se o backend está rodando e se você está autenticado."
-        );
+        const status = err?.response?.status;
+        if (status === 401 || status === 403) {
+          setError("Sessao invalida ou expirada. Faca login novamente.");
+        } else if (status === 400) {
+          setError("Tenant ausente na sessao. Faca login novamente.");
+        } else {
+          setError(
+            "Nao foi possivel carregar os fluxos. Verifique backend e conectividade."
+          );
+        }
         setFlows([]);
       })
       .finally(() => setLoading(false));
   }, []); // O array de dependências está vazio, pois o tenantId não é mais uma dependência direta aqui.
 
-  const totalFlows = flows.length;
-  const activeFlows = flows.filter((f) => f.is_active).length;
+  const normalizeChannel = (channel?: string) =>
+    (channel || "desconhecido").toLowerCase();
+
+  const inferCampaign = (name: string) => {
+    // Se existir o padrao "Campanha - Nome", usa o prefixo como campanha.
+    const [maybeCampaign] = name.split(" - ");
+    return maybeCampaign?.trim() || "Geral";
+  };
+
+  const channelOptions = Array.from(
+    new Set(flows.map((f) => normalizeChannel(f.channel)))
+  );
+  const campaignOptions = Array.from(new Set(flows.map((f) => inferCampaign(f.name))));
+
+  const filteredFlows = flows.filter((f) => {
+    const channelOk =
+      channelFilter === "todos" || normalizeChannel(f.channel) === channelFilter;
+    const campaignOk =
+      campaignFilter === "todas" || inferCampaign(f.name) === campaignFilter;
+    return channelOk && campaignOk;
+  });
+
+  const totalFlows = filteredFlows.length;
+  const activeFlows = filteredFlows.filter((f) => f.is_active).length;
   const inactiveFlows = totalFlows - activeFlows;
+
+  const channelGroups = filteredFlows.reduce<Record<string, number>>((acc, flow) => {
+    const key = normalizeChannel(flow.channel);
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  const maxChannelCount = Math.max(1, ...Object.values(channelGroups));
 
   return (
     <div className="p-8">
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-primary">Dashboard</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Visão geral dos seus fluxos de atendimento
+        <h1 className="text-2xl font-bold text-white">Dashboard</h1>
+        <p className="text-sm text-gray-300 mt-1">
+          Visao geral dos seus fluxos de atendimento
         </p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+          <label className="block text-sm text-gray-500 mb-2">Canal</label>
+          <select
+            value={channelFilter}
+            onChange={(e) => setChannelFilter(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+          >
+            <option value="todos">Todos os canais</option>
+            {channelOptions.map((channel) => (
+              <option key={channel} value={channel}>
+                {channel}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+          <label className="block text-sm text-gray-500 mb-2">Campanha</label>
+          <select
+            value={campaignFilter}
+            onChange={(e) => setCampaignFilter(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+          >
+            <option value="todas">Todas as campanhas</option>
+            {campaignOptions.map((campaign) => (
+              <option key={campaign} value={campaign}>
+                {campaign}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-          <p className="text-sm text-gray-500">Total de Flows</p>
+          <p className="text-sm text-gray-500">Total de Fluxos</p>
           <p className="text-2xl font-bold text-primary mt-1">
             {loading ? "—" : totalFlows}
           </p>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-          <p className="text-sm text-gray-500">Flows Ativos</p>
+          <p className="text-sm text-gray-500">Fluxos Ativos</p>
           <p className="text-2xl font-bold text-green-500 mt-1">
             {loading ? "—" : activeFlows}
           </p>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-          <p className="text-sm text-gray-500">Flows Inativos</p>
+          <p className="text-sm text-gray-500">Fluxos Inativos</p>
           <p className="text-2xl font-bold text-gray-400 mt-1">
             {loading ? "—" : inactiveFlows}
           </p>
@@ -92,10 +175,10 @@ export default function Dashboard() {
           <p className="text-sm text-gray-500">Status API</p>
           <p
             className={`text-2xl font-bold mt-1 ${
-              error ? "text-red-500" : "text-green-500"
+              apiOnline === false ? "text-red-500" : "text-green-500"
             }`}
           >
-            {loading ? "—" : error ? "Offline" : "Online"}
+            {apiOnline === null ? "—" : apiOnline ? "Online" : "Offline"}
           </p>
         </div>
       </div>
@@ -106,86 +189,43 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 className="text-lg font-semibold text-primary">Fluxos</h2>
-          <a
-            href="/flows/new"
-            className="bg-accent text-white text-sm px-4 py-2 rounded-lg hover:bg-accent-dark transition-colors"
-          >
-            + Novo Fluxo
-          </a>
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-6">
+        <h2 className="text-lg font-semibold text-primary mb-4">
+          Volume de Fluxos por Canal
+        </h2>
+        <div className="space-y-3">
+          {Object.keys(channelGroups).length === 0 ? (
+            <p className="text-sm text-gray-400">
+              Nenhum dado para os filtros selecionados.
+            </p>
+          ) : (
+            Object.entries(channelGroups).map(([channel, count]) => {
+              const width = Math.max(8, Math.round((count / maxChannelCount) * 100));
+              return (
+                <div key={channel}>
+                  <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+                    <span className="capitalize">{channel}</span>
+                    <span>{count}</span>
+                  </div>
+                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-2 bg-teal-500 rounded-full"
+                      style={{ width: `${width}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
+      </div>
 
-        {loading ? (
-          <div className="px-6 py-12 text-center text-gray-400 text-sm">
-            Carregando fluxos...
-          </div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-gray-400 border-b border-gray-100">
-                <th className="px-6 py-3 font-medium">Nome</th>
-                <th className="px-6 py-3 font-medium">Canal</th>
-                <th className="px-6 py-3 font-medium">Status</th>
-                <th className="px-6 py-3 font-medium">Criado em</th>
-                <th className="px-6 py-3 font-medium">Ação</th>
-              </tr>
-            </thead>
-            <tbody>
-              {flows.length > 0 ? (
-                flows.map((flow) => (
-                  <tr
-                    key={flow.id}
-                    className="border-b border-gray-50 hover:bg-gray-50 transition-colors"
-                  >
-                    <td className="px-6 py-4 font-medium text-primary">
-                      {flow.name}
-                    </td>
-                    <td className="px-6 py-4 capitalize text-gray-600">
-                      {flow.channel || "—"}
-                    </td>
-                    <td className="px-6 py-4">
-                      <span
-                        className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                          flow.is_active
-                            ? "bg-green-100 text-green-700"
-                            : "bg-gray-100 text-gray-500"
-                        }`}
-                      >
-                        {flow.is_active ? "Ativo" : "Inativo"}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-gray-400">
-                      {flow.created_at
-                        ? new Date(flow.created_at).toLocaleDateString("pt-BR")
-                        : "—"}
-                    </td>
-                    <td className="px-6 py-4">
-                      <a
-                        href={`/flows/${flow.id}`}
-                        className="text-accent hover:text-accent-dark font-medium transition-colors"
-                      >
-                        Editar →
-                      </a>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td
-                    colSpan={5}
-                    className="px-6 py-12 text-center text-gray-400"
-                  >
-                    {error
-                      ? "Erro ao carregar fluxos."
-                      : "Nenhum fluxo encontrado. Crie o primeiro!"}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        )}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <h2 className="text-lg font-semibold text-primary mb-2">Resumo do Painel</h2>
+        <p className="text-sm text-gray-600">
+          A criacao e gerenciamento de fluxos fica centralizada no menu lateral em{" "}
+          <strong>Fluxos</strong>.
+        </p>
       </div>
     </div>
   );
