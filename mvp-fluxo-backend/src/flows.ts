@@ -1,50 +1,38 @@
 import { pool } from "./db";
 
-export type Flow = {
+interface Flow {
   id: string;
   tenant_id: string;
   name: string;
   channel: string;
-  created_at: string;
-  updated_at: string;
-};
+}
 
-// Listar flows de um tenant
 export async function listFlowsByTenant(tenantId: string): Promise<Flow[]> {
-  const { rows } = await pool.query<Flow>(
-    `SELECT * FROM flows WHERE tenant_id = $1 ORDER BY created_at DESC`,
-    [tenantId]
-  );
-  return rows;
+  const client = await pool.connect();
+  try {
+    const result = await client.query<Flow>(
+      `SELECT id, tenant_id, name, channel FROM flows WHERE tenant_id = $1`,
+      [tenantId]
+    );
+    return result.rows;
+  } finally {
+    client.release();
+  }
 }
 
-// Buscar flow por ID
-export async function getFlowById(flowId: string): Promise<Flow | null> {
-  const { rows } = await pool.query<Flow>(
-    `SELECT * FROM flows WHERE id = $1`,
-    [flowId]
-  );
-  return rows[0] || null;
-}
-
-// Criar flow
-export type CreateFlowInput = {
+export async function createFlow(data: {
   tenantId: string;
   name: string;
   channel: string;
-};
-
-export async function createFlow(input: CreateFlowInput): Promise<Flow> {
-  const { tenantId, name, channel } = input;
-
-  const { rows } = await pool.query<Flow>(
-    `
-    INSERT INTO flows (tenant_id, name, channel)
-    VALUES ($1, $2, $3)
-    RETURNING *
-    `,
-    [tenantId, name, channel]
-  );
-
-  return rows[0];
+}): Promise<Flow> {
+  const client = await pool.connect();
+  try {
+    const result = await client.query<Flow>(
+      `INSERT INTO flows (id, tenant_id, name, channel) VALUES (gen_random_uuid(), $1, $2, $3) RETURNING *`,
+      [data.tenantId, data.name, data.channel]
+    );
+    return result.rows[0];
+  } finally {
+    client.release();
+  }
 }

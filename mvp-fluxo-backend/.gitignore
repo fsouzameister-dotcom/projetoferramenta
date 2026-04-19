@@ -1,0 +1,13 @@
+# Dependências e build
+node_modules/
+dist/
+
+# Segredos e ambiente local (use .env.example como modelo)
+.env
+.env.local
+.env.*.local
+
+# Logs e OS
+*.log
+.DS_Store
+Thumbs.db

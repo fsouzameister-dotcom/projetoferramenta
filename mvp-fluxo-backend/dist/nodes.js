@@ -5,39 +5,87 @@ exports.createNode = createNode;
 exports.updateNode = updateNode;
 exports.deleteNode = deleteNode;
 const db_1 = require("./db");
-// Listar nodes de um fluxo
-async function listNodesByFlow(flowId) {
-    const { rows } = await db_1.pool.query(`SELECT * FROM nodes WHERE flow_id = $1 ORDER BY created_at ASC`, [flowId]);
-    return rows;
-}
-async function createNode(input) {
-    const { flowId, type, name, config, isStart } = input;
-    const { rows } = await db_1.pool.query(`
-    INSERT INTO nodes (flow_id, type, name, config, is_start)
-    VALUES ($1, $2, $3, $4, $5)
-    RETURNING *
-    `, [flowId, type, name, config, isStart ?? false]);
-    return rows[0];
-}
-async function updateNode(nodeId, input) {
-    const { type, name, config, is_start } = input;
-    const { rows } = await db_1.pool.query(`
-    UPDATE nodes
-    SET 
-      type = COALESCE($1, type),
-      name = COALESCE($2, name),
-      config = COALESCE($3, config),
-      is_start = COALESCE($4, is_start),
-      updated_at = NOW()
-    WHERE id = $5
-    RETURNING *
-    `, [type, name, config, is_start, nodeId]);
-    if (!rows.length) {
-        throw new Error("Node não encontrado");
+async function listNodesByFlow(flowId, tenantId) {
+    const client = await db_1.pool.connect();
+    try {
+        const flowCheck = await client.query(`SELECT id FROM flows WHERE id = $1 AND tenant_id = $2`, [flowId, tenantId]);
+        if (flowCheck.rows.length === 0) {
+            throw new Error("Flow not found or does not belong to this tenant");
+        }
+        const result = await client.query(`SELECT * FROM nodes WHERE flow_id = $1`, [flowId]);
+        return result.rows;
     }
-    return rows[0];
+    finally {
+        client.release();
+    }
 }
-// Deletar node
-async function deleteNode(nodeId) {
-    await db_1.pool.query(`DELETE FROM nodes WHERE id = $1`, [nodeId]);
+async function createNode(data, tenantId) {
+    const client = await db_1.pool.connect();
+    try {
+        const flowCheck = await client.query(`SELECT id FROM flows WHERE id = $1 AND tenant_id = $2`, [data.flowId, tenantId]);
+        if (flowCheck.rows.length === 0) {
+            throw new Error("Flow not found or does not belong to this tenant");
+        }
+        const result = await client.query(`INSERT INTO nodes (id, flow_id, type, name, config, is_start) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5) RETURNING *`, [
+            data.flowId,
+            data.type,
+            data.name,
+            data.config ?? {},
+            data.isStart ?? false,
+        ]);
+        return result.rows[0];
+    }
+    finally {
+        client.release();
+    }
+}
+async function updateNode(nodeId, data, tenantId, flowId) {
+    const client = await db_1.pool.connect();
+    try {
+        const nodeCheck = await client.query(`SELECT n.id FROM nodes n JOIN flows f ON n.flow_id = f.id WHERE n.id = $1 AND f.id = $2 AND f.tenant_id = $3`, [nodeId, flowId, tenantId]);
+        if (nodeCheck.rows.length === 0) {
+            throw new Error("Node not found or does not belong to this tenant");
+        }
+        const setClauses = [];
+        const values = [];
+        let paramIndex = 1;
+        if (data.type !== undefined) {
+            setClauses.push(`type = $${paramIndex++}`);
+            values.push(data.type);
+        }
+        if (data.name !== undefined) {
+            setClauses.push(`name = $${paramIndex++}`);
+            values.push(data.name);
+        }
+        if (data.config !== undefined) {
+            setClauses.push(`config = $${paramIndex++}`);
+            values.push(data.config);
+        }
+        if (data.is_start !== undefined) {
+            setClauses.push(`is_start = $${paramIndex++}`);
+            values.push(data.is_start);
+        }
+        if (setClauses.length === 0) {
+            return null;
+        }
+        values.push(nodeId);
+        const result = await client.query(`UPDATE nodes SET ${setClauses.join(", ")} WHERE id = $${paramIndex} RETURNING *`, values);
+        return result.rows[0] || null;
+    }
+    finally {
+        client.release();
+    }
+}
+async function deleteNode(nodeId, tenantId, flowId) {
+    const client = await db_1.pool.connect();
+    try {
+        const nodeCheck = await client.query(`SELECT n.id FROM nodes n JOIN flows f ON n.flow_id = f.id WHERE n.id = $1 AND f.id = $2 AND f.tenant_id = $3`, [nodeId, flowId, tenantId]);
+        if (nodeCheck.rows.length === 0) {
+            throw new Error("Node not found or does not belong to this tenant");
+        }
+        await client.query(`DELETE FROM nodes WHERE id = $1`, [nodeId]);
+    }
+    finally {
+        client.release();
+    }
 }

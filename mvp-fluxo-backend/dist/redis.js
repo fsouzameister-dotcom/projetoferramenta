@@ -6,15 +6,13 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.redis = void 0;
 exports.testRedisConnection = testRedisConnection;
 const ioredis_1 = __importDefault(require("ioredis"));
-const dotenv_1 = __importDefault(require("dotenv"));
-dotenv_1.default.config();
+const config_1 = require("./config");
 exports.redis = new ioredis_1.default({
-    host: process.env.REDIS_HOST,
-    port: Number(process.env.REDIS_PORT || 6379),
+    host: config_1.REDIS_HOST,
+    port: config_1.REDIS_PORT,
 });
 async function testRedisConnection() {
     try {
-        // Tentamos escrever, mas se der READONLY não vamos derrubar o servidor
         await exports.redis.set("mvp:test", "ok", "EX", 10);
         const value = await exports.redis.get("mvp:test");
         console.log("Redis conectado. Teste (write ok):", value);
@@ -26,7 +24,7 @@ async function testRedisConnection() {
         }
         else {
             console.error("Erro ao conectar no Redis:", err);
-            throw err; // outros erros ainda derrubam
+            throw err;
         }
     }
 }
