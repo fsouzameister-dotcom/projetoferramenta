@@ -69,3 +69,45 @@
 2. Padronização de erros/contratos de resposta da API.
 3. Testes de integração para auth, tenant e CRUD de fluxo/nodes.
 4. Início do motor de execução de fluxo (sessão, estado e eventos).
+
+## Próxima sessão (roteiro rápido)
+
+### Objetivo da sessão
+
+Fechar persistência de posição de nodes no backend com contrato explícito, reduzindo dependência de `config.ui.position`.
+
+### Tarefa 1 (primeira a executar)
+
+- Backend:
+  - revisar schema de `nodes` para campo de posição dedicado
+  - ajustar `createNode`, `updateNode` e `listNodesByFlow` para aceitar/retornar `position`
+  - manter fallback temporário para `config.ui.position` durante migração
+- Frontend:
+  - manter leitura prioritária de `position` retornada pela API
+  - preservar fallback enquanto houver dados legados
+
+### Critério de aceite
+
+- Criar flow, mover nodes, salvar, recarregar página e confirmar posições idênticas.
+- Nenhum node novo deve depender de posição aleatória para render inicial.
+
+### Comandos de retomada
+
+```bash
+cd c:\projetoferramenta
+git pull origin master
+```
+
+Backend:
+
+```bash
+cd c:\projetoferramenta\mvp-fluxo-backend
+npm run dev
+```
+
+Frontend:
+
+```bash
+cd c:\projetoferramenta\mvp-fluxo-frontend
+npm run dev
+```
