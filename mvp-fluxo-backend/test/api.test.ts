@@ -16,13 +16,17 @@ describe("API smoke", () => {
     const app = await appPromise;
     const res = await app.inject({ method: "GET", url: "/health" });
     assert.strictEqual(res.statusCode, 200);
-    assert.strictEqual(JSON.parse(res.payload).status, "ok");
+    const payload = JSON.parse(res.payload);
+    assert.strictEqual(payload.data.status, "ok");
+    assert.ok(payload.meta.requestId);
   });
 
   test("GET /api/flows sem x-tenant-id retorna 400", async () => {
     const app = await appPromise;
     const res = await app.inject({ method: "GET", url: "/api/flows" });
     assert.strictEqual(res.statusCode, 400);
+    const payload = JSON.parse(res.payload);
+    assert.strictEqual(payload.error.code, "TENANT_HEADER_REQUIRED");
   });
 
   test("GET /api/flows com tenant inexistente retorna 404", async () => {
@@ -33,5 +37,7 @@ describe("API smoke", () => {
       headers: { "x-tenant-id": "00000000-0000-0000-0000-000000000000" },
     });
     assert.strictEqual(res.statusCode, 404);
+    const payload = JSON.parse(res.payload);
+    assert.strictEqual(payload.error.code, "TENANT_NOT_FOUND");
   });
 });

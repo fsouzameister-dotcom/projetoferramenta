@@ -15,7 +15,9 @@ interface AuthenticatedUser {
   id: string;
   tenant_id: string;
   role_id: string;
+  role_name?: string;
   email: string;
+  name?: string;
   // Adicione outras propriedades do usuário que você queira acessar globalmente
 }
 

@@ -1,5 +1,6 @@
 import { FastifyRequest, FastifyReply } from "fastify";
 import { pool } from "../db";
+import { ApiError, ERROR_CODES } from "../http";
 
 export async function tenantMiddleware(
   request: FastifyRequest,
@@ -8,10 +9,11 @@ export async function tenantMiddleware(
   const tenantId = request.headers["x-tenant-id"] as string;
 
   if (!tenantId) {
-    reply
-      .code(400)
-      .send({ message: "Tenant ID is required in x-tenant-id header" });
-    return;
+    throw new ApiError(
+      400,
+      ERROR_CODES.tenant.TENANT_HEADER_REQUIRED,
+      "Tenant ID is required in x-tenant-id header"
+    );
   }
 
   try {
@@ -22,8 +24,11 @@ export async function tenantMiddleware(
         [tenantId]
       );
       if (result.rows.length === 0) {
-        reply.code(404).send({ message: "Tenant not found or inactive" });
-        return;
+        throw new ApiError(
+          404,
+          ERROR_CODES.tenant.TENANT_NOT_FOUND,
+          "Tenant not found or inactive"
+        );
       }
 
       request.tenant = result.rows[0];
@@ -31,7 +36,13 @@ export async function tenantMiddleware(
       client.release();
     }
   } catch (error) {
-    console.error("Error in tenantMiddleware:", error);
-    reply.code(500).send({ message: "Internal server error" });
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError(
+      500,
+      ERROR_CODES.tenant.TENANT_MIDDLEWARE_ERROR,
+      "Internal server error"
+    );
   }
 }
