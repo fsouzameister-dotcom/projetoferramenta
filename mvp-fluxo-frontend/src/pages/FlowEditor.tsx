@@ -14,7 +14,7 @@ import ReactFlow, {
   BackgroundVariant,
 } from "reactflow";
 import "reactflow/dist/style.css";
-import api from "../api/client"; // Importa o cliente axios configurado
+import api, { getApiErrorMessage, unwrapApiData } from "../api/client"; // Importa o cliente axios configurado
 import { nodeTypes } from "../components/flownodes"; // Seus tipos de nós personalizados
 
 // REMOVA ESTA LINHA: const tenantId = "1be433d5-f15b-4764-9a85-e88f3bc88732";
@@ -118,7 +118,7 @@ export default function FlowEditor() {
       api.get(`/flows/${flowId}/nodes`),
     ])
       .then(([flowsRes, nodesRes]) => {
-        const flows = flowsRes.data?.data || flowsRes.data || [];
+        const flows = unwrapApiData<FlowData[]>(flowsRes.data);
         const flow = Array.isArray(flows)
           ? flows.find((f: FlowData) => f.id === flowId)
           : null;
@@ -130,7 +130,7 @@ export default function FlowEditor() {
         }
 
         setFlowData(flow);
-        const initialNodes = (nodesRes.data?.data || nodesRes.data || []).map(
+        const initialNodes = unwrapApiData<NodeDataType[]>(nodesRes.data).map(
           (node: NodeDataType) => ({
             id: node.id,
             type: node.type,
@@ -187,7 +187,7 @@ export default function FlowEditor() {
       })
       .catch((err) => {
         console.error("Erro ao carregar fluxo ou nós:", err);
-        setError("Não foi possível carregar o fluxo ou seus nós.");
+        setError(getApiErrorMessage(err, "Não foi possível carregar o fluxo ou seus nós."));
       })
       .finally(() => setLoading(false));
   }, [flowId]); // Dependência apenas de flowId
@@ -224,14 +224,19 @@ export default function FlowEditor() {
 
   const handleAddNode = async (nodeType: string) => {
     const nodeName = paletteItems.find((t) => t.id === nodeType)?.name || "Node";
+    const initialPosition = {
+      x: Math.random() * 400 + 200,
+      y: Math.random() * 300 + 100,
+    };
     try {
       const response = await api.post(`/flows/${flowId}/nodes`, {
         name: nodeName,
         type: nodeType,
         config: {},
         is_start: false,
+        position: initialPosition,
       });
-      const newNode = response.data?.data || response.data;
+      const newNode = unwrapApiData<NodeDataType>(response.data);
       if (newNode && newNode.id) {
         const newReactFlowNode: Node = {
           id: newNode.id,
@@ -241,17 +246,14 @@ export default function FlowEditor() {
             config: newNode.config,
             onSelect: handleNodeClick,
           },
-          position: {
-            x: Math.random() * 400 + 200,
-            y: Math.random() * 300 + 100,
-          },
+          position: newNode.position || initialPosition,
         };
         setNodes((nds) => [...nds, newReactFlowNode]);
         setHasUnsavedChanges(true);
       }
     } catch (err) {
       console.error("Erro ao criar node:", err);
-      alert("Erro ao criar node");
+      alert(getApiErrorMessage(err, "Erro ao criar node"));
     }
   };
 
@@ -263,6 +265,7 @@ export default function FlowEditor() {
         nodes.map((node) =>
           api.put(`/flows/${flowId}/nodes/${node.id}`, {
             name: node.data.label,
+            position: node.position,
             config: {
               ...(node.data.config || {}),
               ui: {
@@ -294,7 +297,7 @@ export default function FlowEditor() {
       alert("Fluxo salvo com sucesso.");
     } catch (err) {
       console.error("Erro ao salvar fluxo:", err);
-      alert("Erro ao salvar fluxo.");
+      alert(getApiErrorMessage(err, "Erro ao salvar fluxo."));
     } finally {
       setSavingFlow(false);
     }
@@ -322,7 +325,7 @@ export default function FlowEditor() {
       setHasUnsavedChanges(true);
     } catch (err) {
       console.error("Erro ao deletar node:", err);
-      alert("Erro ao deletar node");
+      alert(getApiErrorMessage(err, "Erro ao deletar node"));
     }
   };
 
@@ -337,7 +340,7 @@ export default function FlowEditor() {
           content: editNodeContent,
         },
       });
-      const updatedNode = response.data?.data || response.data;
+      const updatedNode = unwrapApiData<NodeDataType>(response.data);
       setNodes((nds) =>
         nds.map((n) =>
           n.id === editingNodeId
@@ -359,7 +362,7 @@ export default function FlowEditor() {
       setEditNodeConfig({});
     } catch (err) {
       console.error("Erro ao atualizar node:", err);
-      alert("Erro ao atualizar node");
+      alert(getApiErrorMessage(err, "Erro ao atualizar node"));
     } finally {
       setEditingNode(false);
     }

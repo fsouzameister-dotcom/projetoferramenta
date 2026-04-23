@@ -14,6 +14,8 @@ import Dashboard from "./pages/Dashboard";
 import Flows from "./pages/Flows";
 import FlowEditor from "./pages/FlowEditor";
 import FlowForm from "./pages/FlowForm";
+import AgentHome from "./pages/AgentHome";
+import UsersAdmin from "./pages/UsersAdmin";
 import Sidebar from "./components/Sidebar";
 
 function isSessionValid(): boolean {
@@ -33,6 +35,17 @@ function isSessionValid(): boolean {
   } catch {
     return false;
   }
+}
+
+function getUserRole(): string {
+  return localStorage.getItem("user_role") || "agente";
+}
+
+function clearSession() {
+  localStorage.removeItem("jwt_token");
+  localStorage.removeItem("tenant_id");
+  localStorage.removeItem("user_role");
+  localStorage.removeItem("user_name");
 }
 
 function SessionActionButton() {
@@ -58,8 +71,7 @@ function SessionActionButton() {
 
   const handleClick = () => {
     if (loggedIn) {
-      localStorage.removeItem("jwt_token");
-      localStorage.removeItem("tenant_id");
+      clearSession();
       setLoggedIn(false);
     }
     navigate("/login");
@@ -106,9 +118,16 @@ const LayoutWithSidebar = () => (
 
 const RequireAuth = () => {
   if (!isSessionValid()) {
-    localStorage.removeItem("jwt_token");
-    localStorage.removeItem("tenant_id");
+    clearSession();
     return <Navigate to="/login" replace />;
+  }
+  return <Outlet />;
+};
+
+const RequireRoles = ({ allowed }: { allowed: string[] }) => {
+  const role = getUserRole();
+  if (!allowed.includes(role)) {
+    return <Navigate to={role === "agente" ? "/agent" : "/dashboard"} replace />;
   }
   return <Outlet />;
 };
@@ -124,14 +143,24 @@ const router = createBrowserRouter([
         element: <RequireAuth />,
         children: [
           {
-            element: <LayoutWithSidebar />,
+            element: <RequireRoles allowed={["admin_local", "supervisor", "admin"]} />,
             children: [
-              { path: "dashboard", element: <Dashboard /> },
-              { path: "flows", element: <Flows /> },
-              { path: "flows/new", element: <FlowForm /> },
-              { path: "flows/edit/:id", element: <FlowForm /> },
-              { path: "flows/:flowId", element: <FlowEditor /> },
+              {
+                element: <LayoutWithSidebar />,
+                children: [
+                  { path: "dashboard", element: <Dashboard /> },
+                  { path: "flows", element: <Flows /> },
+                  { path: "flows/new", element: <FlowForm /> },
+                  { path: "flows/edit/:id", element: <FlowForm /> },
+                  { path: "flows/:flowId", element: <FlowEditor /> },
+                  { path: "admin/users", element: <UsersAdmin /> },
+                ],
+              },
             ],
+          },
+          {
+            element: <RequireRoles allowed={["agente"]} />,
+            children: [{ path: "agent", element: <AgentHome /> }],
           },
         ],
       },

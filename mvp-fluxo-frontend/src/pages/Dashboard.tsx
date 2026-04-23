@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import api from "../api/client";
+import api, { getApiErrorMessage, unwrapApiData } from "../api/client";
 
 interface Flow {
   id: string;
@@ -38,21 +38,7 @@ export default function Dashboard() {
     api
       .get("/flows") // Endpoint agora é apenas "/flows"
       .then((res) => {
-        console.log("=== RESPOSTA /flows ===", res.data);
-
-        const data = res.data;
-        let list: Flow[] = [];
-
-        // Adaptação para diferentes formatos de resposta do backend
-        if (Array.isArray(data)) {
-          list = data;
-        } else if (data && Array.isArray(data.data)) {
-          list = data.data;
-        } else if (data && Array.isArray(data.flows)) {
-          list = data.flows;
-        }
-
-        console.log("Lista normalizada de flows:", list);
+        const list = unwrapApiData<Flow[]>(res.data);
         setFlows(list);
         setError(null);
       })
@@ -65,7 +51,10 @@ export default function Dashboard() {
           setError("Tenant ausente na sessao. Faca login novamente.");
         } else {
           setError(
-            "Nao foi possivel carregar os fluxos. Verifique backend e conectividade."
+            getApiErrorMessage(
+              err,
+              "Nao foi possivel carregar os fluxos. Verifique backend e conectividade."
+            )
           );
         }
         setFlows([]);

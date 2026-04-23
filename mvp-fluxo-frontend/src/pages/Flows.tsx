@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import api from "../api/client";
+import api, { getApiErrorMessage, unwrapApiData } from "../api/client";
 
 interface Flow {
   id: string;
@@ -22,23 +22,10 @@ export default function Flows() {
     api
       .get("/flows")
       .then((res) => {
-        const data = res.data;
-        let list: Flow[] = [];
-
-        if (Array.isArray(data)) {
-          list = data;
-        } else if (data && Array.isArray(data.data)) {
-          list = data.data;
-        } else if (data && Array.isArray(data.flows)) {
-          list = data.flows;
-        }
-
-        setFlows(list);
+        setFlows(unwrapApiData<Flow[]>(res.data));
       })
-      .catch(() => {
-        setError(
-          "Nao foi possivel carregar os fluxos. Verifique backend e autenticacao."
-        );
+      .catch((err) => {
+        setError(getApiErrorMessage(err, "Nao foi possivel carregar os fluxos. Verifique backend e autenticacao."));
         setFlows([]);
       })
       .finally(() => setLoading(false));

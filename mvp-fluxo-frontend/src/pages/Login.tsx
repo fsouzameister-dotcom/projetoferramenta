@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { loginRequest } from "~api/client";
+import { getApiErrorMessage, loginRequest, unwrapApiData } from "~api/client";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -21,19 +21,32 @@ export default function Login() {
         password,
       });
 
-      const { token, tenant_id: tenantId } = response.data;
+      const { token, tenant_id: tenantId } = unwrapApiData<{
+        token: string;
+        tenant_id: string;
+        role_name?: string;
+        name?: string;
+      }>(response.data);
 
       localStorage.setItem("jwt_token", token);
       localStorage.setItem("tenant_id", tenantId);
+      const payload = unwrapApiData<{
+        token: string;
+        tenant_id: string;
+        role_name?: string;
+        name?: string;
+      }>(response.data);
+      localStorage.setItem("user_role", payload.role_name || "agente");
+      localStorage.setItem("user_name", payload.name || email);
 
-      navigate("/dashboard");
+      if ((payload.role_name || "agente") === "agente") {
+        navigate("/agent");
+      } else {
+        navigate("/dashboard");
+      }
     } catch (err: unknown) {
       console.error("Erro no login:", err);
-      const ax = err as { response?: { data?: { message?: string } } };
-      setError(
-        ax.response?.data?.message ||
-          "Erro ao fazer login. Verifique email e senha."
-      );
+      setError(getApiErrorMessage(err, "Erro ao fazer login. Verifique email e senha."));
     } finally {
       setLoading(false);
     }

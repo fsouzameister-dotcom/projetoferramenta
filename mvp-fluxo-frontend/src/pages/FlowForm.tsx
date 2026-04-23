@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import api from "../api/client"; // Importa o cliente axios configurado
+import api, { getApiErrorMessage, unwrapApiData } from "../api/client"; // Importa o cliente axios configurado
 
 // REMOVA ESTA LINHA: const tenantId = "1be433d5-f15b-4764-9a85-e88f3bc88732";
 
@@ -32,7 +32,7 @@ export default function FlowForm() {
     api
       .get(`/flows/${flowId}`)
       .then((res) => {
-        const flow = res.data?.data as Flow | undefined;
+        const flow = unwrapApiData<Flow | null>(res.data);
         if (flow) {
           setFormData({
             name: flow.name,
@@ -45,7 +45,7 @@ export default function FlowForm() {
       })
       .catch((err) => {
         console.error("Erro ao carregar fluxo:", err);
-        setError("Erro ao carregar os dados do fluxo.");
+        setError(getApiErrorMessage(err, "Erro ao carregar os dados do fluxo."));
       })
       .finally(() => setLoading(false));
   }, [flowId]); // Dependência de flowId
@@ -93,7 +93,7 @@ export default function FlowForm() {
       navigate("/dashboard");
     } catch (err) {
       console.error("Erro ao salvar fluxo:", err);
-      setError("Erro ao salvar o fluxo. Tente novamente.");
+      setError(getApiErrorMessage(err, "Erro ao salvar o fluxo. Tente novamente."));
     } finally {
       setSubmitting(false);
     }
