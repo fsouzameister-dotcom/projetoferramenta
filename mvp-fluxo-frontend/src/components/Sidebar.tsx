@@ -4,6 +4,7 @@ const navItems = [
   { label: "Painel", path: "/dashboard", icon: "⊞" },
   { label: "Fluxos", path: "/flows", icon: "⬡" },
   { label: "Usuários", path: "/admin/users", icon: "👤" },
+  { label: "IA", path: "/admin/ai", icon: "🤖" },
   { label: "Relatórios", path: "/reports", icon: "📊" },
   { label: "Configurações", path: "/settings", icon: "⚙" },
 ];

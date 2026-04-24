@@ -34,6 +34,15 @@ import {
   listAgentConversations,
   updateAgentMessageStatus,
 } from "../agent-conversations";
+import {
+  createAiPersona,
+  createAiProviderSetting,
+  createAiScript,
+  generateAiText,
+  listAiPersonas,
+  listAiProviderSettings,
+  updateAiPersona,
+} from "../ai";
 
 const flowSchema = {
   type: "object",
@@ -120,14 +129,36 @@ const messageIdParamSchema = {
   },
 } as const;
 
+const personaIdParamSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["personaId"],
+  properties: {
+    personaId: { type: "string", minLength: 1 },
+  },
+} as const;
+
 // Declaração do plugin Fastify
 const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
+  const hasAdminAccess = (roleName?: string) =>
+    roleName === "admin_local" || roleName === "supervisor" || roleName === "admin";
+
   const ensureAdminAccess = (roleName?: string) => {
-    if (roleName !== "admin_local" && roleName !== "supervisor" && roleName !== "admin") {
+    if (!hasAdminAccess(roleName)) {
       throw new ApiError(
         403,
         ERROR_CODES.users.FORBIDDEN_ROLE,
         "Apenas admin local e supervisor podem gerenciar usuários"
+      );
+    }
+  };
+
+  const ensureAiAdminAccess = (roleName?: string) => {
+    if (!hasAdminAccess(roleName)) {
+      throw new ApiError(
+        403,
+        ERROR_CODES.ai.AI_FORBIDDEN_ROLE,
+        "Apenas admin local e supervisor podem configurar IA"
       );
     }
   };
@@ -234,6 +265,476 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           ERROR_CODES.agent.AGENT_CONVERSATION_CREATE_FAILED,
           "Erro ao criar novo contato"
         );
+      }
+    }
+  );
+
+  fastify.post<{
+    Body: {
+      personaId: string;
+      conversationId?: string;
+      customerContext?: {
+        contactName?: string;
+        tags?: string[];
+        recentMessages?: string[];
+      };
+    };
+  }>(
+    "/ai/assist-hint",
+    {
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["personaId"],
+          properties: {
+            personaId: { type: "string", minLength: 1 },
+            conversationId: { type: "string" },
+            customerContext: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                contactName: { type: "string" },
+                tags: { type: "array", items: { type: "string" } },
+                recentMessages: { type: "array", items: { type: "string" } },
+              },
+            },
+          },
+        },
+        response: {
+          200: successEnvelopeSchema({
+            type: "object",
+            additionalProperties: false,
+            required: ["hint", "source"],
+            properties: {
+              hint: { type: "string" },
+              source: { type: "string", enum: ["ai", "fallback"] },
+            },
+          }),
+          404: errorEnvelopeSchema([
+            ERROR_CODES.ai.AI_PROVIDER_NOT_FOUND,
+            ERROR_CODES.ai.AI_PERSONA_NOT_FOUND,
+          ]),
+          502: errorEnvelopeSchema([ERROR_CODES.ai.AI_HINT_GENERATION_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      const { personaId, conversationId, customerContext } = request.body;
+      const tags = customerContext?.tags ?? [];
+      const recentMessages = customerContext?.recentMessages ?? [];
+      const contactName = customerContext?.contactName || "Cliente";
+      const heuristicText = `${tags.join(" ")} ${recentMessages.join(" ")}`.toLowerCase();
+
+      const fallbackHint = (() => {
+        if (/(reclama|insatisfeit|ruim|cancel|atras|problema|erro)/.test(heuristicText)) {
+          return "Cliente com possível risco de atrito. Valide o motivo, confirme entendimento e ofereça próximo passo com prazo claro.";
+        }
+        if (/(compr|contrat|plano|fechado|assin)/.test(heuristicText)) {
+          return "Cliente com sinal de interesse/compras anteriores. Priorize continuidade: confirme objetivo e ofereça upsell aderente ao histórico.";
+        }
+        return "Inicie com confirmação objetiva da necessidade e proponha duas opções claras para acelerar a decisão do cliente.";
+      })();
+
+      const prompt = [
+        `Você é um copiloto de atendimento para agente humano.`,
+        `Gere UMA dica curta (máx 220 caracteres), objetiva e acionável em português.`,
+        `Contato: ${contactName}`,
+        `Tags: ${tags.join(", ") || "sem tags"}`,
+        `Mensagens recentes: ${recentMessages.join(" | ") || "sem mensagens"}`,
+        `A dica deve reduzir atrito e aumentar resolução no primeiro contato.`,
+      ].join("\n");
+
+      try {
+        const ai = await generateAiText({
+          tenantId: request.tenant.id,
+          personaId,
+          conversationId,
+          message: prompt,
+        });
+        return sendSuccess(request, reply, {
+          hint: ai.text.slice(0, 220),
+          source: "ai",
+        });
+      } catch (error) {
+        request.log.warn(error);
+        return sendSuccess(request, reply, {
+          hint: fallbackHint,
+          source: "fallback",
+        });
+      }
+    }
+  );
+
+  fastify.post<{
+    Body: { provider: "openai" | "gemini"; model: string; apiKey: string; isDefault?: boolean };
+  }>(
+    "/ai/providers",
+    {
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["provider", "model", "apiKey"],
+          properties: {
+            provider: { type: "string", enum: ["openai", "gemini"] },
+            model: { type: "string", minLength: 1 },
+            apiKey: { type: "string", minLength: 8 },
+            isDefault: { type: "boolean" },
+          },
+        },
+        response: {
+          201: successEnvelopeSchema({
+            type: "object",
+            additionalProperties: false,
+            required: ["id", "provider", "model", "is_default", "is_active"],
+            properties: {
+              id: { type: "string" },
+              provider: { type: "string" },
+              model: { type: "string" },
+              is_default: { type: "boolean" },
+              is_active: { type: "boolean" },
+            },
+          }),
+          403: errorEnvelopeSchema([ERROR_CODES.ai.AI_FORBIDDEN_ROLE]),
+          500: errorEnvelopeSchema([ERROR_CODES.ai.AI_PROVIDER_CREATE_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      ensureAiAdminAccess(request.user?.role_name);
+      const body = request.body;
+      try {
+        const created = await createAiProviderSetting({
+          tenantId: request.tenant.id,
+          provider: body.provider,
+          model: body.model,
+          apiKey: body.apiKey,
+          isDefault: body.isDefault,
+        });
+        return sendSuccess(request, reply, created, 201);
+      } catch (error) {
+        request.log.error(error);
+        if (error instanceof ApiError) throw error;
+        throw new ApiError(
+          500,
+          ERROR_CODES.ai.AI_PROVIDER_CREATE_FAILED,
+          "Erro ao criar provedor de IA"
+        );
+      }
+    }
+  );
+
+  fastify.get(
+    "/ai/providers",
+    {
+      schema: {
+        response: {
+          200: successEnvelopeSchema({
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["id", "provider", "model", "is_default", "is_active"],
+              properties: {
+                id: { type: "string" },
+                provider: { type: "string" },
+                model: { type: "string" },
+                is_default: { type: "boolean" },
+                is_active: { type: "boolean" },
+              },
+            },
+          }),
+          403: errorEnvelopeSchema([ERROR_CODES.ai.AI_FORBIDDEN_ROLE]),
+          500: errorEnvelopeSchema([ERROR_CODES.ai.AI_PROVIDERS_LIST_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      ensureAiAdminAccess(request.user?.role_name);
+      try {
+        const providers = await listAiProviderSettings(request.tenant.id);
+        return sendSuccess(request, reply, providers);
+      } catch (error) {
+        request.log.error(error);
+        throw new ApiError(
+          500,
+          ERROR_CODES.ai.AI_PROVIDERS_LIST_FAILED,
+          "Erro ao listar provedores de IA"
+        );
+      }
+    }
+  );
+
+  fastify.post<{
+    Body: {
+      name: string;
+      description?: string;
+      tone?: string;
+      systemPrompt: string;
+      avatarUrl?: string;
+    };
+  }>(
+    "/ai/personas",
+    {
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["name", "systemPrompt"],
+          properties: {
+            name: { type: "string", minLength: 2 },
+            description: { type: "string" },
+            tone: { type: "string" },
+            systemPrompt: { type: "string", minLength: 8 },
+            avatarUrl: { type: "string" },
+          },
+        },
+        response: {
+          201: successEnvelopeSchema({
+            type: "object",
+            additionalProperties: true,
+          }),
+          403: errorEnvelopeSchema([ERROR_CODES.ai.AI_FORBIDDEN_ROLE]),
+          500: errorEnvelopeSchema([ERROR_CODES.ai.AI_PERSONA_CREATE_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      ensureAiAdminAccess(request.user?.role_name);
+      try {
+        const persona = await createAiPersona({
+          tenantId: request.tenant.id,
+          createdBy: request.user?.id,
+          name: request.body.name,
+          description: request.body.description,
+          tone: request.body.tone,
+          systemPrompt: request.body.systemPrompt,
+          avatarUrl: request.body.avatarUrl,
+        });
+        return sendSuccess(request, reply, persona, 201);
+      } catch (error) {
+        request.log.error(error);
+        if (error instanceof ApiError) throw error;
+        throw new ApiError(500, ERROR_CODES.ai.AI_PERSONA_CREATE_FAILED, "Erro ao criar persona");
+      }
+    }
+  );
+
+  fastify.get(
+    "/ai/personas",
+    {
+      schema: {
+        response: {
+          200: successEnvelopeSchema({
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: true,
+            },
+          }),
+          500: errorEnvelopeSchema([ERROR_CODES.ai.AI_PERSONAS_LIST_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      try {
+        const personas = await listAiPersonas(request.tenant.id);
+        return sendSuccess(request, reply, personas);
+      } catch (error) {
+        request.log.error(error);
+        throw new ApiError(500, ERROR_CODES.ai.AI_PERSONAS_LIST_FAILED, "Erro ao listar personas");
+      }
+    }
+  );
+
+  fastify.put<{
+    Params: { personaId: string };
+    Body: {
+      name?: string;
+      description?: string;
+      tone?: string;
+      systemPrompt?: string;
+      avatarUrl?: string;
+      isActive?: boolean;
+    };
+  }>(
+    "/ai/personas/:personaId",
+    {
+      schema: {
+        params: personaIdParamSchema,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            name: { type: "string", minLength: 2 },
+            description: { type: "string" },
+            tone: { type: "string" },
+            systemPrompt: { type: "string", minLength: 8 },
+            avatarUrl: { type: "string" },
+            isActive: { type: "boolean" },
+          },
+        },
+        response: {
+          200: successEnvelopeSchema({
+            type: "object",
+            additionalProperties: true,
+          }),
+          403: errorEnvelopeSchema([ERROR_CODES.ai.AI_FORBIDDEN_ROLE]),
+          404: errorEnvelopeSchema([ERROR_CODES.ai.AI_PERSONA_NOT_FOUND]),
+          500: errorEnvelopeSchema([ERROR_CODES.ai.AI_PERSONA_UPDATE_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      ensureAiAdminAccess(request.user?.role_name);
+      const { personaId } = request.params;
+      try {
+        const updated = await updateAiPersona({
+          tenantId: request.tenant.id,
+          personaId,
+          name: request.body.name,
+          description: request.body.description,
+          tone: request.body.tone,
+          systemPrompt: request.body.systemPrompt,
+          avatarUrl: request.body.avatarUrl,
+          isActive: request.body.isActive,
+        });
+        if (!updated) {
+          throw new ApiError(404, ERROR_CODES.ai.AI_PERSONA_NOT_FOUND, "Persona não encontrada");
+        }
+        return sendSuccess(request, reply, updated);
+      } catch (error) {
+        request.log.error(error);
+        if (error instanceof ApiError) throw error;
+        throw new ApiError(
+          500,
+          ERROR_CODES.ai.AI_PERSONA_UPDATE_FAILED,
+          "Erro ao atualizar persona"
+        );
+      }
+    }
+  );
+
+  fastify.post<{
+    Body: {
+      personaId: string;
+      flowId?: string;
+      name: string;
+      scriptContent: unknown;
+    };
+  }>(
+    "/ai/scripts",
+    {
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["personaId", "name", "scriptContent"],
+          properties: {
+            personaId: { type: "string", minLength: 1 },
+            flowId: { type: "string" },
+            name: { type: "string", minLength: 2 },
+            scriptContent: {},
+          },
+        },
+        response: {
+          201: successEnvelopeSchema({
+            type: "object",
+            additionalProperties: true,
+          }),
+          403: errorEnvelopeSchema([ERROR_CODES.ai.AI_FORBIDDEN_ROLE]),
+          500: errorEnvelopeSchema([ERROR_CODES.ai.AI_SCRIPT_CREATE_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      ensureAiAdminAccess(request.user?.role_name);
+      try {
+        const script = await createAiScript({
+          tenantId: request.tenant.id,
+          createdBy: request.user?.id,
+          personaId: request.body.personaId,
+          flowId: request.body.flowId,
+          name: request.body.name,
+          scriptContent: request.body.scriptContent,
+        });
+        return sendSuccess(request, reply, script, 201);
+      } catch (error) {
+        request.log.error(error);
+        if (error instanceof ApiError) throw error;
+        throw new ApiError(500, ERROR_CODES.ai.AI_SCRIPT_CREATE_FAILED, "Erro ao criar roteiro");
+      }
+    }
+  );
+
+  fastify.post<{
+    Body: {
+      personaId: string;
+      scriptId?: string;
+      message: string;
+      conversationId?: string;
+    };
+  }>(
+    "/ai/respond",
+    {
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["personaId", "message"],
+          properties: {
+            personaId: { type: "string", minLength: 1 },
+            scriptId: { type: "string" },
+            message: { type: "string", minLength: 1 },
+            conversationId: { type: "string" },
+          },
+        },
+        response: {
+          200: successEnvelopeSchema({
+            type: "object",
+            additionalProperties: false,
+            required: ["text", "provider", "model", "usage"],
+            properties: {
+              text: { type: "string" },
+              provider: { type: "string" },
+              model: { type: "string" },
+              usage: {
+                type: "object",
+                additionalProperties: false,
+                required: ["requestTokens", "responseTokens"],
+                properties: {
+                  requestTokens: { type: "number" },
+                  responseTokens: { type: "number" },
+                },
+              },
+            },
+          }),
+          404: errorEnvelopeSchema([
+            ERROR_CODES.ai.AI_PROVIDER_NOT_FOUND,
+            ERROR_CODES.ai.AI_PERSONA_NOT_FOUND,
+          ]),
+          502: errorEnvelopeSchema([
+            ERROR_CODES.ai.AI_RESPONSE_FAILED,
+            ERROR_CODES.ai.AI_RESPONSE_INVALID,
+          ]),
+        },
+      },
+    },
+    async (request, reply) => {
+      try {
+        const result = await generateAiText({
+          tenantId: request.tenant.id,
+          personaId: request.body.personaId,
+          scriptId: request.body.scriptId,
+          message: request.body.message,
+          conversationId: request.body.conversationId,
+        });
+        return sendSuccess(request, reply, result);
+      } catch (error) {
+        request.log.error(error);
+        if (error instanceof ApiError) throw error;
+        throw new ApiError(502, ERROR_CODES.ai.AI_RESPONSE_FAILED, "Erro ao gerar resposta de IA");
       }
     }
   );

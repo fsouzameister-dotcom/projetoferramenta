@@ -16,6 +16,7 @@ import FlowEditor from "./pages/FlowEditor";
 import FlowForm from "./pages/FlowForm";
 import AgentHome from "./pages/AgentHome";
 import UsersAdmin from "./pages/UsersAdmin";
+import AiAdmin from "./pages/AiAdmin";
 import Sidebar from "./components/Sidebar";
 
 function isSessionValid(): boolean {
@@ -154,6 +155,7 @@ const router = createBrowserRouter([
                   { path: "flows/edit/:id", element: <FlowForm /> },
                   { path: "flows/:flowId", element: <FlowEditor /> },
                   { path: "admin/users", element: <UsersAdmin /> },
+                  { path: "admin/ai", element: <AiAdmin /> },
                 ],
               },
             ],

@@ -37,6 +37,11 @@ type Conversation = {
   messages: ChatMessage[];
 };
 
+type AiHintPayload = {
+  hint: string;
+  source: "ai" | "fallback";
+};
+
 type AgentDataMode = "mock" | "api";
 const emojiOptions = ["😀", "😁", "😂", "😉", "😍", "👍", "🙏", "🎯", "🚀", "✅", "🔥", "💬"];
 const templateOptions = [
@@ -155,6 +160,9 @@ export default function AgentHome() {
   const [pendingMediaByConversation, setPendingMediaByConversation] = useState<
     Record<string, ChatMessage[]>
   >({});
+  const [agentHint, setAgentHint] = useState<AiHintPayload | null>(null);
+  const [loadingHint, setLoadingHint] = useState(false);
+  const [hintVisible, setHintVisible] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   const mergeWithPendingMedia = (apiConversations: Conversation[]) => {
@@ -264,10 +272,70 @@ export default function AgentHome() {
     }));
   };
 
+  const requestAgentHint = async () => {
+    if (!activeConversation) return;
+    setLoadingHint(true);
+    try {
+      let personaId = localStorage.getItem("ai_persona_id");
+      if (!personaId) {
+        const personaRes = await api.get("/ai/personas");
+        const personas = unwrapApiData<Array<{ id: string }>>(personaRes.data);
+        personaId = personas[0]?.id;
+        if (personaId) {
+          localStorage.setItem("ai_persona_id", personaId);
+        }
+      }
+
+      if (!personaId) {
+        setAgentHint({
+          hint: "Cadastre ao menos uma persona de IA para receber recomendações contextuais.",
+          source: "fallback",
+        });
+        setHintVisible(true);
+        return;
+      }
+
+      const recentMessages = activeConversation.messages
+        .slice(-6)
+        .map((msg) => msg.text || msg.contact?.name || msg.location?.label || "")
+        .filter((line) => line.trim().length > 0);
+
+      const response = await api.post("/ai/assist-hint", {
+        personaId,
+        conversationId: activeConversation.id,
+        customerContext: {
+          contactName: activeConversation.contactName,
+          tags: activeConversation.tags ?? [],
+          recentMessages,
+        },
+      });
+      const payload = unwrapApiData<AiHintPayload>(response.data);
+      setAgentHint(payload);
+      setHintVisible(true);
+    } catch (error) {
+      setAgentHint({
+        hint: getApiErrorMessage(
+          error,
+          "Não foi possível gerar dica IA agora. Continue com abordagem consultiva e confirme a necessidade do cliente."
+        ),
+        source: "fallback",
+      });
+      setHintVisible(true);
+    } finally {
+      setLoadingHint(false);
+    }
+  };
+
   useEffect(() => {
     if (!chatScrollRef.current) return;
     chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
   }, [activeMessages.length, activeConversationId]);
+
+  useEffect(() => {
+    if (!activeConversationId) return;
+    if (resolvedMode !== "api") return;
+    void requestAgentHint();
+  }, [activeConversationId, resolvedMode]);
 
   const handleSendText = () => {
     if (!activeConversation || !composeText.trim()) return;
@@ -622,6 +690,27 @@ export default function AgentHome() {
             />
           </div>
 
+          {hintVisible && agentHint ? (
+            <div className="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-amber-300">Dica IA ao agente</p>
+                  <p className="text-sm text-amber-100">{agentHint.hint}</p>
+                  <p className="text-[11px] text-amber-300/80 mt-1">
+                    Fonte: {agentHint.source === "ai" ? "IA contextual" : "Fallback heurístico"}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setHintVisible(false)}
+                  className="text-amber-200 hover:text-white text-sm"
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           {modeNotice ? (
             <div className="mb-3 text-xs px-3 py-2 rounded border border-[#324464] bg-[#162544] text-gray-300">
               {modeNotice}
@@ -642,6 +731,14 @@ export default function AgentHome() {
               <div className="mb-3">
                 <p className="font-semibold text-gray-100">{activeConversation?.contactName}</p>
                 <p className="text-xs text-gray-400">{activeConversation?.phone}</p>
+                <button
+                  type="button"
+                  onClick={() => void requestAgentHint()}
+                  disabled={loadingHint}
+                  className="mt-2 px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-400/40 text-amber-200 text-xs hover:bg-amber-500/30 disabled:opacity-60"
+                >
+                  {loadingHint ? "Gerando dica..." : "Gerar dica IA"}
+                </button>
               </div>
 
               <div ref={chatScrollRef} className="flex-1 overflow-auto space-y-2 pr-1">
