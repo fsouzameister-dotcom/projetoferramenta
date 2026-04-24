@@ -1,4 +1,5 @@
 import { ApiError, ERROR_CODES } from "./http";
+import { generateAiText } from "./ai";
 import { listNodesByFlow } from "./nodes";
 
 type FlowNode = {
@@ -112,6 +113,58 @@ function compareValues(leftRaw: unknown, operator: string, rightRaw: unknown): b
   }
 
   return false;
+}
+
+type DecisionRule = {
+  variable?: string;
+  operator?: string;
+  comparisonValue?: unknown;
+};
+
+type DecisionRouteRule = DecisionRule & {
+  label?: string;
+  next_node_id?: string;
+};
+
+function evaluateDecisionRule(
+  rule: DecisionRule,
+  variables: Record<string, unknown>
+): {
+  result: boolean;
+  variableName: string;
+  leftValue: unknown;
+  operator: string;
+  comparisonValue: unknown;
+} {
+  const variableRef = typeof rule.variable === "string" ? rule.variable : "";
+  const variableName = unwrapVariableRef(variableRef);
+  const operator =
+    typeof rule.operator === "string" && rule.operator.trim() ? rule.operator : "igual_a";
+  const comparisonValue =
+    typeof rule.comparisonValue === "string" || typeof rule.comparisonValue === "number"
+      ? rule.comparisonValue
+      : "";
+  const leftValue = variables[variableName];
+  const result = compareValues(leftValue, operator, comparisonValue);
+  return { result, variableName, leftValue, operator, comparisonValue };
+}
+
+function parseJsonFromModel(text: string): Record<string, unknown> | null {
+  const trimmed = text.trim();
+  try {
+    return JSON.parse(trimmed) as Record<string, unknown>;
+  } catch {
+    const first = trimmed.indexOf("{");
+    const last = trimmed.lastIndexOf("}");
+    if (first >= 0 && last > first) {
+      try {
+        return JSON.parse(trimmed.slice(first, last + 1)) as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
 }
 
 async function executeApiCallNode(
@@ -242,23 +295,143 @@ async function executeApiCallNode(
   }
 }
 
-function executeDecisionNode(
+async function executeDecisionNode(
   config: FlowConfig,
-  variables: Record<string, unknown>
-): { nextNodeId: string | null; details: Record<string, unknown> } {
-  const variableRef =
-    typeof config.variable === "string" && config.variable.trim()
-      ? config.variable
-      : "";
-  const variableName = unwrapVariableRef(variableRef);
-  const operator =
-    typeof config.operator === "string" && config.operator.trim()
-      ? config.operator
-      : "igual_a";
-  const comparisonValue =
-    typeof config.comparisonValue === "string" ? config.comparisonValue : "";
-  const leftValue = variables[variableName];
-  const result = compareValues(leftValue, operator, comparisonValue);
+  variables: Record<string, unknown>,
+  tenantId: string
+): Promise<{ nextNodeId: string | null; details: Record<string, unknown> }> {
+  const decisionMode =
+    typeof config.decisionMode === "string" && config.decisionMode.trim()
+      ? config.decisionMode
+      : "simple";
+
+  if (decisionMode === "ai") {
+    const personaId =
+      typeof config.aiPersonaId === "string" && config.aiPersonaId.trim()
+        ? config.aiPersonaId.trim()
+        : "";
+    if (!personaId) {
+      throw new ApiError(
+        400,
+        ERROR_CODES.execution.FLOW_EXECUTION_INVALID,
+        "Node de decisão IA sem persona configurada"
+      );
+    }
+
+    const aiPromptBase =
+      typeof config.aiPrompt === "string" && config.aiPrompt.trim()
+        ? config.aiPrompt.trim()
+        : "Classifique o próximo passo mais adequado para o atendimento.";
+    const aiRoutes = Array.isArray(config.aiRoutes)
+      ? (config.aiRoutes as Array<{ label?: string; next_node_id?: string }>)
+      : [];
+    const validRoutes = aiRoutes.filter(
+      (route) =>
+        typeof route.label === "string" &&
+        route.label.trim() &&
+        typeof route.next_node_id === "string" &&
+        route.next_node_id.trim()
+    ) as Array<{ label: string; next_node_id: string }>;
+
+    const contextKeys = Array.isArray(config.aiContextKeys)
+      ? (config.aiContextKeys as unknown[]).filter((k) => typeof k === "string")
+      : [];
+    const scopedVariables =
+      contextKeys.length > 0
+        ? Object.fromEntries(
+            contextKeys
+              .map((key) => [key as string, variables[key as string]])
+              .filter(([, value]) => value !== undefined)
+          )
+        : variables;
+
+    const instruction = [
+      aiPromptBase,
+      `Rotas válidas: ${validRoutes.map((r) => r.label).join(", ") || "true, false"}.`,
+      `Responda APENAS em JSON no formato {"route":"<rota>","reason":"<motivo>"}.`,
+      `Contexto do fluxo: ${JSON.stringify(scopedVariables)}`,
+    ].join("\n");
+
+    const ai = await generateAiText({
+      tenantId,
+      personaId,
+      message: instruction,
+    });
+    const parsed = parseJsonFromModel(ai.text);
+    const route = typeof parsed?.route === "string" ? parsed.route.trim() : "";
+    const reason = typeof parsed?.reason === "string" ? parsed.reason.trim() : ai.text;
+
+    const mapped = validRoutes.find((candidate) => candidate.label === route);
+    let nextNodeId = mapped?.next_node_id ?? null;
+    if (!nextNodeId) {
+      const lowered = ai.text.toLowerCase();
+      if (/\btrue\b|\bsim\b|\baprovar\b/.test(lowered)) {
+        nextNodeId = typeof config.next_node_id_true === "string" ? config.next_node_id_true : null;
+      } else if (/\bfalse\b|\bn[aã]o\b|\brejeitar\b/.test(lowered)) {
+        nextNodeId = typeof config.next_node_id_false === "string" ? config.next_node_id_false : null;
+      }
+    }
+    if (!nextNodeId && typeof config.default_next_node_id === "string") {
+      nextNodeId = config.default_next_node_id;
+    }
+
+    return {
+      nextNodeId,
+      details: {
+        decisionMode,
+        aiRoute: route || null,
+        aiReason: reason,
+        availableRoutes: validRoutes.map((r) => r.label),
+        provider: ai.provider,
+        model: ai.model,
+      },
+    };
+  }
+
+  if (decisionMode === "multi_branch") {
+    const routeRules = Array.isArray(config.routeRules) ? (config.routeRules as DecisionRouteRule[]) : [];
+    const evaluations = routeRules
+      .filter((rule) => typeof rule.next_node_id === "string" && rule.next_node_id)
+      .map((rule) => ({ rule, evalResult: evaluateDecisionRule(rule, variables) }));
+    const matched = evaluations.find((item) => item.evalResult.result);
+    const nextNodeId = matched?.rule.next_node_id ?? (typeof config.default_next_node_id === "string" ? config.default_next_node_id : null);
+
+    return {
+      nextNodeId,
+      details: {
+        decisionMode,
+        matchedLabel: matched?.rule.label ?? null,
+        evaluations: evaluations.map((item) => ({
+          label: item.rule.label ?? null,
+          variableName: item.evalResult.variableName,
+          operator: item.evalResult.operator,
+          comparisonValue: item.evalResult.comparisonValue,
+          result: item.evalResult.result,
+        })),
+      },
+    };
+  }
+
+  const combinedRules = Array.isArray(config.rules) ? (config.rules as DecisionRule[]) : [];
+  const rules =
+    combinedRules.length > 0
+      ? combinedRules
+      : [
+          {
+            variable: typeof config.variable === "string" ? config.variable : "",
+            operator: typeof config.operator === "string" ? config.operator : "igual_a",
+            comparisonValue: config.comparisonValue,
+          },
+        ];
+  const evaluated = rules.map((rule) => evaluateDecisionRule(rule, variables));
+  const logicalOperator =
+    typeof config.logicalOperator === "string" && config.logicalOperator.toUpperCase() === "OR"
+      ? "OR"
+      : "AND";
+  const result =
+    logicalOperator === "OR"
+      ? evaluated.some((item) => item.result)
+      : evaluated.every((item) => item.result);
   const nextNodeId = result
     ? (config.next_node_id_true as string | undefined)
     : (config.next_node_id_false as string | undefined);
@@ -266,10 +439,9 @@ function executeDecisionNode(
   return {
     nextNodeId: nextNodeId ?? null,
     details: {
-      variableName,
-      leftValue,
-      operator,
-      comparisonValue,
+      decisionMode: evaluated.length > 1 ? "combined" : "simple",
+      logicalOperator,
+      rules: evaluated,
       result,
     },
   };
@@ -337,7 +509,7 @@ export async function executeFlow(
       nextNodeId = apiResult.nextNodeId;
       details = apiResult.details;
     } else if (currentNode.type === "decisao") {
-      const decisionResult = executeDecisionNode(config, variables);
+      const decisionResult = await executeDecisionNode(config, variables, tenantId);
       nextNodeId = decisionResult.nextNodeId;
       details = decisionResult.details;
     } else {

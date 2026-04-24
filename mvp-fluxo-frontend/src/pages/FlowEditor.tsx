@@ -43,6 +43,17 @@ interface TestResult {
   error?: string;
 }
 
+type DecisionRule = {
+  variable: string;
+  operator: string;
+  comparisonValue: string;
+};
+
+type DecisionRouteRule = DecisionRule & {
+  label: string;
+  next_node_id: string;
+};
+
 const paletteItems = [
   { id: "inicio", name: "Início", icon: "▶️" },
   { id: "conversa", name: "Conversa", icon: "💬" },
@@ -85,6 +96,143 @@ export default function FlowEditor() {
   const [flowVariables, setFlowVariables] = useState<Record<string, any>>({});
   const [savingFlow, setSavingFlow] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [decisionAssistantGoal, setDecisionAssistantGoal] = useState("");
+  const [decisionAssistantLoading, setDecisionAssistantLoading] = useState(false);
+
+  const parseJsonText = <T,>(text: string, fallback: T): T => {
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      return fallback;
+    }
+  };
+
+  const parseFirstJsonObject = (rawText: string): Record<string, any> | null => {
+    const trimmed = rawText.trim();
+    try {
+      return JSON.parse(trimmed) as Record<string, any>;
+    } catch {
+      const start = trimmed.indexOf("{");
+      const end = trimmed.lastIndexOf("}");
+      if (start >= 0 && end > start) {
+        try {
+          return JSON.parse(trimmed.slice(start, end + 1)) as Record<string, any>;
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    }
+  };
+
+  const handleGenerateDecisionSuggestion = async (
+    availableTargets: Array<{ id: string; label: string }>
+  ) => {
+    if (!decisionAssistantGoal.trim()) {
+      alert("Descreva o objetivo da decisão para gerar a sugestão.");
+      return;
+    }
+    setDecisionAssistantLoading(true);
+    try {
+      let personaId = (editNodeConfig.aiPersonaId as string | undefined)?.trim();
+      if (!personaId) {
+        personaId = localStorage.getItem("ai_persona_id") || "";
+      }
+      if (!personaId) {
+        const personasResponse = await api.get("/ai/personas");
+        const personas = unwrapApiData<Array<{ id: string }>>(personasResponse.data);
+        personaId = personas[0]?.id || "";
+      }
+      if (!personaId) {
+        alert("Cadastre ao menos uma persona em IA para usar o assistente.");
+        return;
+      }
+
+      const currentMode = editNodeConfig.decisionMode || "simple";
+      const prompt = [
+        "Você é um assistente de configuração de node de decisão para fluxo de atendimento.",
+        `Objetivo: ${decisionAssistantGoal.trim()}`,
+        `Modo atual sugerido pelo usuário: ${currentMode}`,
+        `Variáveis disponíveis no fluxo: ${Object.keys(flowVariables).join(", ") || "nenhuma"}`,
+        `Nós de destino possíveis: ${availableTargets.map((t) => t.label).join(", ") || "nenhum"}`,
+        "Retorne APENAS JSON com chaves possíveis:",
+        "{",
+        '  "decisionMode": "simple|combined|multi_branch|ai",',
+        '  "logicalOperator": "AND|OR",',
+        '  "rules": [{"variable":"{{var}}","operator":"igual_a","comparisonValue":"x"}],',
+        '  "routeRules": [{"label":"rota","variable":"{{var}}","operator":"igual_a","comparisonValue":"x","targetLabel":"Nome do node"}],',
+        '  "aiPrompt": "texto curto",',
+        '  "aiContextKeys": ["var1","var2"],',
+        '  "aiRoutes": [{"label":"rota","targetLabel":"Nome do node"}]',
+        "}",
+        "Se não souber o destino exato, envie targetLabel vazio.",
+      ].join("\n");
+
+      const aiResponse = await api.post("/ai/respond", {
+        personaId,
+        message: prompt,
+      });
+      const aiPayload = unwrapApiData<{ text: string }>(aiResponse.data);
+      const parsed = parseFirstJsonObject(aiPayload?.text || "");
+      if (!parsed) {
+        alert("A IA não retornou um JSON válido para sugestão. Tente refinar o objetivo.");
+        return;
+      }
+
+      const targetByLabel = new Map(
+        availableTargets.map((target) => [target.label.toLowerCase(), target.id])
+      );
+
+      const suggestedDecisionMode =
+        typeof parsed.decisionMode === "string" ? parsed.decisionMode : currentMode;
+      const suggestedRules = Array.isArray(parsed.rules) ? parsed.rules : [];
+      const suggestedRouteRules = Array.isArray(parsed.routeRules)
+        ? parsed.routeRules.map((route: any) => {
+            const matchedTargetId =
+              typeof route.targetLabel === "string"
+                ? targetByLabel.get(route.targetLabel.toLowerCase()) || ""
+                : "";
+            return {
+              label: route.label || "",
+              variable: route.variable || "",
+              operator: route.operator || "igual_a",
+              comparisonValue: route.comparisonValue || "",
+              next_node_id: matchedTargetId,
+            };
+          })
+        : [];
+      const suggestedAiRoutes = Array.isArray(parsed.aiRoutes)
+        ? parsed.aiRoutes.map((route: any) => {
+            const matchedTargetId =
+              typeof route.targetLabel === "string"
+                ? targetByLabel.get(route.targetLabel.toLowerCase()) || ""
+                : "";
+            return {
+              label: route.label || "",
+              next_node_id: matchedTargetId,
+            };
+          })
+        : [];
+
+      setEditNodeConfig({
+        ...editNodeConfig,
+        decisionMode: suggestedDecisionMode,
+        logicalOperator:
+          typeof parsed.logicalOperator === "string" ? parsed.logicalOperator : "AND",
+        rules: suggestedRules,
+        routeRules: suggestedRouteRules,
+        aiPrompt: typeof parsed.aiPrompt === "string" ? parsed.aiPrompt : editNodeConfig.aiPrompt || "",
+        aiContextKeys: Array.isArray(parsed.aiContextKeys) ? parsed.aiContextKeys : [],
+        aiRoutes: suggestedAiRoutes,
+        aiPersonaId: editNodeConfig.aiPersonaId || personaId,
+      });
+      setHasUnsavedChanges(true);
+    } catch (err) {
+      alert(getApiErrorMessage(err, "Não foi possível gerar sugestão de decisão via IA."));
+    } finally {
+      setDecisionAssistantLoading(false);
+    }
+  };
 
   const resolvePersistedPosition = (node: NodeDataType) => {
     const fromColumn = node.position;
@@ -157,6 +305,20 @@ export default function FlowEditor() {
           }
           // Lógica para nós de decisão ou divisão lógica com múltiplos next_node_id
           if (node.data.type === "decisao" || node.data.type === "divisao_logica") {
+            const routeRules = Array.isArray(node.data.config?.routeRules)
+              ? node.data.config.routeRules
+              : [];
+            routeRules.forEach((rule: any, idx: number) => {
+              if (rule?.next_node_id) {
+                initialEdges.push({
+                  id: `e${node.id}-route-${idx}-${rule.next_node_id}`,
+                  source: node.id,
+                  target: rule.next_node_id,
+                  animated: true,
+                  label: rule.label || `Rota ${idx + 1}`,
+                });
+              }
+            });
             if (node.data.config.next_node_id_true) {
               initialEdges.push({
                 id: `e${node.id}-true-${node.data.config.next_node_id_true}`,
@@ -463,6 +625,152 @@ export default function FlowEditor() {
     });
   };
 
+  const buildDecisionDraftEdges = (sourceId: string, config: any) => {
+    const draftEdges: any[] = [];
+    const mode = config?.decisionMode || "simple";
+
+    if (mode === "ai" && Array.isArray(config?.aiRoutes)) {
+      config.aiRoutes.forEach((route: any, index: number) => {
+        if (!route?.next_node_id) return;
+        draftEdges.push({
+          id: `e${sourceId}-ai-route-${index}-${route.next_node_id}`,
+          source: sourceId,
+          sourceHandle: `ai-route-${index}`,
+          target: route.next_node_id,
+          animated: true,
+          label: route.label || `IA ${index + 1}`,
+        });
+      });
+      if (config.default_next_node_id) {
+        draftEdges.push({
+          id: `e${sourceId}-default-${config.default_next_node_id}`,
+          source: sourceId,
+          target: config.default_next_node_id,
+          animated: true,
+          label: "Fallback",
+        });
+      }
+      return draftEdges;
+    }
+
+    if (mode === "multi_branch" && Array.isArray(config?.routeRules)) {
+      config.routeRules.forEach((rule: any, index: number) => {
+        if (!rule?.next_node_id) return;
+        draftEdges.push({
+          id: `e${sourceId}-route-${index}-${rule.next_node_id}`,
+          source: sourceId,
+          sourceHandle: `route-${index}`,
+          target: rule.next_node_id,
+          animated: true,
+          label: rule.label || `Rota ${index + 1}`,
+        });
+      });
+      if (config.default_next_node_id) {
+        draftEdges.push({
+          id: `e${sourceId}-default-${config.default_next_node_id}`,
+          source: sourceId,
+          target: config.default_next_node_id,
+          animated: true,
+          label: "Fallback",
+        });
+      }
+      return draftEdges;
+    }
+
+    if (config?.next_node_id_true) {
+      draftEdges.push({
+        id: `e${sourceId}-true-${config.next_node_id_true}`,
+        source: sourceId,
+        sourceHandle: "true",
+        target: config.next_node_id_true,
+        animated: true,
+        label: "Sim",
+      });
+    }
+    if (config?.next_node_id_false) {
+      draftEdges.push({
+        id: `e${sourceId}-false-${config.next_node_id_false}`,
+        source: sourceId,
+        sourceHandle: "false",
+        target: config.next_node_id_false,
+        animated: true,
+        label: "Não",
+      });
+    }
+    if (config?.next_node_id) {
+      draftEdges.push({
+        id: `e${sourceId}-${config.next_node_id}`,
+        source: sourceId,
+        target: config.next_node_id,
+        animated: true,
+      });
+    }
+    return draftEdges;
+  };
+
+  const applyDecisionDraftConnections = async () => {
+    if (!selectedNodeId) return;
+    const sourceNode = nodes.find((n) => n.id === selectedNodeId);
+    if (!sourceNode) return;
+    try {
+      await api.put(`/flows/${flowId}/nodes/${selectedNodeId}`, {
+        name: editNodeName || sourceNode.data.label,
+        config: editNodeConfig,
+      });
+
+      const newDraftEdges = buildDecisionDraftEdges(selectedNodeId, editNodeConfig);
+      setEdges((prev) => {
+        const filtered = prev.filter((edge) => edge.source !== selectedNodeId);
+        return [...filtered, ...newDraftEdges];
+      });
+      setNodes((prev) =>
+        prev.map((node) =>
+          node.id === selectedNodeId
+            ? {
+                ...node,
+                data: {
+                  ...node.data,
+                  config: editNodeConfig,
+                },
+              }
+            : node
+        )
+      );
+      setHasUnsavedChanges(true);
+      alert("Rascunho de conexões aplicado no canvas.");
+    } catch (error) {
+      alert(getApiErrorMessage(error, "Erro ao aplicar conexões sugeridas."));
+    }
+  };
+
+  const getDecisionMissingTargets = (config: any): string[] => {
+    const mode = config?.decisionMode || "simple";
+    if (mode === "ai") {
+      const routes = Array.isArray(config?.aiRoutes) ? config.aiRoutes : [];
+      return routes
+        .map((route: any, index: number) => ({
+          label: route?.label || `Rota IA ${index + 1}`,
+          hasTarget: Boolean(route?.next_node_id),
+        }))
+        .filter((item: { label: string; hasTarget: boolean }) => !item.hasTarget)
+        .map((item: { label: string; hasTarget: boolean }) => item.label);
+    }
+    if (mode === "multi_branch") {
+      const routes = Array.isArray(config?.routeRules) ? config.routeRules : [];
+      return routes
+        .map((route: any, index: number) => ({
+          label: route?.label || `Rota ${index + 1}`,
+          hasTarget: Boolean(route?.next_node_id),
+        }))
+        .filter((item: { label: string; hasTarget: boolean }) => !item.hasTarget)
+        .map((item: { label: string; hasTarget: boolean }) => item.label);
+    }
+    const missing: string[] = [];
+    if (!config?.next_node_id_true) missing.push("Saída Sim");
+    if (!config?.next_node_id_false) missing.push("Saída Não");
+    return missing;
+  };
+
   const onConnect = useCallback(
     async (params: Connection) => {
       const newEdge = { ...params, animated: true };
@@ -474,7 +782,33 @@ export default function FlowEditor() {
       if (sourceNode) {
         const updatedConfig = { ...sourceNode.data.config };
         if (sourceNode.type === "decisao" || sourceNode.type === "divisao_logica") {
-          if (params.sourceHandle === "true") {
+          if (params.sourceHandle?.startsWith("route-")) {
+            const index = Number(params.sourceHandle.replace("route-", ""));
+            const currentRules = Array.isArray(updatedConfig.routeRules)
+              ? [...updatedConfig.routeRules]
+              : [];
+            if (currentRules[index]) {
+              currentRules[index] = {
+                ...currentRules[index],
+                next_node_id: params.target,
+              };
+              updatedConfig.routeRules = currentRules;
+              updatedConfig.decisionMode = "multi_branch";
+            }
+          } else if (params.sourceHandle?.startsWith("ai-route-")) {
+            const index = Number(params.sourceHandle.replace("ai-route-", ""));
+            const currentRoutes = Array.isArray(updatedConfig.aiRoutes)
+              ? [...updatedConfig.aiRoutes]
+              : [];
+            if (currentRoutes[index]) {
+              currentRoutes[index] = {
+                ...currentRoutes[index],
+                next_node_id: params.target,
+              };
+              updatedConfig.aiRoutes = currentRoutes;
+              updatedConfig.decisionMode = "ai";
+            }
+          } else if (params.sourceHandle === "true") {
             updatedConfig.next_node_id_true = params.target;
             updatedConfig.next_node_id = undefined; // Limpa o next_node_id padrão se for decisão
           } else if (params.sourceHandle === "false") {
@@ -531,6 +865,30 @@ export default function FlowEditor() {
               updatedConfig.next_node_id_true = undefined;
             } else if (edge.sourceHandle === "false") {
               updatedConfig.next_node_id_false = undefined;
+            } else if (edge.sourceHandle?.startsWith("route-")) {
+              const index = Number(edge.sourceHandle.replace("route-", ""));
+              const currentRules = Array.isArray(updatedConfig.routeRules)
+                ? [...updatedConfig.routeRules]
+                : [];
+              if (currentRules[index]) {
+                currentRules[index] = {
+                  ...currentRules[index],
+                  next_node_id: "",
+                };
+                updatedConfig.routeRules = currentRules;
+              }
+            } else if (edge.sourceHandle?.startsWith("ai-route-")) {
+              const index = Number(edge.sourceHandle.replace("ai-route-", ""));
+              const currentRoutes = Array.isArray(updatedConfig.aiRoutes)
+                ? [...updatedConfig.aiRoutes]
+                : [];
+              if (currentRoutes[index]) {
+                currentRoutes[index] = {
+                  ...currentRoutes[index],
+                  next_node_id: "",
+                };
+                updatedConfig.aiRoutes = currentRoutes;
+              }
             } else {
               updatedConfig.next_node_id = undefined;
             }
@@ -998,54 +1356,450 @@ export default function FlowEditor() {
             {/* DECISÃO */}
             {selectedNodeType === "decisao" && (
               <>
-                <div className="mb-4">
-                  <label htmlFor="decisionVariable" className="block text-sm font-medium text-gray-700 mb-2">
-                    Variável para Decisão (ex: &#123;&#123;nome_da_variavel&#125;&#125;) {/* CORRIGIDO AQUI */}
-                  </label>
-                  <input
-                    id="decisionVariable"
-                    type="text"
-                    value={editNodeConfig.variable || ""}
-                    onChange={(e) =>
-                      setEditNodeConfig({ ...editNodeConfig, variable: e.target.value })
+                {(() => {
+                  const availableTargets = nodes
+                    .filter((n) => n.id !== selectedNodeId)
+                    .map((n) => ({ id: n.id, label: n.data?.label || n.id }));
+                  const missingTargets = getDecisionMissingTargets(editNodeConfig);
+                  const canApplyDecisionDraft = missingTargets.length === 0;
+
+                  const updateRouteRule = (
+                    index: number,
+                    field: keyof DecisionRouteRule,
+                    value: string
+                  ) => {
+                    const current = Array.isArray(editNodeConfig.routeRules)
+                      ? [...editNodeConfig.routeRules]
+                      : [];
+                    while (current.length <= index) {
+                      current.push({
+                        label: "",
+                        variable: "",
+                        operator: "igual_a",
+                        comparisonValue: "",
+                        next_node_id: "",
+                      });
                     }
-                    placeholder="nome_da_variavel"
-                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
-                  />
-                </div>
+                    current[index] = { ...current[index], [field]: value };
+                    setEditNodeConfig({ ...editNodeConfig, routeRules: current });
+                  };
+
+                  const removeRouteRule = (index: number) => {
+                    const current = Array.isArray(editNodeConfig.routeRules)
+                      ? [...editNodeConfig.routeRules]
+                      : [];
+                    current.splice(index, 1);
+                    setEditNodeConfig({ ...editNodeConfig, routeRules: current });
+                  };
+
+                  const addRouteRule = () => {
+                    const current = Array.isArray(editNodeConfig.routeRules)
+                      ? [...editNodeConfig.routeRules]
+                      : [];
+                    current.push({
+                      label: "",
+                      variable: "",
+                      operator: "igual_a",
+                      comparisonValue: "",
+                      next_node_id: "",
+                    });
+                    setEditNodeConfig({ ...editNodeConfig, routeRules: current });
+                  };
+
+                  const updateAiRoute = (
+                    index: number,
+                    field: "label" | "next_node_id",
+                    value: string
+                  ) => {
+                    const current = Array.isArray(editNodeConfig.aiRoutes)
+                      ? [...editNodeConfig.aiRoutes]
+                      : [];
+                    while (current.length <= index) {
+                      current.push({ label: "", next_node_id: "" });
+                    }
+                    current[index] = { ...current[index], [field]: value };
+                    setEditNodeConfig({ ...editNodeConfig, aiRoutes: current });
+                  };
+
+                  const removeAiRoute = (index: number) => {
+                    const current = Array.isArray(editNodeConfig.aiRoutes)
+                      ? [...editNodeConfig.aiRoutes]
+                      : [];
+                    current.splice(index, 1);
+                    setEditNodeConfig({ ...editNodeConfig, aiRoutes: current });
+                  };
+
+                  const addAiRoute = () => {
+                    const current = Array.isArray(editNodeConfig.aiRoutes)
+                      ? [...editNodeConfig.aiRoutes]
+                      : [];
+                    current.push({ label: "", next_node_id: "" });
+                    setEditNodeConfig({ ...editNodeConfig, aiRoutes: current });
+                  };
+
+                  return (
+                    <>
                 <div className="mb-4">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Operador
+                    Modo de decisão
                   </label>
                   <select
-                    value={editNodeConfig.operator || "igual_a"}
+                    value={editNodeConfig.decisionMode || "simple"}
                     onChange={(e) =>
-                      setEditNodeConfig({ ...editNodeConfig, operator: e.target.value })
+                      setEditNodeConfig({ ...editNodeConfig, decisionMode: e.target.value })
                     }
                     className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
                   >
-                    <option value="igual_a">Igual a</option>
-                    <option value="diferente_de">Diferente de</option>
-                    <option value="contem">Contém</option>
-                    <option value="nao_contem">Não Contém</option>
-                    <option value="maior_que">Maior que</option>
-                    <option value="menor_que">Menor que</option>
+                    <option value="simple">Simples (1 regra)</option>
+                    <option value="combined">Combinada (AND/OR)</option>
+                    <option value="multi_branch">Multi-rota (várias saídas)</option>
+                    <option value="ai">IA (contextual)</option>
                   </select>
                 </div>
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Valor para Comparação
+
+                <div className="mb-4 p-3 rounded-lg border border-indigo-200 bg-indigo-50">
+                  <label className="block text-sm font-medium text-indigo-900 mb-2">
+                    Assistente IA de configuração
                   </label>
-                  <input
-                    type="text"
-                    value={editNodeConfig.comparisonValue || ""} // CORRIGIDO AQUI
-                    onChange={(e) =>
-                      setEditNodeConfig({ ...editNodeConfig, comparisonValue: e.target.value }) // E AQUI
-                    }
-                    placeholder="valor"
-                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  <textarea
+                    value={decisionAssistantGoal}
+                    onChange={(e) => setDecisionAssistantGoal(e.target.value)}
+                    placeholder="Descreva o objetivo da decisão. Ex.: separar clientes por intenção (reclamação, compra, suporte) com fallback para humano."
+                    className="w-full px-3 py-2 border border-indigo-200 bg-white text-gray-900 rounded-lg h-24 resize-none text-sm"
                   />
+                  <button
+                    type="button"
+                    onClick={() => void handleGenerateDecisionSuggestion(availableTargets)}
+                    disabled={decisionAssistantLoading}
+                    className="mt-2 px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-700 disabled:opacity-60"
+                  >
+                    {decisionAssistantLoading
+                      ? "Gerando sugestão..."
+                      : "Sugerir regras e rotas com IA"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void applyDecisionDraftConnections()}
+                    disabled={!canApplyDecisionDraft}
+                    className="mt-2 ml-2 px-3 py-2 rounded-lg bg-indigo-900 text-indigo-100 text-sm hover:bg-indigo-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Aplicar sugestão + rascunho conexões
+                  </button>
+                  {!canApplyDecisionDraft ? (
+                    <p className="mt-2 text-xs text-amber-700">
+                      Destinos obrigatórios faltando: {missingTargets.join(", ")}
+                    </p>
+                  ) : null}
                 </div>
+
+                {(editNodeConfig.decisionMode || "simple") === "simple" && (
+                  <>
+                    <div className="mb-4">
+                      <label htmlFor="decisionVariable" className="block text-sm font-medium text-gray-700 mb-2">
+                        Variável para Decisão (ex: &#123;&#123;nome_da_variavel&#125;&#125;)
+                      </label>
+                      <input
+                        id="decisionVariable"
+                        type="text"
+                        value={editNodeConfig.variable || ""}
+                        onChange={(e) =>
+                          setEditNodeConfig({ ...editNodeConfig, variable: e.target.value })
+                        }
+                        placeholder="nome_da_variavel"
+                        className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      />
+                    </div>
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Operador
+                      </label>
+                      <select
+                        value={editNodeConfig.operator || "igual_a"}
+                        onChange={(e) =>
+                          setEditNodeConfig({ ...editNodeConfig, operator: e.target.value })
+                        }
+                        className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      >
+                        <option value="igual_a">Igual a</option>
+                        <option value="diferente_de">Diferente de</option>
+                        <option value="contem">Contém</option>
+                        <option value="nao_contem">Não Contém</option>
+                        <option value="maior_que">Maior que</option>
+                        <option value="menor_que">Menor que</option>
+                      </select>
+                    </div>
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Valor para Comparação
+                      </label>
+                      <input
+                        type="text"
+                        value={editNodeConfig.comparisonValue || ""}
+                        onChange={(e) =>
+                          setEditNodeConfig({ ...editNodeConfig, comparisonValue: e.target.value })
+                        }
+                        placeholder="valor"
+                        className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      />
+                    </div>
+                  </>
+                )}
+
+                {(editNodeConfig.decisionMode || "simple") === "combined" && (
+                  <>
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Operador lógico entre regras
+                      </label>
+                      <select
+                        value={editNodeConfig.logicalOperator || "AND"}
+                        onChange={(e) =>
+                          setEditNodeConfig({ ...editNodeConfig, logicalOperator: e.target.value })
+                        }
+                        className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      >
+                        <option value="AND">AND (todas verdadeiras)</option>
+                        <option value="OR">OR (qualquer verdadeira)</option>
+                      </select>
+                    </div>
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Regras combinadas (JSON)
+                      </label>
+                      <textarea
+                        value={JSON.stringify(editNodeConfig.rules || [], null, 2)}
+                        onChange={(e) =>
+                          setEditNodeConfig({
+                            ...editNodeConfig,
+                            rules: parseJsonText<DecisionRule[]>(e.target.value, []),
+                          })
+                        }
+                        placeholder='[{"variable":"{{intencao}}","operator":"igual_a","comparisonValue":"reclamacao"}]'
+                        className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 h-28 resize-none font-mono text-xs"
+                      />
+                    </div>
+                  </>
+                )}
+
+                {(editNodeConfig.decisionMode || "simple") === "multi_branch" && (
+                  <>
+                    <div className="mb-4 space-y-3">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Rotas de decisão
+                      </label>
+                      {(Array.isArray(editNodeConfig.routeRules) ? editNodeConfig.routeRules : []).map(
+                        (rule: DecisionRouteRule, index: number) => (
+                          <div key={index} className="p-3 rounded-lg border border-gray-200 bg-gray-50">
+                            <div className="grid grid-cols-2 gap-2 mb-2">
+                              <input
+                                value={rule.label || ""}
+                                onChange={(e) => updateRouteRule(index, "label", e.target.value)}
+                                placeholder="Label da rota"
+                                className="px-3 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg text-sm"
+                              />
+                              <select
+                                value={rule.next_node_id || ""}
+                                onChange={(e) =>
+                                  updateRouteRule(index, "next_node_id", e.target.value)
+                                }
+                                className={`px-3 py-2 border rounded-lg text-sm ${
+                                  rule.next_node_id
+                                    ? "border-gray-300 bg-white text-gray-900"
+                                    : "border-amber-400 bg-amber-50 text-amber-900"
+                                }`}
+                              >
+                                <option value="">Destino da rota</option>
+                                {availableTargets.map((target) => (
+                                  <option key={target.id} value={target.id}>
+                                    {target.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2 mb-2">
+                              <input
+                                value={rule.variable || ""}
+                                onChange={(e) => updateRouteRule(index, "variable", e.target.value)}
+                                placeholder="{{variavel}}"
+                                className="px-3 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg text-sm"
+                              />
+                              <select
+                                value={rule.operator || "igual_a"}
+                                onChange={(e) => updateRouteRule(index, "operator", e.target.value)}
+                                className="px-3 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg text-sm"
+                              >
+                                <option value="igual_a">Igual a</option>
+                                <option value="diferente_de">Diferente de</option>
+                                <option value="contem">Contém</option>
+                                <option value="nao_contem">Não contém</option>
+                                <option value="maior_que">Maior que</option>
+                                <option value="menor_que">Menor que</option>
+                              </select>
+                              <input
+                                value={String(rule.comparisonValue || "")}
+                                onChange={(e) =>
+                                  updateRouteRule(index, "comparisonValue", e.target.value)
+                                }
+                                placeholder="valor"
+                                className="px-3 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg text-sm"
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => removeRouteRule(index)}
+                              className="text-xs text-red-600 hover:underline"
+                            >
+                              Remover rota
+                            </button>
+                          </div>
+                        )
+                      )}
+                      <button
+                        type="button"
+                        onClick={addRouteRule}
+                        className="px-3 py-2 rounded-lg bg-slate-700 text-white text-sm hover:bg-slate-800"
+                      >
+                        + Adicionar rota
+                      </button>
+                    </div>
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Próximo node padrão (fallback)
+                      </label>
+                      <input
+                        type="text"
+                        value={editNodeConfig.default_next_node_id || ""}
+                        onChange={(e) =>
+                          setEditNodeConfig({
+                            ...editNodeConfig,
+                            default_next_node_id: e.target.value,
+                          })
+                        }
+                        placeholder="node-id fallback"
+                        className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      />
+                    </div>
+                  </>
+                )}
+
+                {(editNodeConfig.decisionMode || "simple") === "ai" && (
+                  <>
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Persona IA (ID)
+                      </label>
+                      <input
+                        type="text"
+                        value={editNodeConfig.aiPersonaId || ""}
+                        onChange={(e) =>
+                          setEditNodeConfig({ ...editNodeConfig, aiPersonaId: e.target.value })
+                        }
+                        placeholder="id da persona configurada"
+                        className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      />
+                    </div>
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Prompt da decisão IA
+                      </label>
+                      <textarea
+                        value={editNodeConfig.aiPrompt || ""}
+                        onChange={(e) =>
+                          setEditNodeConfig({ ...editNodeConfig, aiPrompt: e.target.value })
+                        }
+                        placeholder="Instruções para a IA decidir a próxima rota..."
+                        className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 h-24 resize-none"
+                      />
+                    </div>
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Rotas da IA
+                      </label>
+                      <div className="space-y-2">
+                        {(Array.isArray(editNodeConfig.aiRoutes) ? editNodeConfig.aiRoutes : []).map(
+                          (route: { label: string; next_node_id: string }, index: number) => (
+                            <div key={index} className="grid grid-cols-2 gap-2 items-center">
+                              <input
+                                value={route.label || ""}
+                                onChange={(e) => updateAiRoute(index, "label", e.target.value)}
+                                placeholder="Label (ex.: reclamacao)"
+                                className="px-3 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg text-sm"
+                              />
+                              <div className="flex gap-2">
+                                <select
+                                  value={route.next_node_id || ""}
+                                  onChange={(e) => updateAiRoute(index, "next_node_id", e.target.value)}
+                                  className={`flex-1 px-3 py-2 border rounded-lg text-sm ${
+                                    route.next_node_id
+                                      ? "border-gray-300 bg-white text-gray-900"
+                                      : "border-amber-400 bg-amber-50 text-amber-900"
+                                  }`}
+                                >
+                                  <option value="">Destino</option>
+                                  {availableTargets.map((target) => (
+                                    <option key={target.id} value={target.id}>
+                                      {target.label}
+                                    </option>
+                                  ))}
+                                </select>
+                                <button
+                                  type="button"
+                                  onClick={() => removeAiRoute(index)}
+                                  className="px-2 text-red-600 hover:text-red-700"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                          )
+                        )}
+                        <button
+                          type="button"
+                          onClick={addAiRoute}
+                          className="px-3 py-2 rounded-lg bg-slate-700 text-white text-sm hover:bg-slate-800"
+                        >
+                          + Adicionar rota IA
+                        </button>
+                      </div>
+                    </div>
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Chaves de contexto IA (JSON array, opcional)
+                      </label>
+                      <textarea
+                        value={JSON.stringify(editNodeConfig.aiContextKeys || [], null, 2)}
+                        onChange={(e) =>
+                          setEditNodeConfig({
+                            ...editNodeConfig,
+                            aiContextKeys: parseJsonText<string[]>(e.target.value, []),
+                          })
+                        }
+                        placeholder='["historico_compras","ultima_reclamacao","sentimento"]'
+                        className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 h-20 resize-none font-mono text-xs"
+                      />
+                    </div>
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Próximo node padrão (fallback)
+                      </label>
+                      <input
+                        type="text"
+                        value={editNodeConfig.default_next_node_id || ""}
+                        onChange={(e) =>
+                          setEditNodeConfig({
+                            ...editNodeConfig,
+                            default_next_node_id: e.target.value,
+                          })
+                        }
+                        placeholder="node-id fallback"
+                        className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      />
+                    </div>
+                  </>
+                )}
+                    </>
+                  );
+                })()}
               </>
             )}
 
