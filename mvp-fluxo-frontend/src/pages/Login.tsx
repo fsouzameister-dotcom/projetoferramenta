@@ -1,8 +1,12 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getApiErrorMessage, loginRequest, unwrapApiData } from "~api/client";
+import logoClienton from "../../logo-clienton.png";
 
 export default function Login() {
+  const defaultTenantId =
+    (import.meta.env.VITE_DEFAULT_TENANT_ID as string | undefined)?.trim() ||
+    "00000000-0000-4000-8000-000000000001";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -19,6 +23,7 @@ export default function Login() {
       const response = await loginRequest({
         email,
         password,
+        tenantId: defaultTenantId,
       });
 
       const { token, tenant_id: tenantId } = unwrapApiData<{
@@ -55,6 +60,13 @@ export default function Login() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
       <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md">
+        <div className="mb-6 flex justify-center">
+          <img
+            src={logoClienton}
+            alt="ClientOn"
+            className="w-72 max-w-full h-auto object-contain"
+          />
+        </div>
         <h2 className="text-2xl font-bold text-center text-gray-800 mb-6">
           Login
         </h2>

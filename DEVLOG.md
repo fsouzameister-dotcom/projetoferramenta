@@ -770,3 +770,70 @@ Objetivo: avançar em paralelo nas trilhas de operação, WhatsApp Meta e IA, se
   - mitigação: pré-processamento de chunks, topK controlado e timeout por etapa.
 - Complexidade em múltiplas trilhas:
   - mitigação: checkpoints semanais com critérios objetivos de aceite (Go/No-Go).
+
+---
+
+## Checkpoint de sessão (2026-04-24)
+
+### Entregas concluídas nesta sessão
+
+- Backend IA:
+  - novo módulo `src/ai.ts` com schema auto-criado para:
+    - `ai_provider_settings`
+    - `ai_personas`
+    - `ai_scripts`
+    - `ai_usage_logs`
+  - rotas IA adicionadas em `protected.routes.ts`:
+    - `POST/GET /api/ai/providers`
+    - `POST/GET/PUT /api/ai/personas`
+    - `POST /api/ai/scripts`
+    - `POST /api/ai/respond`
+    - `POST /api/ai/assist-hint`
+  - execução de decisão em fluxo evoluída para:
+    - `decisionMode: simple`
+    - `decisionMode: combined` (AND/OR)
+    - `decisionMode: multi_branch`
+    - `decisionMode: ai`
+
+- Frontend Admin IA:
+  - nova tela `AiAdmin` integrada ao menu lateral e rotas.
+  - UX de persona em modo guiado (não técnico), com:
+    - identidade, tom, estilo, objetivo, personalidade, diferenciais e foto.
+  - remoção de redundância em persona:
+    - removidos campos "O que falar" e "O que conseguir" da persona.
+  - UX de roteiro sem código com etapas dinâmicas:
+    - adicionar/remover etapas ilimitadas.
+    - cada etapa com campos guiados de conteúdo e objetivo.
+
+- Frontend Editor de Fluxo (node decisão):
+  - configuração avançada dos modos de decisão no painel lateral.
+  - rotas visuais com seleção de destino por dropdown.
+  - handles dinâmicos para `multi_branch` e `ai`.
+  - assistente IA no painel de decisão:
+    - gera sugestão de regras/rotas com base em objetivo textual.
+  - botão de aplicação automática:
+    - "Aplicar sugestão + rascunho conexões" desenha arestas no canvas.
+  - segurança de configuração:
+    - destaque visual de rotas sem destino.
+    - bloqueio de aplicação do rascunho quando faltam destinos obrigatórios.
+  - status no card do node:
+    - badge "OK" ou "N sem destino" no próprio canvas.
+
+### Build/validação
+
+- Backend build: OK.
+- Frontend build: OK.
+
+### Estado de git para retomada
+
+- Branch atual de trabalho: `cursor/ia-admin-agent-hints`.
+- Commits relevantes desta sessão:
+  - `935f17c` feat: adicionar base IA no admin e dicas para agente
+  - `2ed634b` feat: evoluir assistente de decisão e UX de roteiros IA
+
+### Próximo tema já alinhado para retomada
+
+- Publicação com URL fixa real (não temporária), em VPS InterServer:
+  - domínio/subdomínios (`app.` e `api.`),
+  - Nginx + SSL,
+  - deploy contínuo para frontend/backend.

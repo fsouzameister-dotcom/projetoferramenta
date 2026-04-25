@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
+import logoClienton from "../../logo-clienton.png";
 
 const navItems = [
   { label: "Painel", path: "/dashboard", icon: "⊞" },
@@ -11,16 +13,24 @@ const navItems = [
 
 export default function Sidebar() {
   const location = useLocation();
+  const [logoFailed, setLogoFailed] = useState(false);
 
   return (
     <aside className="w-60 bg-gradient-to-b from-zinc-800 to-zinc-900 min-h-screen flex flex-col border-r border-zinc-700/80 shadow-2xl">
       {/* Logo */}
       <div className="px-4 py-5 border-b border-zinc-700/80 bg-zinc-200/95">
-        <img
-          src="/logo-clienton.png"
-          alt="ClientOn"
-          className="w-full h-auto max-h-16 object-contain mb-2"
-        />
+        {logoFailed ? (
+          <div className="w-full h-14 mb-2 rounded-md bg-zinc-800 text-zinc-100 flex items-center justify-center font-semibold tracking-wide text-xl">
+            ClientOn
+          </div>
+        ) : (
+          <img
+            src={logoClienton}
+            alt="ClientOn"
+            className="w-full h-auto max-h-16 object-contain mb-2"
+            onError={() => setLogoFailed(true)}
+          />
+        )}
         <p className="text-zinc-700 text-xs mt-1 text-center">
           Soluções de negócios
         </p>
