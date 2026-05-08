@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import api, { getApiErrorMessage, unwrapApiData } from "../api/client";
+import logoClienton from "../../logo-clienton.png";
 
 type ConversationStatus = "em_espera" | "em_andamento" | "historico";
 type MessageType = "text" | "contact" | "location" | "attachment" | "audio" | "image";
@@ -11,6 +13,7 @@ type ChatMessage = {
   provider_message_id?: string;
   type: MessageType;
   direction: MessageDirection;
+  sender_name?: string;
   delivery?: MessageDelivery;
   text?: string;
   createdAt: string;
@@ -28,6 +31,13 @@ type Conversation = {
   contactName: string;
   phone: string;
   status: ConversationStatus;
+  lifecycle_status?: "open" | "closed_manual" | "closed_window";
+  closed_at?: string;
+  closed_by?: string;
+  last_customer_message_at?: string;
+  window_expires_at?: string;
+  outside_service_window?: boolean;
+  requires_template_to_resume?: boolean;
   tags?: string[];
   metadata?: {
     queue?: string;
@@ -50,6 +60,11 @@ const templateOptions = [
   { name: "Confirmação atendimento", params: ["protocolo"] },
 ];
 
+function getSimulationFeatureKey(): string {
+  const tenantId = localStorage.getItem("tenant_id") || "default";
+  return `agent_test_simulation_enabled_${tenantId}`;
+}
+
 const initialConversations: Conversation[] = [
   {
     id: "c1",
@@ -62,6 +77,7 @@ const initialConversations: Conversation[] = [
         id: "m1",
         type: "text",
         direction: "in",
+        sender_name: "Cliente",
         text: "Oi, quero saber sobre planos.",
         createdAt: "10:11",
       },
@@ -78,6 +94,7 @@ const initialConversations: Conversation[] = [
         id: "m2",
         type: "text",
         direction: "in",
+        sender_name: "Cliente",
         text: "Consegue me enviar a localização da loja?",
         createdAt: "10:25",
       },
@@ -85,6 +102,7 @@ const initialConversations: Conversation[] = [
         id: "m3",
         type: "location",
         direction: "out",
+        sender_name: "BOT",
         createdAt: "10:27",
         delivery: "read",
         location: { label: "Loja Central", lat: -23.55052, lng: -46.633308 },
@@ -102,6 +120,7 @@ const initialConversations: Conversation[] = [
         id: "m4",
         type: "contact",
         direction: "out",
+        sender_name: "BOT",
         createdAt: "09:50",
         delivery: "delivered",
         contact: { name: "Comercial ClientOn", phone: "+55 11 4000-1000" },
@@ -132,6 +151,7 @@ function deliveryClass(delivery?: MessageDelivery) {
 
 export default function AgentHome() {
   const userName = localStorage.getItem("user_name") || "Agente";
+  const simulationEnabled = localStorage.getItem(getSimulationFeatureKey()) === "true";
   const envMode = (import.meta.env.VITE_AGENT_DATA_MODE as AgentDataMode | undefined) || "mock";
   const [resolvedMode, setResolvedMode] = useState<AgentDataMode>(envMode);
   const [modeNotice, setModeNotice] = useState<string | null>(null);
@@ -160,9 +180,7 @@ export default function AgentHome() {
   const [pendingMediaByConversation, setPendingMediaByConversation] = useState<
     Record<string, ChatMessage[]>
   >({});
-  const [agentHint, setAgentHint] = useState<AiHintPayload | null>(null);
   const [loadingHint, setLoadingHint] = useState(false);
-  const [hintVisible, setHintVisible] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   const mergeWithPendingMedia = (apiConversations: Conversation[]) => {
@@ -189,7 +207,7 @@ export default function AgentHome() {
           setConversations(mergeWithPendingMedia(payload));
           setActiveConversationId(payload[0]?.id ?? null);
           setResolvedMode("api");
-          setModeNotice("Modo API ativo");
+          setModeNotice(null);
         } else {
           setResolvedMode("mock");
           setModeNotice("API sem payload esperado. Fallback para modo emulado.");
@@ -236,6 +254,10 @@ export default function AgentHome() {
 
   const activeConversation =
     conversations.find((conv) => conv.id === activeConversationId) ?? null;
+  const isConversationClosed = activeConversation?.lifecycle_status
+    ? activeConversation.lifecycle_status !== "open"
+    : activeConversation?.status === "historico";
+  const requiresTemplateToResume = Boolean(activeConversation?.requires_template_to_resume);
 
   const activeMessages = useMemo(() => {
     if (!activeConversation) return [];
@@ -287,11 +309,7 @@ export default function AgentHome() {
       }
 
       if (!personaId) {
-        setAgentHint({
-          hint: "Cadastre ao menos uma persona de IA para receber recomendações contextuais.",
-          source: "fallback",
-        });
-        setHintVisible(true);
+        window.alert("Cadastre ao menos uma persona de IA para receber recomendações contextuais.");
         return;
       }
 
@@ -310,17 +328,14 @@ export default function AgentHome() {
         },
       });
       const payload = unwrapApiData<AiHintPayload>(response.data);
-      setAgentHint(payload);
-      setHintVisible(true);
+      window.alert(payload.hint);
     } catch (error) {
-      setAgentHint({
-        hint: getApiErrorMessage(
+      window.alert(
+        getApiErrorMessage(
           error,
           "Não foi possível gerar dica IA agora. Continue com abordagem consultiva e confirme a necessidade do cliente."
-        ),
-        source: "fallback",
-      });
-      setHintVisible(true);
+        )
+      );
     } finally {
       setLoadingHint(false);
     }
@@ -339,6 +354,14 @@ export default function AgentHome() {
 
   const handleSendText = () => {
     if (!activeConversation || !composeText.trim()) return;
+    if (isConversationClosed) {
+      window.alert(
+        requiresTemplateToResume
+          ? "Atendimento encerrado e janela Meta fechada. Reabra com template para retomar."
+          : "Atendimento encerrado. Reabra a conversa para enviar mensagens."
+      );
+      return;
+    }
     const payload = composeText.trim();
     setComposeText("");
     if (resolvedMode === "api") {
@@ -346,6 +369,7 @@ export default function AgentHome() {
         .post(`/agent/conversations/${activeConversation.id}/messages`, {
           type: "text",
           text: payload,
+          sender_name: userName,
         })
         .then((res) => {
           const updated = unwrapApiData<Conversation>(res.data);
@@ -357,6 +381,7 @@ export default function AgentHome() {
       id: crypto.randomUUID(),
       type: "text",
       direction: "out",
+      sender_name: userName,
       text: payload,
       createdAt: new Date().toLocaleTimeString("pt-BR", {
         hour: "2-digit",
@@ -366,13 +391,102 @@ export default function AgentHome() {
     });
   };
 
+  const ensureConversationOpenForMessage = () => {
+    if (!isConversationClosed) return true;
+    window.alert(
+      requiresTemplateToResume
+        ? "Atendimento encerrado e janela Meta fechada. Reabra com template para retomar."
+        : "Atendimento encerrado. Reabra a conversa para enviar mensagens."
+    );
+    return false;
+  };
+
+  const handleCloseConversation = async () => {
+    if (!activeConversation) return;
+    const ok = window.confirm("Encerrar este atendimento agora?");
+    if (!ok) return;
+    if (resolvedMode === "api") {
+      try {
+        const res = await api.post(`/agent/conversations/${activeConversation.id}/close`);
+        const updated = unwrapApiData<Conversation>(res.data);
+        setConversations((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+        return;
+      } catch (error) {
+        window.alert(getApiErrorMessage(error, "Não foi possível encerrar atendimento."));
+        return;
+      }
+    }
+    updateConversation(activeConversation.id, (conv) => ({
+      ...conv,
+      status: "historico",
+      lifecycle_status: "closed_manual",
+      closed_at: new Date().toISOString(),
+      closed_by: userName,
+    }));
+  };
+
+  const handleReopenConversation = async () => {
+    if (!activeConversation) return;
+    let templateName: string | undefined;
+    if (requiresTemplateToResume) {
+      const provided = window.prompt(
+        "Janela Meta encerrada. Informe o nome do template aprovado para reabrir:"
+      );
+      templateName = provided?.trim() || undefined;
+      if (!templateName) {
+        window.alert("Reabertura cancelada: template é obrigatório fora da janela.");
+        return;
+      }
+    }
+    if (resolvedMode === "api") {
+      try {
+        const res = await api.post(`/agent/conversations/${activeConversation.id}/reopen`, {
+          templateName,
+          templateParams: {},
+          botName: "BOT",
+        });
+        const updated = unwrapApiData<Conversation>(res.data);
+        setConversations((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+        return;
+      } catch (error) {
+        window.alert(getApiErrorMessage(error, "Não foi possível reabrir atendimento."));
+        return;
+      }
+    }
+    updateConversation(activeConversation.id, (conv) => ({
+      ...conv,
+      status: "em_andamento",
+      lifecycle_status: "open",
+      closed_at: undefined,
+      closed_by: undefined,
+    }));
+  };
+
+  const handleSimulateIncomingMessage = () => {
+    if (!activeConversation || !simulationEnabled) return;
+    pushLocalMessage(activeConversation.id, {
+      id: crypto.randomUUID(),
+      type: "text",
+      direction: "in",
+      sender_name: activeConversation.contactName || "Cliente",
+      text: "Mensagem simulada do cliente para validar o layout do atendimento.",
+      createdAt: new Date().toLocaleTimeString("pt-BR", {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+      delivery: "read",
+    });
+  };
+
   const handleSendContact = () => {
     if (!activeConversation) return;
+    if (!ensureConversationOpenForMessage()) return;
     if (resolvedMode === "api") {
       void api
         .post(`/agent/conversations/${activeConversation.id}/messages`, {
           type: "contact",
           contact: { name: "Equipe Comercial", phone: "+55 11 4000-1000" },
+          sender_name: userName,
         })
         .then((res) => {
           const updated = unwrapApiData<Conversation>(res.data);
@@ -384,6 +498,7 @@ export default function AgentHome() {
       id: crypto.randomUUID(),
       type: "contact",
       direction: "out",
+      sender_name: userName,
       createdAt: new Date().toLocaleTimeString("pt-BR", {
         hour: "2-digit",
         minute: "2-digit",
@@ -395,11 +510,13 @@ export default function AgentHome() {
 
   const handleSendLocation = () => {
     if (!activeConversation) return;
+    if (!ensureConversationOpenForMessage()) return;
     if (resolvedMode === "api") {
       void api
         .post(`/agent/conversations/${activeConversation.id}/messages`, {
           type: "location",
           location: { label: "Unidade Atendimento", lat: -23.55052, lng: -46.633308 },
+          sender_name: userName,
         })
         .then((res) => {
           const updated = unwrapApiData<Conversation>(res.data);
@@ -411,6 +528,7 @@ export default function AgentHome() {
       id: crypto.randomUUID(),
       type: "location",
       direction: "out",
+      sender_name: userName,
       createdAt: new Date().toLocaleTimeString("pt-BR", {
         hour: "2-digit",
         minute: "2-digit",
@@ -422,10 +540,12 @@ export default function AgentHome() {
 
   const handleAttachmentSelected = (file: File | null) => {
     if (!activeConversation || !file) return;
+    if (!ensureConversationOpenForMessage()) return;
     const msg: ChatMessage = {
       id: crypto.randomUUID(),
       type: "attachment",
       direction: "out",
+      sender_name: userName,
       createdAt: new Date().toLocaleTimeString("pt-BR", {
         hour: "2-digit",
         minute: "2-digit",
@@ -442,11 +562,13 @@ export default function AgentHome() {
 
   const handleImageSelected = (file: File | null) => {
     if (!activeConversation || !file) return;
+    if (!ensureConversationOpenForMessage()) return;
     const imageUrl = URL.createObjectURL(file);
     const msg: ChatMessage = {
       id: crypto.randomUUID(),
       type: "image",
       direction: "out",
+      sender_name: userName,
       createdAt: new Date().toLocaleTimeString("pt-BR", {
         hour: "2-digit",
         minute: "2-digit",
@@ -464,6 +586,7 @@ export default function AgentHome() {
 
   const startRecording = async () => {
     if (isRecording) return;
+    if (!ensureConversationOpenForMessage()) return;
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const mediaRecorder = new MediaRecorder(stream);
     const chunks: Blob[] = [];
@@ -490,12 +613,14 @@ export default function AgentHome() {
 
   const sendRecordedAudio = () => {
     if (!activeConversation || !recordedAudioBlob || !recordedAudioUrl) return;
+    if (!ensureConversationOpenForMessage()) return;
     const durationSec =
       recordingStartedAt !== null ? Math.max(1, Math.round((Date.now() - recordingStartedAt) / 1000)) : undefined;
     pushLocalMessage(activeConversation.id, {
       id: crypto.randomUUID(),
       type: "audio",
       direction: "out",
+      sender_name: userName,
       createdAt: new Date().toLocaleTimeString("pt-BR", {
         hour: "2-digit",
         minute: "2-digit",
@@ -524,6 +649,7 @@ export default function AgentHome() {
           queue: newContactForm.queue.trim() || undefined,
           templateName: newContactForm.templateName || undefined,
           templateParams: newContactForm.templateParams,
+          botName: "BOT",
         });
         const created = unwrapApiData<Conversation>(response.data);
         setConversations((prev) => [created, ...prev]);
@@ -555,6 +681,7 @@ export default function AgentHome() {
         id: crypto.randomUUID(),
         type: "text",
         direction: "out",
+        sender_name: "BOT",
         text: `Template "${newContactForm.templateName}" enviado`,
         createdAt: new Date().toLocaleTimeString("pt-BR", {
           hour: "2-digit",
@@ -586,6 +713,14 @@ export default function AgentHome() {
     <div className="h-screen overflow-hidden bg-gradient-to-br from-primary-dark via-[#132a55] to-[#0f1e3d] text-gray-100 p-4 md:p-6">
       <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-4 h-[calc(100vh-2rem)]">
         <aside className="bg-[#1b2540] rounded-xl border border-[#2f3d63] p-4 flex flex-col shadow-xl">
+          <Link
+            to="/agent"
+            className="mb-4 rounded-lg border border-[#314263] bg-[#101b34] px-3 py-2 inline-flex w-fit transition-all duration-200 hover:border-cyan-300/60 hover:bg-[#142142] hover:shadow-[0_0_0_1px_rgba(103,232,249,0.25)] focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70"
+            aria-label="Ir para início da central do agente"
+          >
+            <img src={logoClienton} alt="ClientOn" className="h-9 w-auto" />
+          </Link>
+
           <div className="flex items-center gap-2 mb-3">
             <button
               type="button"
@@ -673,46 +808,22 @@ export default function AgentHome() {
           </div>
         </aside>
 
-        <section className="bg-[#1b2540] rounded-xl border border-[#2f3d63] p-4 flex flex-col min-h-0 overflow-hidden shadow-xl">
-          <div className="flex items-center justify-between border-b border-[#33466f] pb-3 mb-3">
+        <section className="bg-[#1b2540] rounded-xl border border-[#2f3d63] p-3 flex flex-col min-h-0 overflow-hidden shadow-xl">
+          <div className="flex items-center justify-between border-b border-[#33466f] pb-2 mb-2">
             <div>
-              <h1 className="text-[22px] font-bold text-white tracking-tight">Central do Agente</h1>
-              <p className="text-[13px] text-gray-300">Atendente: {userName}</p>
-              <p className="text-xs text-gray-400">
-                Fonte de dados: {resolvedMode === "api" ? "API real" : "Emulada"}
-              </p>
+              <h1 className="text-[20px] font-bold text-white tracking-tight">Central do Agente</h1>
+              <p className="text-xs text-gray-300">Atendente: {userName}</p>
             </div>
             <input
               value={chatSearch}
               onChange={(e) => setChatSearch(e.target.value)}
               placeholder="Busca por texto na conversa"
-              className="w-64 bg-[#0f1a33] border border-[#314263] rounded-lg px-3 py-2 text-sm text-gray-100 outline-none"
+              className="w-56 bg-[#0f1a33] border border-[#314263] rounded-lg px-3 py-1.5 text-xs text-gray-100 outline-none"
             />
           </div>
 
-          {hintVisible && agentHint ? (
-            <div className="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-amber-300">Dica IA ao agente</p>
-                  <p className="text-sm text-amber-100">{agentHint.hint}</p>
-                  <p className="text-[11px] text-amber-300/80 mt-1">
-                    Fonte: {agentHint.source === "ai" ? "IA contextual" : "Fallback heurístico"}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setHintVisible(false)}
-                  className="text-amber-200 hover:text-white text-sm"
-                >
-                  Fechar
-                </button>
-              </div>
-            </div>
-          ) : null}
-
           {modeNotice ? (
-            <div className="mb-3 text-xs px-3 py-2 rounded border border-[#324464] bg-[#162544] text-gray-300">
+            <div className="mb-2 text-[11px] px-2.5 py-1.5 rounded border border-[#324464] bg-[#162544] text-gray-300">
               {modeNotice}
             </div>
           ) : null}
@@ -728,17 +839,45 @@ export default function AgentHome() {
             </div>
           ) : !loadingConversations ? (
             <div className="flex-1 min-h-0 flex flex-col">
-              <div className="mb-3">
-                <p className="font-semibold text-gray-100">{activeConversation?.contactName}</p>
-                <p className="text-xs text-gray-400">{activeConversation?.phone}</p>
-                <button
-                  type="button"
-                  onClick={() => void requestAgentHint()}
-                  disabled={loadingHint}
-                  className="mt-2 px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-400/40 text-amber-200 text-xs hover:bg-amber-500/30 disabled:opacity-60"
-                >
-                  {loadingHint ? "Gerando dica..." : "Gerar dica IA"}
-                </button>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-sm text-gray-100">{activeConversation?.contactName}</p>
+                  <p className="text-[11px] text-gray-400">{activeConversation?.phone}</p>
+                  <p className="text-[11px] text-cyan-200 mt-0.5">
+                    {activeConversation?.lifecycle_status === "closed_manual"
+                      ? "Encerrado manualmente"
+                      : activeConversation?.lifecycle_status === "closed_window"
+                      ? "Encerrado por janela Meta"
+                      : "Em atendimento"}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {isConversationClosed ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleReopenConversation()}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 text-[11px] hover:bg-emerald-500/30"
+                    >
+                      Reabrir atendimento
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void handleCloseConversation()}
+                      className="px-2.5 py-1 rounded-lg bg-red-500/20 border border-red-400/40 text-red-200 text-[11px] hover:bg-red-500/30"
+                    >
+                      Encerrar atendimento
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void requestAgentHint()}
+                    disabled={loadingHint}
+                    className="px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-400/40 text-amber-200 text-[11px] hover:bg-amber-500/30 disabled:opacity-60"
+                  >
+                    {loadingHint ? "Gerando dica..." : "Gerar dica IA"}
+                  </button>
+                </div>
               </div>
 
               <div ref={chatScrollRef} className="flex-1 overflow-auto space-y-2 pr-1">
@@ -754,6 +893,12 @@ export default function AgentHome() {
                           : "bg-[#222f4d] border-[#374c77] text-gray-100"
                       }`}
                     >
+                      <p className="text-[11px] font-semibold text-cyan-200 mb-1">
+                        {msg.sender_name ||
+                          (msg.direction === "out"
+                            ? userName
+                            : activeConversation?.contactName || "Cliente")}
+                      </p>
                       {msg.type === "text" ? <p>{msg.text}</p> : null}
                       {msg.type === "contact" && msg.contact ? (
                         <div>
@@ -826,6 +971,15 @@ export default function AgentHome() {
 
               <div className="shrink-0 mt-3 border-t border-[#3a3a3a] pt-3 bg-[#1b2540]">
                 <div className="flex gap-2 mb-2">
+                  {simulationEnabled ? (
+                    <button
+                      type="button"
+                      onClick={handleSimulateIncomingMessage}
+                      className="px-3 py-2 rounded-lg bg-[#3a2a59] text-violet-100 text-sm hover:bg-[#4a3470]"
+                    >
+                      Simular cliente
+                    </button>
+                  ) : null}
                   <label className="px-3 py-2 rounded-lg bg-[#223150] text-gray-200 text-sm hover:bg-[#2b3f66] cursor-pointer">
                     Enviar imagem
                     <input
@@ -918,12 +1072,20 @@ export default function AgentHome() {
                   <input
                     value={composeText}
                     onChange={(e) => setComposeText(e.target.value)}
-                    placeholder="Digite a mensagem..."
+                    placeholder={
+                      isConversationClosed
+                        ? requiresTemplateToResume
+                          ? "Conversa encerrada por janela. Reabra com template."
+                          : "Conversa encerrada. Reabra para continuar."
+                        : "Digite a mensagem..."
+                    }
+                    disabled={isConversationClosed}
                     className="flex-1 bg-[#0f1a33] border border-[#314263] rounded-lg px-3 py-2 text-sm text-gray-100 outline-none"
                   />
                   <button
                     type="button"
                     onClick={handleSendText}
+                    disabled={isConversationClosed}
                     className="px-4 py-2 rounded-lg bg-accent text-white font-semibold hover:bg-accent-dark"
                   >
                     Enviar

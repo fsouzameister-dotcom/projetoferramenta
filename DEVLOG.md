@@ -837,3 +837,207 @@ Objetivo: avançar em paralelo nas trilhas de operação, WhatsApp Meta e IA, se
   - domínio/subdomínios (`app.` e `api.`),
   - Nginx + SSL,
   - deploy contínuo para frontend/backend.
+
+---
+
+## Checkpoint de sessão (2026-04-26)
+
+### Entregas concluídas nesta sessão
+
+- DNS e domínio:
+  - validação de `clienton.com.br`, `www.clienton.com.br`, `app.clienton.com.br`, `api.clienton.com.br`.
+  - consolidação de acesso público por subdomínio (site/app/api).
+- SSL/HTTPS:
+  - certificado Let's Encrypt ativo para raiz e subdomínios.
+  - app e api respondendo com HTTPS e status `200`.
+- Publicação frontend:
+  - `VITE_API_URL` ajustado para `https://api.clienton.com.br`.
+  - título da aba atualizado para `app-ClientOn`.
+  - favicon da aba trocado para imagem da marca (`public/favicon-clienton.png`).
+- Correções operacionais:
+  - login validado via API e navegador após correções de deploy/cache.
+  - dashboard voltou a carregar sem erro interno após ajuste de conectividade local.
+- Hardening inicial:
+  - UFW ativo com regras:
+    - `ALLOW`: `22`, `80`, `443`
+    - `DENY`: `3000`, `5432`, `6379` (IPv4 e IPv6)
+  - Docker ajustado para bind local de banco e redis:
+    - `127.0.0.1:5432:5432`
+    - `127.0.0.1:6379:6379`
+- Backup de banco:
+  - script `/usr/local/bin/backup_mvp_pg.sh` criado e validado.
+  - agendamento diário em `crontab`: `15 3 * * *`.
+  - backup validado em `/opt/backups/postgres/mvp_core_2026-04-26_180512.sql.gz`.
+
+### Pendências registradas
+
+- Registrar senha atual de Postgres em cofre seguro:
+  - recuperar valor com:
+    - `grep '^PG_PASSWORD=' /opt/mvp-fluxo-backend/.env`
+  - salvar em gerenciador seguro (fora do repositório).
+- Opcional de endurecimento adicional:
+  - ajustar bind do backend para `127.0.0.1` no código (além de firewall), mantendo proxy Apache.
+
+### Documentação operacional
+
+- Novo runbook criado para operação da VPS:
+  - `RUNBOOK_OPERACAO.md`
+
+---
+
+## Checkpoint de sessão (2026-05-04)
+
+### Pendências operacionais rápidas (status)
+
+- Endurecimento adicional concluído no código backend:
+  - `HOST` centralizado em `src/config.ts` com fallback `0.0.0.0`.
+  - `app.listen` em `src/server.ts` passou a respeitar `HOST` do ambiente.
+  - resultado esperado em produção: `HOST=127.0.0.1` para bind local atrás do Apache.
+- Registro de segredo operacional:
+  - mantido procedimento para recuperar e salvar `PG_PASSWORD` em cofre seguro:
+    - `grep '^PG_PASSWORD=' /opt/mvp-fluxo-backend/.env`
+  - ação manual pendente no ambiente (fora do repositório), por política de segurança.
+
+---
+
+## Backlog registrado (2026-05-07)
+
+### Demanda adiada para próxima janela
+
+- Tema: implementação ponta a ponta do node `capturar_entrada`.
+- Contexto:
+  - hoje o node está presente no frontend, mas sem função de negócio dedicada no executor.
+  - a execução atual cai no fluxo genérico por `next_node_id`.
+- Escopo mínimo (MVP da entrega):
+  1. definir contrato do node (`config`) e estrutura de saída para variáveis do contexto;
+  2. implementar branch específica no `flow-executor`;
+  3. ajustar UI/painel para exibir somente campos oficialmente suportados;
+  4. criar teste automatizado de execução do node no backend;
+  5. atualizar documentação de nodes com status `Implementado` após validação.
+- Prioridade: alta (primeira onda de nodes fora do núcleo atual).
+- Critério de aceite:
+  - fluxo com `capturar_entrada` executa com persistência da entrada em variável de contexto e segue corretamente para o próximo node.
+
+---
+
+## Checkpoint de sessão (2026-05-07)
+
+### Entregas concluídas nesta sessão (atendimento agente)
+
+- Frontend (`AgentHome`):
+  - exibição de remetente nas mensagens (agente/BOT/cliente) consolidada.
+  - redução de área ocupada no topo da conversa para aumentar legibilidade.
+  - removido input de nome do BOT da tela do agente (mantido como responsabilidade administrativa).
+  - removida faixa fixa de dica IA; botão `Gerar dica IA` reposicionado na linha do contato.
+  - recurso de simulação de mensagem inbound implementado como funcionalidade controlada.
+  - recurso de simulação oculto por padrão e habilitável por admin para ambiente de testes.
+- Backend + Frontend (ciclo do atendimento):
+  - botão e fluxo de `Encerrar atendimento` implementados.
+  - conversa passa a suportar ciclo operacional com estados:
+    - `open`
+    - `closed_manual`
+    - `closed_window`
+  - bloqueio de envio quando conversa está encerrada.
+  - reabertura de atendimento implementada com regra Meta:
+    - se janela aberta: permite retomar sem template.
+    - se janela encerrada: exige template para retomada.
+  - fechamento automático por expiração de janela de 24h preparado no backend.
+  - inclusão de metadados de ciclo na conversa (fechamento e janela) para uso de UI e relatórios.
+- Correção pós-deploy:
+  - ajuste de serialização de campos opcionais da conversa para evitar falha de validação de resposta no Fastify ao encerrar atendimento.
+
+### Regras de negócio alinhadas (Meta + operação)
+
+- Encerramento manual continua existindo para caso resolvido.
+- Janela Meta encerrada impede mensagem livre e força retomada via template.
+- Conversa encerrada bloqueia composer até reabertura.
+- Reabertura deve respeitar a janela:
+  - aberta: sem template obrigatório.
+  - fechada: template obrigatório.
+
+### Discussão estratégica registrada para próxima etapa
+
+- Não usar apenas contexto de assunto para consolidar histórico (evita falso vínculo entre demandas diferentes).
+- Criar identidade de cliente independente da sessão de atendimento para relatórios e operação:
+  - cadastro mestre do cliente com múltiplos números/canais.
+  - capacidade de vincular números diferentes ao mesmo cliente.
+  - visão analítica futura com filtros por:
+    - sessão,
+    - número,
+    - cliente consolidado.
+- Necessidade operacional futura:
+  - agente escolher qual número/canal usar no contato ativo quando o cliente tiver múltiplos.
+
+### Observação operacional da VPS
+
+- Diretório de execução backend no servidor validado em:
+  - `/opt/mvp-fluxo-backend`
+- Ambiente de produção atual usa pasta publicada (sem `.git`), com deploy por cópia de build.
+
+---
+
+## Checkpoint de sessão (2026-05-08)
+
+### Decisão arquitetural: Canal WhatsApp
+
+- Adotada abordagem de adapter unificado por canal de mensageria, começando por **WhatsApp Cloud API direto** (sem broker/BSP).
+- Sequência aprovada:
+  1. Fase 1 (entregue): adapter `whatsapp_cloud_api` + Opção B (credenciais coladas pelo admin do tenant).
+  2. Fase 2 (futuro): mesmo adapter, onboarding via Embedded Signup.
+  3. Fase 3 (sob demanda): adapters Twilio / Zenvia / 360dialog apenas se cliente exigir.
+
+### Entregas concluídas nesta sessão (Fase 1)
+
+- Backend:
+  - novo módulo `src/secrets.ts` — encriptação AES-256-GCM compartilhada (extraída de `ai.ts`).
+  - novo módulo `src/whatsapp-channels.ts`:
+    - tabelas `whatsapp_channel_accounts`, `whatsapp_channel_secrets`, `whatsapp_phone_numbers` (criadas idempotentemente).
+    - cadastro de canal Opção B (WABA ID + Phone Number ID + Access Token cifrado).
+    - resolução de tenant a partir de `phone_number_id` (roteamento de webhook).
+    - obtenção de contexto outbound por tenant.
+  - novo módulo `src/whatsapp-cloud-api.ts`:
+    - envio de mensagem de texto via Graph API.
+    - parser de webhook (mensagens de texto inbound + status `sent` / `delivered` / `read` / `failed`).
+    - validação de `X-Hub-Signature-256` com `WHATSAPP_APP_SECRET`.
+  - rotas públicas em `src/app.ts`:
+    - `GET /webhooks/whatsapp` (verificação Meta).
+    - `POST /webhooks/whatsapp` (eventos inbound + status).
+    - parser JSON personalizado guardando `rawBody` para validação de assinatura.
+  - rotas administrativas em `/api/whatsapp/channels` (GET/POST), restritas a admin local/supervisor.
+  - integração no atendimento (`agent-conversations.ts`):
+    - `recordInboundWhatsAppMessage` com dedupe por `wamid.*` (índice único parcial em `agent_messages`).
+    - `appendAgentMessage` com envio real via Cloud API quando há canal configurado:
+      - mensagem persiste como `sending` → após chamada Graph: `sent` (com `wamid`) ou `failed` (com `error_code`/`error_description`).
+    - matching de telefone independente de máscara (busca por dígitos).
+  - `http.ts`: novos códigos de erro `whatsapp.*`.
+  - `config.ts`: variáveis `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET` (ou `META_APP_SECRET`), `WHATSAPP_GRAPH_API_VERSION`, `WHATSAPP_SKIP_SIGNATURE_VERIFY`.
+  - `.env.example` atualizado.
+- Frontend:
+  - nova página `WhatsAppAdmin` (`/admin/whatsapp`) — cadastro e listagem de canais.
+  - sidebar com novo item "WhatsApp" e roteamento protegido por roles admin.
+- Documentação operacional:
+  - `RUNBOOK_OPERACAO.md` ganhou seção dedicada à Cloud API:
+    - variáveis `.env`,
+    - ajuste recomendado de Apache para proxy de `/webhooks/`,
+    - configuração no Meta for Developers,
+    - fluxo de cadastro pela ferramenta,
+    - validação ponta a ponta,
+    - diagnóstico via `journalctl` e `psql`,
+    - procedimento de deploy desta entrega.
+
+### Restrições conhecidas e pontos não cobertos (intencionais nesta fase)
+
+- Envio real apenas para `type: "text"`. Contact / location continuam mock.
+- Templates Meta e mídia (upload via `/media`) ainda não conectados ao fluxo de reabertura/UI.
+- Tenant com múltiplos números: outbound usa o primeiro número cadastrado (sem seleção por conversa ainda).
+- Embedded Signup permanece para Fase 2.
+
+### Próxima sessão (roteiro rápido)
+
+1. Deploy desta entrega na VPS (RUNBOOK seção WhatsApp).
+2. Conectar número BRDID na Cloud API e cadastrar via `/admin/whatsapp`.
+3. Validar inbound + outbound + ciclo de status com número real.
+4. Após validação, planejar:
+   - templates aprovados sincronizados via API (lista para o seletor de retomada),
+   - upload e recepção de mídia (texto → áudio/imagem/documento),
+   - seleção de número outbound por conversa quando houver mais de um.

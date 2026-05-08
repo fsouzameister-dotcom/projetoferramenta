@@ -29,9 +29,16 @@ import {
   updateUserForTenant,
 } from "../users";
 import {
+  createWhatsAppChannelOptionB,
+  listWhatsAppChannels,
+} from "../whatsapp-channels";
+import {
+  AgentConversationRuleError,
   appendAgentMessage,
+  closeAgentConversation,
   createAgentConversation,
   listAgentConversations,
+  reopenAgentConversation,
   updateAgentMessageStatus,
 } from "../agent-conversations";
 import {
@@ -220,6 +227,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       queue?: string;
       templateName?: string;
       templateParams?: Record<string, string>;
+      botName?: string;
     };
   }>(
     "/agent/conversations",
@@ -235,6 +243,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
             queue: { type: "string" },
             templateName: { type: "string" },
             templateParams: { type: "object", additionalProperties: { type: "string" } },
+            botName: { type: "string" },
           },
         },
         response: {
@@ -256,6 +265,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           queue: body.queue?.trim() || undefined,
           templateName: body.templateName?.trim() || undefined,
           templateParams: body.templateParams ?? {},
+          botName: body.botName?.trim() || undefined,
         });
         return sendSuccess(request, reply, created, 201);
       } catch (error) {
@@ -462,6 +472,98 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           ERROR_CODES.ai.AI_PROVIDERS_LIST_FAILED,
           "Erro ao listar provedores de IA"
         );
+      }
+    }
+  );
+
+  fastify.get(
+    "/whatsapp/channels",
+    {
+      schema: {
+        response: {
+          200: successEnvelopeSchema({
+            type: "array",
+            items: { type: "object", additionalProperties: true },
+          }),
+          403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+          500: errorEnvelopeSchema([ERROR_CODES.whatsapp.WHATSAPP_CHANNELS_LIST_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      ensureAdminAccess(request.user?.role_name);
+      try {
+        const data = await listWhatsAppChannels(request.tenant.id);
+        return sendSuccess(request, reply, data);
+      } catch (error) {
+        request.log.error(error);
+        throw new ApiError(
+          500,
+          ERROR_CODES.whatsapp.WHATSAPP_CHANNELS_LIST_FAILED,
+          "Erro ao listar canais WhatsApp"
+        );
+      }
+    }
+  );
+
+  fastify.post<{
+    Body: {
+      label?: string;
+      wabaId: string;
+      accessToken: string;
+      phoneNumberId: string;
+      displayPhoneNumber?: string;
+    };
+  }>(
+    "/whatsapp/channels",
+    {
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["wabaId", "accessToken", "phoneNumberId"],
+          properties: {
+            label: { type: "string" },
+            wabaId: { type: "string", minLength: 1 },
+            accessToken: { type: "string", minLength: 1 },
+            phoneNumberId: { type: "string", minLength: 1 },
+            displayPhoneNumber: { type: "string" },
+          },
+        },
+        response: {
+          201: successEnvelopeSchema({
+            type: "object",
+            additionalProperties: false,
+            required: ["channelId", "phoneNumberId"],
+            properties: {
+              channelId: { type: "string" },
+              phoneNumberId: { type: "string" },
+            },
+          }),
+          400: errorEnvelopeSchema([ERROR_CODES.common.VALIDATION_ERROR]),
+          403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+          500: errorEnvelopeSchema([ERROR_CODES.whatsapp.WHATSAPP_CHANNEL_CREATE_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      ensureAdminAccess(request.user?.role_name);
+      const body = request.body;
+      try {
+        const created = await createWhatsAppChannelOptionB({
+          tenantId: request.tenant.id,
+          label: body.label,
+          wabaId: body.wabaId,
+          accessToken: body.accessToken,
+          phoneNumberId: body.phoneNumberId,
+          displayPhoneNumber: body.displayPhoneNumber,
+        });
+        return sendSuccess(request, reply, created, 201);
+      } catch (error) {
+        request.log.error(error);
+        if (error instanceof ApiError) throw error;
+        const msg = error instanceof Error ? error.message : "Erro ao registrar canal WhatsApp";
+        throw new ApiError(400, ERROR_CODES.common.VALIDATION_ERROR, msg);
       }
     }
   );
@@ -1597,6 +1699,13 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
                 contactName: { type: "string" },
                 phone: { type: "string" },
                 status: { type: "string", enum: ["em_espera", "em_andamento", "historico"] },
+                lifecycle_status: { type: "string", enum: ["open", "closed_manual", "closed_window"] },
+                closed_at: { type: "string" },
+                closed_by: { type: "string" },
+                last_customer_message_at: { type: "string" },
+                window_expires_at: { type: "string" },
+                outside_service_window: { type: "boolean" },
+                requires_template_to_resume: { type: "boolean" },
                 tags: { type: "array", items: { type: "string" } },
                 messages: {
                   type: "array",
@@ -1648,6 +1757,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       text?: string;
       contact?: { name: string; phone: string };
       location?: { label: string; lat: number; lng: number };
+      sender_name?: string;
     };
   }>(
     "/agent/conversations/:conversationId/messages",
@@ -1663,6 +1773,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
             text: { type: "string" },
             contact: { type: "object", additionalProperties: true },
             location: { type: "object", additionalProperties: true },
+            sender_name: { type: "string" },
           },
         },
         response: {
@@ -1670,6 +1781,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
             type: "object",
             additionalProperties: true,
           }),
+          409: errorEnvelopeSchema([ERROR_CODES.agent.AGENT_MESSAGE_SEND_FAILED]),
           404: errorEnvelopeSchema([ERROR_CODES.agent.AGENT_CONVERSATION_NOT_FOUND]),
           500: errorEnvelopeSchema([ERROR_CODES.agent.AGENT_MESSAGE_SEND_FAILED]),
         },
@@ -1681,8 +1793,61 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
         const updated = await appendAgentMessage(
           request.tenant.id,
           conversationId,
-          request.body
+          {
+            ...request.body,
+            senderName: request.body.sender_name || request.user?.name || request.user?.email,
+          }
         );
+        if (!updated) {
+          throw new ApiError(
+            404,
+            ERROR_CODES.agent.AGENT_CONVERSATION_NOT_FOUND,
+            "Conversa não encontrada"
+          );
+        }
+        return sendSuccess(request, reply, updated);
+      } catch (error) {
+        request.log.error(error);
+        if (error instanceof AgentConversationRuleError) {
+          throw new ApiError(409, ERROR_CODES.agent.AGENT_MESSAGE_SEND_FAILED, error.message, {
+            rule: error.code,
+          });
+        }
+        if (error instanceof ApiError) throw error;
+        throw new ApiError(
+          500,
+          ERROR_CODES.agent.AGENT_MESSAGE_SEND_FAILED,
+          "Erro ao enviar mensagem"
+        );
+      }
+    }
+  );
+
+  fastify.post<{
+    Params: { conversationId: string };
+  }>(
+    "/agent/conversations/:conversationId/close",
+    {
+      schema: {
+        params: conversationIdParamSchema,
+        response: {
+          200: successEnvelopeSchema({
+            type: "object",
+            additionalProperties: true,
+          }),
+          404: errorEnvelopeSchema([ERROR_CODES.agent.AGENT_CONVERSATION_NOT_FOUND]),
+          500: errorEnvelopeSchema([ERROR_CODES.agent.AGENT_CONVERSATION_CREATE_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      const { conversationId } = request.params;
+      try {
+        const updated = await closeAgentConversation({
+          tenantId: request.tenant.id,
+          conversationId,
+          closedBy: request.user?.name || request.user?.email,
+        });
         if (!updated) {
           throw new ApiError(
             404,
@@ -1696,8 +1861,76 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
         if (error instanceof ApiError) throw error;
         throw new ApiError(
           500,
-          ERROR_CODES.agent.AGENT_MESSAGE_SEND_FAILED,
-          "Erro ao enviar mensagem"
+          ERROR_CODES.agent.AGENT_CONVERSATION_CREATE_FAILED,
+          "Erro ao encerrar conversa"
+        );
+      }
+    }
+  );
+
+  fastify.post<{
+    Params: { conversationId: string };
+    Body: {
+      templateName?: string;
+      templateParams?: Record<string, string>;
+      botName?: string;
+    };
+  }>(
+    "/agent/conversations/:conversationId/reopen",
+    {
+      schema: {
+        params: conversationIdParamSchema,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            templateName: { type: "string" },
+            templateParams: { type: "object", additionalProperties: { type: "string" } },
+            botName: { type: "string" },
+          },
+        },
+        response: {
+          200: successEnvelopeSchema({
+            type: "object",
+            additionalProperties: true,
+          }),
+          404: errorEnvelopeSchema([ERROR_CODES.agent.AGENT_CONVERSATION_NOT_FOUND]),
+          409: errorEnvelopeSchema([ERROR_CODES.agent.AGENT_MESSAGE_SEND_FAILED]),
+          500: errorEnvelopeSchema([ERROR_CODES.agent.AGENT_CONVERSATION_CREATE_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      const { conversationId } = request.params;
+      try {
+        const updated = await reopenAgentConversation({
+          tenantId: request.tenant.id,
+          conversationId,
+          reopenedBy: request.user?.name || request.user?.email,
+          templateName: request.body.templateName?.trim() || undefined,
+          templateParams: request.body.templateParams ?? {},
+          botName: request.body.botName?.trim() || undefined,
+        });
+        if (!updated) {
+          throw new ApiError(
+            404,
+            ERROR_CODES.agent.AGENT_CONVERSATION_NOT_FOUND,
+            "Conversa não encontrada"
+          );
+        }
+        return sendSuccess(request, reply, updated);
+      } catch (error) {
+        request.log.error(error);
+        if (error instanceof AgentConversationRuleError) {
+          throw new ApiError(409, ERROR_CODES.agent.AGENT_MESSAGE_SEND_FAILED, error.message, {
+            rule: error.code,
+          });
+        }
+        if (error instanceof ApiError) throw error;
+        throw new ApiError(
+          500,
+          ERROR_CODES.agent.AGENT_CONVERSATION_CREATE_FAILED,
+          "Erro ao reabrir conversa"
         );
       }
     }

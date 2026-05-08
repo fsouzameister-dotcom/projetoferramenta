@@ -7,6 +7,7 @@ const navItems = [
   { label: "Fluxos", path: "/flows", icon: "⬡" },
   { label: "Usuários", path: "/admin/users", icon: "👤" },
   { label: "IA", path: "/admin/ai", icon: "🤖" },
+  { label: "WhatsApp", path: "/admin/whatsapp", icon: "💬" },
   { label: "Relatórios", path: "/reports", icon: "📊" },
   { label: "Configurações", path: "/settings", icon: "⚙" },
 ];

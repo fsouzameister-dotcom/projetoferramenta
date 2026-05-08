@@ -14,7 +14,13 @@ const roleOptions = [
   { value: "agente", label: "Agente" },
 ];
 
+function getSimulationFeatureKey(): string {
+  const tenantId = localStorage.getItem("tenant_id") || "default";
+  return `agent_test_simulation_enabled_${tenantId}`;
+}
+
 export default function UsersAdmin() {
+  const simulationFeatureKey = getSimulationFeatureKey();
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -32,6 +38,10 @@ export default function UsersAdmin() {
     password: "",
     role_name: "agente",
   });
+  const [simulationEnabled, setSimulationEnabled] = useState(
+    () => localStorage.getItem(getSimulationFeatureKey()) === "true"
+  );
+  const [simulationNotice, setSimulationNotice] = useState<string | null>(null);
 
   const loadUsers = async () => {
     setLoading(true);
@@ -110,12 +120,40 @@ export default function UsersAdmin() {
     }
   };
 
+  const toggleSimulationFeature = (checked: boolean) => {
+    localStorage.setItem(simulationFeatureKey, checked ? "true" : "false");
+    setSimulationEnabled(checked);
+    setSimulationNotice(
+      checked
+        ? "Simulação de mensagem do cliente habilitada para este ambiente."
+        : "Simulação de mensagem do cliente desabilitada para este ambiente."
+    );
+  };
+
   return (
     <div className="p-8">
       <h1 className="text-2xl font-bold text-white">Usuários e Permissões</h1>
       <p className="text-sm text-gray-300 mt-1">
         Crie perfis de admin local, supervisor e agente.
       </p>
+      <p className="text-xs text-gray-400 mt-1">
+        O campo de nome define como o atendente aparece nas mensagens para o cliente.
+      </p>
+      <div className="mt-4 bg-white rounded-xl p-4 border border-gray-100">
+        <p className="text-sm font-semibold text-gray-900">Ambiente de testes</p>
+        <p className="text-xs text-gray-600 mt-1">
+          Habilita o botão oculto "Simular cliente" na tela de atendimento para validar layout sem envio real.
+        </p>
+        <label className="mt-3 inline-flex items-center gap-2 text-sm text-gray-800">
+          <input
+            type="checkbox"
+            checked={simulationEnabled}
+            onChange={(e) => toggleSimulationFeature(e.target.checked)}
+          />
+          Ativar simulação local para este tenant
+        </label>
+        {simulationNotice ? <p className="mt-2 text-xs text-teal-700">{simulationNotice}</p> : null}
+      </div>
 
       {error && (
         <div className="mt-4 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
@@ -126,7 +164,7 @@ export default function UsersAdmin() {
       <form onSubmit={onSubmit} className="mt-6 bg-white rounded-xl p-6 grid grid-cols-1 md:grid-cols-4 gap-3">
         <input
           className="border rounded-lg px-3 py-2 text-gray-900"
-          placeholder="Nome"
+          placeholder="Nome de exibicao no atendimento"
           value={form.name}
           onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
           required
@@ -173,7 +211,7 @@ export default function UsersAdmin() {
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-gray-600">
             <tr>
-              <th className="px-4 py-3 text-left">Nome</th>
+              <th className="px-4 py-3 text-left">Nome de exibicao</th>
               <th className="px-4 py-3 text-left">Email</th>
               <th className="px-4 py-3 text-left">Perfil</th>
             </tr>
@@ -181,13 +219,13 @@ export default function UsersAdmin() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={3} className="px-4 py-6 text-center text-gray-500">
+                <td colSpan={4} className="px-4 py-6 text-center text-gray-500">
                   Carregando...
                 </td>
               </tr>
             ) : users.length === 0 ? (
               <tr>
-                <td colSpan={3} className="px-4 py-6 text-center text-gray-500">
+                <td colSpan={4} className="px-4 py-6 text-center text-gray-500">
                   Nenhum usuário cadastrado.
                 </td>
               </tr>

@@ -1,0 +1,156 @@
+# Documento de Funcionalidades dos Nodes de Fluxo
+
+## Contexto
+
+Este documento consolida o que cada node faz hoje no projeto, considerando:
+
+- representação e configuração no `FlowEditor` (frontend);
+- execução real no `flow-executor` (backend).
+
+## Legenda de status
+
+- `Implementado`: possui comportamento de negócio no executor.
+- `Parcial`: possui UI/configuração, mas execução limitada.
+- `Sem função de negócio`: atualmente só segue para o próximo node (`next_node_id`) sem lógica específica.
+
+## Mapa atual de nodes
+
+### `inicio`
+
+- Status: `Implementado`
+- Frontend: node de início do fluxo.
+- Backend: define o primeiro salto via `config.next_node_id`.
+
+### `mensagem`
+
+- Status: `Implementado`
+- Frontend: permite editar conteúdo da mensagem.
+- Backend:
+  - renderiza template com variáveis (`{{variavel}}`);
+  - adiciona saída em `messages`;
+  - segue para `config.next_node_id`.
+
+### `chamada_api`
+
+- Status: `Implementado`
+- Frontend:
+  - configuração de URL, método, headers, body, auth, query params;
+  - teste manual da API e mapeamento de resposta.
+- Backend:
+  - executa requisição HTTP real;
+  - suporta autenticação (`bearer`, `basic`, `api_key`);
+  - suporta timeout e tratamento de erro;
+  - aplica `responseMapping` para variáveis do fluxo;
+  - segue para `config.next_node_id`.
+
+### `decisao`
+
+- Status: `Implementado` (avançado)
+- Frontend:
+  - modos `simple`, `combined`, `multi_branch`, `ai`;
+  - assistente IA para sugerir regras/rotas;
+  - rascunho automático de conexões;
+  - validação visual de rotas sem destino.
+- Backend:
+  - `simple`: 1 regra (sim/não);
+  - `combined`: múltiplas regras com `AND`/`OR`;
+  - `multi_branch`: múltiplas rotas com primeira regra verdadeira;
+  - `ai`: escolha de rota via persona IA + fallback;
+  - fallback com `default_next_node_id` quando aplicável.
+
+### `conversa`
+
+- Status: `Sem função de negócio`
+- Frontend: node visual com edição de conteúdo no painel.
+- Backend: não possui lógica específica; cai no fluxo genérico (`next_node_id`).
+
+### `funcao`
+
+- Status: `Sem função de negócio`
+- Frontend: node visual.
+- Backend: sem execução específica; apenas encadeamento.
+
+### `transferir_chamada`
+
+- Status: `Sem função de negócio`
+- Frontend: node visual.
+- Backend: sem integração/ação de telefonia implementada no executor.
+
+### `digitar_tecla`
+
+- Status: `Sem função de negócio`
+- Frontend: node visual.
+- Backend: não interpreta DTMF/entrada de tecla no executor atual.
+
+### `divisao_logica`
+
+- Status: `Parcial`
+- Frontend:
+  - possui handles `true/false` e conexões visuais;
+  - compartilha parte da mecânica de conexões com `decisao`.
+- Backend:
+  - não existe branch específica para `divisao_logica` no executor;
+  - funciona apenas como nó genérico (`next_node_id`).
+- Observação:
+  - hoje a decisão real está concentrada no node `decisao`.
+
+### `transferir_agente`
+
+- Status: `Sem função de negócio`
+- Frontend: node visual.
+- Backend: sem lógica de roteamento para agente/fila no executor.
+
+### `sms`
+
+- Status: `Sem função de negócio`
+- Frontend: node visual.
+- Backend: sem envio de SMS no executor.
+
+### `extrair_variavel`
+
+- Status: `Sem função de negócio`
+- Frontend: node visual.
+- Backend: não há parser/extração implementada no executor.
+
+### `mcp`
+
+- Status: `Sem função de negócio`
+- Frontend: node visual.
+- Backend: sem chamada MCP dedicada no executor atual.
+
+### `capturar_entrada`
+
+- Status: `Sem função de negócio`
+- Frontend: node visual.
+- Backend: não captura input externo/interativo no executor atual.
+
+### `encerramento`
+
+- Status: `Parcial`
+- Frontend: node de término visual (somente entrada).
+- Backend: não tem branch específica; encerra na prática quando não há `next_node_id`.
+
+## Conclusão objetiva
+
+Nodes com execução de negócio real hoje:
+
+- `inicio`
+- `mensagem`
+- `chamada_api`
+- `decisao`
+
+Todos os demais estão com foco principal em modelagem visual e ainda precisam de implementação dedicada no executor para refletirem o comportamento esperado de produto.
+
+## Proposta de adequação (prioridade)
+
+1. Definir quais nodes serão oficialmente suportados na fase atual (evitar catálogo grande sem execução).
+2. Para os nodes fora de escopo imediato:
+   - ocultar da paleta, ou
+   - marcar como "em breve".
+3. Implementar em ondas, começando por maior impacto operacional:
+   - `capturar_entrada`
+   - `transferir_agente`
+   - `transferir_chamada`
+   - `extrair_variavel`
+4. Criar teste automatizado por node implementado no executor.
+

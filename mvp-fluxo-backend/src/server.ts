@@ -1,6 +1,7 @@
 import "dotenv/config";
 
 import { buildApp } from "./app";
+import { HOST } from "./config";
 import { testDbConnection } from "./db";
 import { testRedisConnection } from "./redis";
 
@@ -12,8 +13,8 @@ async function main() {
     await testRedisConnection();
 
     const port = Number(process.env.PORT || 3000);
-    await app.listen({ port, host: "0.0.0.0" });
-    console.log(`API rodando em http://0.0.0.0:${port}`);
+    await app.listen({ port, host: HOST });
+    console.log(`API rodando em http://${HOST}:${port}`);
   } catch (err) {
     app.log.error(err);
     await app.close();

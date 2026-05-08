@@ -13,6 +13,7 @@ function required(name: string): string {
 }
 
 export const JWT_SECRET = required("JWT_SECRET");
+export const HOST = process.env.HOST?.trim() || "0.0.0.0";
 
 export const PG_HOST = required("PG_HOST");
 export const PG_PORT = parseInt(process.env.PG_PORT || "5432", 10);
@@ -54,4 +55,26 @@ export function resolveLoginTenantId(bodyTenantId?: string): string | null {
   }
   const def = process.env.DEFAULT_LOGIN_TENANT_ID?.trim();
   return def || null;
+}
+
+/** Versão da Graph API para WhatsApp Cloud (ex.: v21.0). */
+export const WHATSAPP_GRAPH_API_VERSION =
+  process.env.WHATSAPP_GRAPH_API_VERSION?.trim() || "v21.0";
+
+/** Webhook Cloud API — token de verificação (GET hub.verify_token). Opcional até usar webhooks. */
+export function getWhatsAppWebhookVerifyToken(): string | undefined {
+  return process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN?.trim();
+}
+
+/** Segredo do app Meta para validar `X-Hub-Signature-256` no POST do webhook. */
+export function getWhatsAppAppSecret(): string | undefined {
+  return (
+    process.env.WHATSAPP_APP_SECRET?.trim() ||
+    process.env.META_APP_SECRET?.trim()
+  );
+}
+
+/** Apenas desenvolvimento: não valida assinatura (nunca use em produção). */
+export function shouldSkipWhatsAppSignatureVerify(): boolean {
+  return process.env.WHATSAPP_SKIP_SIGNATURE_VERIFY === "true";
 }

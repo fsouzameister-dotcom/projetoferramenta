@@ -1,9 +1,16 @@
-import Fastify from "fastify";
+import Fastify, { type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import * as jwt from "jsonwebtoken";
 import * as bcrypt from "bcrypt";
 
-import { JWT_SECRET, getCorsOrigin, resolveLoginTenantId } from "./config";
+import {
+  JWT_SECRET,
+  getCorsOrigin,
+  getWhatsAppAppSecret,
+  getWhatsAppWebhookVerifyToken,
+  resolveLoginTenantId,
+  shouldSkipWhatsAppSignatureVerify,
+} from "./config";
 import { pool } from "./db";
 import {
   ApiError,
@@ -13,8 +20,16 @@ import {
   sendSuccess,
   successEnvelopeSchema,
 } from "./http";
-import { updateAgentMessageStatusByProvider } from "./agent-conversations";
+import {
+  recordInboundWhatsAppMessage,
+  updateAgentMessageStatusByProvider,
+} from "./agent-conversations";
 import protectedRoutes from "./routes/protected.routes";
+import { resolveTenantByWhatsAppPhoneNumberId } from "./whatsapp-channels";
+import {
+  parseWhatsAppWebhookPayload,
+  verifyWhatsAppWebhookSignature,
+} from "./whatsapp-cloud-api";
 
 export type BuildAppOptions = {
   /** Em testes, desliga logs ruidosos */
@@ -31,6 +46,21 @@ export async function buildApp(options: BuildAppOptions = {}) {
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "x-tenant-id"],
   });
+
+  app.removeContentTypeParser("application/json");
+  app.addContentTypeParser(
+    "application/json",
+    { parseAs: "buffer", bodyLimit: 10 * 1024 * 1024 },
+    function (request: FastifyRequest, body: Buffer, done) {
+      try {
+        (request as FastifyRequest & { rawBody?: Buffer }).rawBody = body;
+        const json: unknown = JSON.parse(body.toString("utf8"));
+        done(null, json);
+      } catch (err) {
+        done(err as Error, undefined);
+      }
+    }
+  );
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ApiError) {
@@ -255,6 +285,68 @@ export async function buildApp(options: BuildAppOptions = {}) {
       return sendSuccess(request, reply, { updated: Boolean(updated) });
     }
   );
+
+  app.get("/webhooks/whatsapp", async (request, reply) => {
+    const verify = getWhatsAppWebhookVerifyToken();
+    if (!verify) {
+      return reply.code(503).send("Webhook verify token não configurado");
+    }
+    const q = request.query as Record<string, string | undefined>;
+    if (
+      q["hub.mode"] === "subscribe" &&
+      q["hub.verify_token"] === verify &&
+      typeof q["hub.challenge"] === "string"
+    ) {
+      return reply.code(200).send(q["hub.challenge"]);
+    }
+    return reply.code(403).send("Forbidden");
+  });
+
+  app.post("/webhooks/whatsapp", async (request, reply) => {
+    const raw = (request as FastifyRequest & { rawBody?: Buffer }).rawBody;
+    const appSecret = getWhatsAppAppSecret();
+    if (!shouldSkipWhatsAppSignatureVerify()) {
+      if (!appSecret || !raw) {
+        return reply.code(500).send({ ok: false });
+      }
+      const sig = request.headers["x-hub-signature-256"];
+      const sigStr = typeof sig === "string" ? sig : undefined;
+      if (!verifyWhatsAppWebhookSignature(raw, sigStr, appSecret)) {
+        return reply.code(403).send({ ok: false });
+      }
+    }
+
+    const events = parseWhatsAppWebhookPayload(request.body);
+    for (const ev of events) {
+      const resolved = await resolveTenantByWhatsAppPhoneNumberId(ev.phoneNumberId);
+      if (!resolved) continue;
+
+      if (ev.kind === "inbound_text") {
+        const ts = ev.timestampSec
+          ? new Date(ev.timestampSec * 1000).toISOString()
+          : new Date().toISOString();
+        await recordInboundWhatsAppMessage({
+          tenantId: resolved.tenantId,
+          providerMessageId: ev.messageId,
+          fromWaId: ev.fromWaId,
+          textBody: ev.textBody,
+          contactName: ev.contactName,
+          timestampIso: ts,
+        });
+      } else if (ev.kind === "status") {
+        await updateAgentMessageStatusByProvider({
+          tenantId: resolved.tenantId,
+          providerMessageId: ev.messageId,
+          deliveryStatus: ev.status,
+          errorCode:
+            ev.errors?.[0]?.code !== undefined ? String(ev.errors[0].code) : undefined,
+          errorDescription: ev.errors?.[0]?.title ?? undefined,
+        });
+      }
+    }
+
+    return reply.code(200).send({ ok: true });
+  });
 
   await app.register(protectedRoutes, { prefix: "/api" });
   await app.ready();
