@@ -164,6 +164,8 @@ Importante:
 
 ## WhatsApp Cloud API - canal direto Meta (Fase 1)
 
+Roteiro completo passo a passo (incl. VPS sem `.git` em `/opt/mvp-fluxo-backend`, ordem das credenciais Meta): **`DEPLOY_WHATSAPP_VPS_COMPLETO.md`** na raiz do repositório.
+
 Esta secao cobre a configuracao e o deploy do canal WhatsApp via Cloud API direta
 (adapter `whatsapp_cloud_api`, Opcao B - credenciais coladas pelo admin).
 
