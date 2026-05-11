@@ -3,15 +3,7 @@ import cors from "@fastify/cors";
 import * as jwt from "jsonwebtoken";
 import * as bcrypt from "bcrypt";
 
-import {
-  JWT_SECRET,
-  getCorsOrigin,
-  getWhatsAppAppSecret,
-  getWhatsAppWebhookVerifyToken,
-  resolveLoginTenantId,
-  shouldSkipTwilioSignatureVerify,
-  shouldSkipWhatsAppSignatureVerify,
-} from "./config";
+import { JWT_SECRET, getCorsOrigin, resolveLoginTenantId } from "./config";
 import { pool } from "./db";
 import {
   ApiError,
@@ -32,6 +24,12 @@ import {
   verifyWhatsAppWebhookSignature,
 } from "./whatsapp-cloud-api";
 import { verifyTwilioWebhookSignature } from "./whatsapp-twilio-api";
+import {
+  resolveMetaAppSecret,
+  resolveMetaWebhookVerifyToken,
+  resolveShouldSkipTwilioSignatureVerify,
+  resolveShouldSkipWhatsAppSignatureVerify,
+} from "./server-whatsapp-settings";
 
 export type BuildAppOptions = {
   /** Em testes, desliga logs ruidosos */
@@ -333,7 +331,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   );
 
   app.get("/webhooks/whatsapp", async (request, reply) => {
-    const verify = getWhatsAppWebhookVerifyToken();
+    const verify = await resolveMetaWebhookVerifyToken();
     if (!verify) {
       return reply.code(503).send("Webhook verify token não configurado");
     }
@@ -350,8 +348,8 @@ export async function buildApp(options: BuildAppOptions = {}) {
 
   app.post("/webhooks/whatsapp", async (request, reply) => {
     const raw = (request as FastifyRequest & { rawBody?: Buffer }).rawBody;
-    const appSecret = getWhatsAppAppSecret();
-    if (!shouldSkipWhatsAppSignatureVerify()) {
+    const appSecret = await resolveMetaAppSecret();
+    if (!(await resolveShouldSkipWhatsAppSignatureVerify())) {
       if (!appSecret || !raw) {
         return reply.code(500).send({ ok: false });
       }
@@ -411,7 +409,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
     const fullUrl = publicUrlFromRequest(request);
     const sig = request.headers["x-twilio-signature"];
     const sigStr = typeof sig === "string" ? sig : undefined;
-    if (!shouldSkipTwilioSignatureVerify()) {
+    if (!(await resolveShouldSkipTwilioSignatureVerify())) {
       if (
         !verifyTwilioWebhookSignature({
           authToken: resolved.authToken,
@@ -469,7 +467,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
     const fullUrl = publicUrlFromRequest(request);
     const sig = request.headers["x-twilio-signature"];
     const sigStr = typeof sig === "string" ? sig : undefined;
-    if (!shouldSkipTwilioSignatureVerify()) {
+    if (!(await resolveShouldSkipTwilioSignatureVerify())) {
       if (
         !verifyTwilioWebhookSignature({
           authToken: resolved.authToken,

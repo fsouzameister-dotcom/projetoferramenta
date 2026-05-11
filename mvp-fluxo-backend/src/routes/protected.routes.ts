@@ -36,6 +36,10 @@ import {
   updateWhatsAppChannelLabel,
 } from "../whatsapp-channels";
 import {
+  getServerWhatsAppSettingsPublic,
+  upsertServerWhatsAppSettings,
+} from "../server-whatsapp-settings";
+import {
   AgentConversationRuleError,
   appendAgentMessage,
   closeAgentConversation,
@@ -741,6 +745,116 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           500,
           ERROR_CODES.whatsapp.WHATSAPP_CHANNEL_DELETE_FAILED,
           "Erro ao remover canal WhatsApp"
+        );
+      }
+    }
+  );
+
+  const serverWhatsAppSettingsSchema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["meta", "flags"],
+    properties: {
+      meta: {
+        type: "object",
+        additionalProperties: false,
+        required: ["webhookVerifyTokenConfigured", "appSecretConfigured"],
+        properties: {
+          webhookVerifyTokenConfigured: { type: "boolean" },
+          appSecretConfigured: { type: "boolean" },
+        },
+      },
+      flags: {
+        type: "object",
+        additionalProperties: false,
+        required: ["whatsappSkipSignatureVerify", "twilioSkipSignatureVerify"],
+        properties: {
+          whatsappSkipSignatureVerify: { type: "boolean" },
+          twilioSkipSignatureVerify: { type: "boolean" },
+        },
+      },
+    },
+  } as const;
+
+  fastify.get(
+    "/whatsapp/server-settings",
+    {
+      schema: {
+        response: {
+          200: successEnvelopeSchema(serverWhatsAppSettingsSchema),
+          403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+          500: errorEnvelopeSchema([ERROR_CODES.whatsapp.WHATSAPP_SERVER_SETTINGS_GET_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      ensureAdminAccess(request.user?.role_name);
+      try {
+        const data = await getServerWhatsAppSettingsPublic();
+        return sendSuccess(request, reply, data);
+      } catch (error) {
+        request.log.error(error);
+        throw new ApiError(
+          500,
+          ERROR_CODES.whatsapp.WHATSAPP_SERVER_SETTINGS_GET_FAILED,
+          "Erro ao carregar configurações globais do WhatsApp"
+        );
+      }
+    }
+  );
+
+  fastify.patch<{
+    Body: {
+      metaWebhookVerifyToken?: string;
+      metaAppSecret?: string;
+      whatsappSkipSignatureVerify?: boolean;
+      twilioSkipSignatureVerify?: boolean;
+    };
+  }>(
+    "/whatsapp/server-settings",
+    {
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            metaWebhookVerifyToken: { type: "string" },
+            metaAppSecret: { type: "string" },
+            whatsappSkipSignatureVerify: { type: "boolean" },
+            twilioSkipSignatureVerify: { type: "boolean" },
+          },
+        },
+        response: {
+          200: successEnvelopeSchema({
+            type: "object",
+            additionalProperties: false,
+            required: ["success"],
+            properties: {
+              success: { type: "boolean" },
+            },
+          }),
+          403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+          500: errorEnvelopeSchema([ERROR_CODES.whatsapp.WHATSAPP_SERVER_SETTINGS_UPDATE_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      ensureAdminAccess(request.user?.role_name);
+      const body = request.body;
+      try {
+        await upsertServerWhatsAppSettings({
+          metaWebhookVerifyToken: body.metaWebhookVerifyToken,
+          metaAppSecret: body.metaAppSecret,
+          whatsappSkipSignatureVerify: body.whatsappSkipSignatureVerify,
+          twilioSkipSignatureVerify: body.twilioSkipSignatureVerify,
+        });
+        return sendSuccess(request, reply, { success: true });
+      } catch (error) {
+        request.log.error(error);
+        throw new ApiError(
+          500,
+          ERROR_CODES.whatsapp.WHATSAPP_SERVER_SETTINGS_UPDATE_FAILED,
+          "Erro ao salvar configurações globais do WhatsApp"
         );
       }
     }

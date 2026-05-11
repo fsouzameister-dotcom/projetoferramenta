@@ -79,6 +79,17 @@ async function copyToClipboard(text: string): Promise<boolean> {
   }
 }
 
+type ServerWhatsAppSettings = {
+  meta: {
+    webhookVerifyTokenConfigured: boolean;
+    appSecretConfigured: boolean;
+  };
+  flags: {
+    whatsappSkipSignatureVerify: boolean;
+    twilioSkipSignatureVerify: boolean;
+  };
+};
+
 export default function WhatsAppAdmin() {
   const apiOrigin = getApiOrigin();
   const metaWebhookUrl = `${apiOrigin}/webhooks/whatsapp`;
@@ -102,6 +113,14 @@ export default function WhatsAppAdmin() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [copyHint, setCopyHint] = useState<string | null>(null);
 
+  const [serverSettings, setServerSettings] = useState<ServerWhatsAppSettings | null>(null);
+  const [loadingServerSettings, setLoadingServerSettings] = useState(true);
+  const [savingServerSettings, setSavingServerSettings] = useState(false);
+  const [serverMetaVerifyToken, setServerMetaVerifyToken] = useState("");
+  const [serverMetaAppSecret, setServerMetaAppSecret] = useState("");
+  const [flagSkipMetaSig, setFlagSkipMetaSig] = useState(false);
+  const [flagSkipTwilioSig, setFlagSkipTwilioSig] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -115,9 +134,25 @@ export default function WhatsAppAdmin() {
     }
   }, []);
 
+  const loadServerSettings = useCallback(async () => {
+    setLoadingServerSettings(true);
+    try {
+      const res = await api.get("/whatsapp/server-settings");
+      const data = unwrapApiData<ServerWhatsAppSettings>(res.data);
+      setServerSettings(data);
+      setFlagSkipMetaSig(data.flags.whatsappSkipSignatureVerify);
+      setFlagSkipTwilioSig(data.flags.twilioSkipSignatureVerify);
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Erro ao carregar configurações globais do WhatsApp"));
+    } finally {
+      setLoadingServerSettings(false);
+    }
+  }, []);
+
   useEffect(() => {
     void load();
-  }, [load]);
+    void loadServerSettings();
+  }, [load, loadServerSettings]);
 
   const flashCopy = async (text: string) => {
     const ok = await copyToClipboard(text);
@@ -126,6 +161,29 @@ export default function WhatsAppAdmin() {
   };
 
   const selectedOption = CHANNEL_OPTIONS.find((o) => o.id === selectedChannelId);
+
+  const onSaveServerSettings = async (e: FormEvent) => {
+    e.preventDefault();
+    setSavingServerSettings(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await api.patch("/whatsapp/server-settings", {
+        metaWebhookVerifyToken: serverMetaVerifyToken.trim() || undefined,
+        metaAppSecret: serverMetaAppSecret.trim() || undefined,
+        whatsappSkipSignatureVerify: flagSkipMetaSig,
+        twilioSkipSignatureVerify: flagSkipTwilioSig,
+      });
+      setServerMetaVerifyToken("");
+      setServerMetaAppSecret("");
+      setNotice("Configurações globais salvas no servidor.");
+      await loadServerSettings();
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Erro ao salvar configurações globais"));
+    } finally {
+      setSavingServerSettings(false);
+    }
+  };
 
   const onConnectSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -249,6 +307,92 @@ export default function WhatsAppAdmin() {
           {notice}
         </div>
       )}
+
+      <section className="mt-6 bg-white rounded-xl border border-slate-300 p-6 text-sm text-gray-800">
+        <h2 className="text-lg font-semibold text-gray-900">Configuração global (Meta webhooks)</h2>
+        <p className="text-xs text-gray-600 mt-1 max-w-3xl">
+          Estes valores ficam no <strong>banco de dados</strong> (cifrados) e substituem{" "}
+          <span className="font-mono">WHATSAPP_WEBHOOK_VERIFY_TOKEN</span> e{" "}
+          <span className="font-mono">WHATSAPP_APP_SECRET</span> do <span className="font-mono">.env</span> quando
+          preenchidos aqui — não é necessário alterar código para trocar esses segredos.{" "}
+          <strong>Credenciais por canal</strong> (WABA / Twilio por número) continuam em{" "}
+          <strong>Nova conexão</strong> abaixo.
+        </p>
+        {loadingServerSettings ? (
+          <p className="mt-4 text-gray-500">Carregando configurações…</p>
+        ) : (
+          <form onSubmit={onSaveServerSettings} className="mt-4 space-y-4 max-w-xl">
+            <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-gray-600">
+              <span>
+                Verify token:{" "}
+                <strong className={serverSettings?.meta.webhookVerifyTokenConfigured ? "text-emerald-700" : "text-amber-700"}>
+                  {serverSettings?.meta.webhookVerifyTokenConfigured ? "configurado" : "não configurado"}
+                </strong>
+              </span>
+              <span>
+                App Secret:{" "}
+                <strong className={serverSettings?.meta.appSecretConfigured ? "text-emerald-700" : "text-amber-700"}>
+                  {serverSettings?.meta.appSecretConfigured ? "configurado" : "não configurado"}
+                </strong>
+              </span>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1" htmlFor="srv-verify">
+                Novo verify token (Meta GET webhook)
+              </label>
+              <input
+                id="srv-verify"
+                type="password"
+                autoComplete="off"
+                className="w-full border rounded-lg px-3 py-2 text-gray-900 font-mono text-xs"
+                placeholder="Deixe em branco para manter o atual"
+                value={serverMetaVerifyToken}
+                onChange={(e) => setServerMetaVerifyToken(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1" htmlFor="srv-secret">
+                Novo App Secret (Meta assinatura POST)
+              </label>
+              <input
+                id="srv-secret"
+                type="password"
+                autoComplete="off"
+                className="w-full border rounded-lg px-3 py-2 text-gray-900 font-mono text-xs"
+                placeholder="Deixe em branco para manter o atual"
+                value={serverMetaAppSecret}
+                onChange={(e) => setServerMetaAppSecret(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2 border-t border-gray-100 pt-3">
+              <p className="text-xs text-amber-800 font-medium">Apenas desenvolvimento / diagnóstico</p>
+              <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={flagSkipMetaSig}
+                  onChange={(e) => setFlagSkipMetaSig(e.target.checked)}
+                />
+                Não validar assinatura Meta (<span className="font-mono">X-Hub-Signature-256</span>)
+              </label>
+              <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={flagSkipTwilioSig}
+                  onChange={(e) => setFlagSkipTwilioSig(e.target.checked)}
+                />
+                Não validar assinatura Twilio (<span className="font-mono">X-Twilio-Signature</span>)
+              </label>
+            </div>
+            <button
+              type="submit"
+              disabled={savingServerSettings}
+              className="bg-slate-800 text-white px-4 py-2 rounded-lg text-sm hover:bg-slate-900 disabled:opacity-50"
+            >
+              {savingServerSettings ? "Salvando…" : "Salvar configuração global"}
+            </button>
+          </form>
+        )}
+      </section>
 
       <section className="mt-6 bg-slate-900/60 border border-slate-700 rounded-xl p-5 text-sm text-gray-200">
         <h2 className="text-base font-semibold text-white mb-2">Webhooks e variáveis do servidor</h2>

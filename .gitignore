@@ -1,0 +1,7 @@
+# Bundles e artefatos locais de backup
+backups/
+
+# Ambiente (nunca commitar)
+.env
+.env.*
+!.env.example
