@@ -1041,3 +1041,57 @@ Objetivo: avançar em paralelo nas trilhas de operação, WhatsApp Meta e IA, se
    - templates aprovados sincronizados via API (lista para o seletor de retomada),
    - upload e recepção de mídia (texto → áudio/imagem/documento),
    - seleção de número outbound por conversa quando houver mais de um.
+
+---
+
+## Checkpoint de sessão (2026-05-11)
+
+### Objetivo
+
+Evoluir a área admin de WhatsApp (configuração e governança) e registrar lições de deploy na VPS.
+
+### Backend
+
+- `whatsapp-channels.ts`:
+  - `updateWhatsAppChannelLabel(tenantId, channelId, label)` — atualiza rótulo com escopo por tenant.
+  - `deleteWhatsAppChannel(tenantId, channelId)` — remove conta do canal (CASCADE em segredos e números).
+- Rotas em `protected.routes.ts` (prefixo `/api`, já com auth):
+  - `PATCH /api/whatsapp/channels/:channelId` — body `{ label }` (1–200 caracteres).
+  - `DELETE /api/whatsapp/channels/:channelId`.
+- `http.ts`: códigos `WHATSAPP_CHANNEL_NOT_FOUND`, `WHATSAPP_CHANNEL_UPDATE_FAILED`, `WHATSAPP_CHANNEL_DELETE_FAILED`.
+
+### Frontend
+
+- `api/client.ts`: export `getApiOrigin()` — mesma origem de `VITE_API_URL` (sem barra final), para health e URLs públicas.
+- `pages/WhatsAppAdmin.tsx`:
+  - seção **Webhook e variáveis do servidor**: base da API, URL `…/webhooks/whatsapp` com botão copiar, checklist (env, proxy `/webhooks/`, Meta, campo `messages`, cadastro nomeado), referência aos runbooks;
+  - **nome do canal obrigatório** no formulário (mínimo 2 caracteres no envio);
+  - lista de canais com **Renomear** (inline) e **Remover** (confirmação).
+
+### Documentação
+
+- `RUNBOOK_OPERACAO.md` e `DEPLOY_WHATSAPP_VPS_COMPLETO.md`: deploy do frontend deve usar o **`DocumentRoot` real** do VirtualHost do app (na VPS atual: **`/var/www/app`**, não `/var/www/html`); comando sugerido de verificação com `grep ServerName/DocumentRoot` em `sites-enabled`.
+
+### Deploy na VPS — lições registradas
+
+1. **`/opt/mvp-fluxo-backend` sem `.git`**: não usar `git pull` ali; fluxo recomendado: clone em `/opt/build/projetoferramenta`, `rsync` do código para `/opt/mvp-fluxo-backend` (excluir `.env`, `node_modules`, `dist`), `npm ci` + `npm run build`, `systemctl restart mvp-backend`.
+2. **Frontend (Vite 8)**: build exige **Node 20.19+** na máquina que roda `npm run build`; Node 18 quebra o Vite.
+3. **Publicação estática**: após `npm run build`, `rsync` do `dist/` para o diretório do **VirtualHost de `app.`** (ex.: `rsync -av --delete dist/ /var/www/app/`).
+
+### Comandos de retomada rápida (VPS)
+
+```bash
+ssh root@173.214.173.110
+# Atualizar clone, sincronizar backend, build e serviço
+cd /opt/build/projetoferramenta && git pull origin master
+rsync -av --delete --exclude='.env' --exclude='node_modules' --exclude='dist' \
+  /opt/build/projetoferramenta/mvp-fluxo-backend/ /opt/mvp-fluxo-backend/
+cd /opt/mvp-fluxo-backend && npm ci && npm run build && systemctl restart mvp-backend
+# Frontend (Node 20+)
+cd /opt/build/projetoferramenta/mvp-fluxo-frontend
+echo 'VITE_API_URL=https://api.clienton.com.br' > .env.production
+npm ci && npm run build
+rsync -av --delete dist/ /var/www/app/
+```
+
+*(Confirmar `DocumentRoot` do app antes do último `rsync`.)*

@@ -78,3 +78,8 @@ export function getWhatsAppAppSecret(): string | undefined {
 export function shouldSkipWhatsAppSignatureVerify(): boolean {
   return process.env.WHATSAPP_SKIP_SIGNATURE_VERIFY === "true";
 }
+
+/** Apenas desenvolvimento: não valida X-Twilio-Signature (nunca use em produção). */
+export function shouldSkipTwilioSignatureVerify(): boolean {
+  return process.env.TWILIO_SKIP_SIGNATURE_VERIFY === "true";
+}

@@ -170,10 +170,10 @@ Esperado: HTTP `200` e JSON com `data.status` = `ok`.
 
 ## Parte D — Frontend (build + publicação)
 
-Confira onde o Apache serve os estáticos (neste projeto costuma ser `/var/www/html`):
+Confira onde o Apache serve o **app** (subdomínio tipo `app.clienton.com.br`). O `DocumentRoot` pode ser `/var/www/app` e **não** `/var/www/html`:
 
 ```bash
-ls -la /var/www/html | head
+grep -R "ServerName\\|DocumentRoot" /etc/apache2/sites-enabled/
 ```
 
 Build do frontend a partir do clone:
@@ -183,10 +183,10 @@ cd /opt/build/projetoferramenta/mvp-fluxo-frontend
 echo 'VITE_API_URL=https://api.clienton.com.br' > .env.production
 npm ci
 npm run build
-rsync -av --delete dist/ /var/www/html/
+rsync -av --delete dist/ /var/www/app/
 ```
 
-*(Se o domínio da API for outro, troque `VITE_API_URL`.)*
+*(Troque `/var/www/app/` pelo `DocumentRoot` real do seu VirtualHost do app. Se o domínio da API for outro, troque `VITE_API_URL`.)*
 
 ---
 

@@ -30,7 +30,10 @@ import {
 } from "../users";
 import {
   createWhatsAppChannelOptionB,
+  createWhatsAppChannelTwilio,
+  deleteWhatsAppChannel,
   listWhatsAppChannels,
+  updateWhatsAppChannelLabel,
 } from "../whatsapp-channels";
 import {
   AgentConversationRuleError,
@@ -142,6 +145,15 @@ const personaIdParamSchema = {
   required: ["personaId"],
   properties: {
     personaId: { type: "string", minLength: 1 },
+  },
+} as const;
+
+const whatsappChannelIdParamSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["channelId"],
+  properties: {
+    channelId: { type: "string", minLength: 1 },
   },
 } as const;
 
@@ -564,6 +576,172 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
         if (error instanceof ApiError) throw error;
         const msg = error instanceof Error ? error.message : "Erro ao registrar canal WhatsApp";
         throw new ApiError(400, ERROR_CODES.common.VALIDATION_ERROR, msg);
+      }
+    }
+  );
+
+  fastify.post<{
+    Body: {
+      label?: string;
+      accountSid: string;
+      authToken: string;
+      fromWhatsApp: string;
+    };
+  }>(
+    "/whatsapp/channels/twilio",
+    {
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["accountSid", "authToken", "fromWhatsApp"],
+          properties: {
+            label: { type: "string" },
+            accountSid: { type: "string", minLength: 32 },
+            authToken: { type: "string", minLength: 8 },
+            fromWhatsApp: { type: "string", minLength: 8 },
+          },
+        },
+        response: {
+          201: successEnvelopeSchema({
+            type: "object",
+            additionalProperties: false,
+            required: ["channelId", "phoneNumberId"],
+            properties: {
+              channelId: { type: "string" },
+              phoneNumberId: { type: "string" },
+            },
+          }),
+          400: errorEnvelopeSchema([ERROR_CODES.common.VALIDATION_ERROR]),
+          403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+          500: errorEnvelopeSchema([ERROR_CODES.whatsapp.WHATSAPP_CHANNEL_CREATE_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      ensureAdminAccess(request.user?.role_name);
+      const body = request.body;
+      try {
+        const created = await createWhatsAppChannelTwilio({
+          tenantId: request.tenant.id,
+          label: body.label,
+          accountSid: body.accountSid,
+          authToken: body.authToken,
+          fromWhatsApp: body.fromWhatsApp,
+        });
+        return sendSuccess(request, reply, created, 201);
+      } catch (error) {
+        request.log.error(error);
+        if (error instanceof ApiError) throw error;
+        const msg = error instanceof Error ? error.message : "Erro ao registrar canal Twilio";
+        throw new ApiError(400, ERROR_CODES.common.VALIDATION_ERROR, msg);
+      }
+    }
+  );
+
+  fastify.patch<{
+    Params: { channelId: string };
+    Body: { label: string };
+  }>(
+    "/whatsapp/channels/:channelId",
+    {
+      schema: {
+        params: whatsappChannelIdParamSchema,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["label"],
+          properties: {
+            label: { type: "string", minLength: 1, maxLength: 200 },
+          },
+        },
+        response: {
+          200: successEnvelopeSchema({
+            type: "object",
+            additionalProperties: false,
+            required: ["success"],
+            properties: {
+              success: { type: "boolean" },
+            },
+          }),
+          400: errorEnvelopeSchema([ERROR_CODES.common.VALIDATION_ERROR]),
+          403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+          404: errorEnvelopeSchema([ERROR_CODES.whatsapp.WHATSAPP_CHANNEL_NOT_FOUND]),
+          500: errorEnvelopeSchema([ERROR_CODES.whatsapp.WHATSAPP_CHANNEL_UPDATE_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      ensureAdminAccess(request.user?.role_name);
+      try {
+        await updateWhatsAppChannelLabel(
+          request.tenant.id,
+          request.params.channelId,
+          request.body.label
+        );
+        return sendSuccess(request, reply, { success: true });
+      } catch (error) {
+        request.log.error(error);
+        if (error instanceof Error && error.message === "CANAL_NAO_ENCONTRADO") {
+          throw new ApiError(
+            404,
+            ERROR_CODES.whatsapp.WHATSAPP_CHANNEL_NOT_FOUND,
+            "Canal WhatsApp não encontrado"
+          );
+        }
+        if (error instanceof Error && error.message.includes("label")) {
+          throw new ApiError(400, ERROR_CODES.common.VALIDATION_ERROR, error.message);
+        }
+        throw new ApiError(
+          500,
+          ERROR_CODES.whatsapp.WHATSAPP_CHANNEL_UPDATE_FAILED,
+          "Erro ao atualizar canal WhatsApp"
+        );
+      }
+    }
+  );
+
+  fastify.delete<{
+    Params: { channelId: string };
+  }>(
+    "/whatsapp/channels/:channelId",
+    {
+      schema: {
+        params: whatsappChannelIdParamSchema,
+        response: {
+          200: successEnvelopeSchema({
+            type: "object",
+            additionalProperties: false,
+            required: ["success"],
+            properties: {
+              success: { type: "boolean" },
+            },
+          }),
+          403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+          404: errorEnvelopeSchema([ERROR_CODES.whatsapp.WHATSAPP_CHANNEL_NOT_FOUND]),
+          500: errorEnvelopeSchema([ERROR_CODES.whatsapp.WHATSAPP_CHANNEL_DELETE_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      ensureAdminAccess(request.user?.role_name);
+      try {
+        await deleteWhatsAppChannel(request.tenant.id, request.params.channelId);
+        return sendSuccess(request, reply, { success: true });
+      } catch (error) {
+        request.log.error(error);
+        if (error instanceof Error && error.message === "CANAL_NAO_ENCONTRADO") {
+          throw new ApiError(
+            404,
+            ERROR_CODES.whatsapp.WHATSAPP_CHANNEL_NOT_FOUND,
+            "Canal WhatsApp não encontrado"
+          );
+        }
+        throw new ApiError(
+          500,
+          ERROR_CODES.whatsapp.WHATSAPP_CHANNEL_DELETE_FAILED,
+          "Erro ao remover canal WhatsApp"
+        );
       }
     }
   );

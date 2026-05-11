@@ -1,7 +1,11 @@
 import axios from "axios";
 
-const API_ORIGIN =
-  import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? "http://localhost:3000";
+/** Origem da API (sem barra final), usada em health checks e URLs públicas como webhooks. */
+export function getApiOrigin(): string {
+  return import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? "http://localhost:3000";
+}
+
+const API_ORIGIN = getApiOrigin();
 
 const api = axios.create({
   baseURL: `${API_ORIGIN}/api`,

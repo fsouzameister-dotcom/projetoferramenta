@@ -15,7 +15,7 @@ Este runbook cobre operacao basica de producao para:
 - Backend env: `/opt/mvp-fluxo-backend/.env`
 - Backend service: `mvp-backend`
 - Stack Docker: `/opt/mvp-fluxo/docker-compose.yml`
-- Frontend publicado: `/var/www/html` (estado atual)
+- Frontend publicado: conferir `DocumentRoot` do VirtualHost de `app.*` (ex.: `/var/www/app`; **não** usar `/var/www/html` se o Apache do app apontar para outro diretório)
 - Backups SQL: `/opt/backups/postgres`
 - Script backup: `/usr/local/bin/backup_mvp_pg.sh`
 
@@ -285,8 +285,9 @@ Sintomas comuns:
 cd /opt/mvp-fluxo-backend && git pull origin master && npm ci && npm run build
 cd /opt/mvp-fluxo-frontend && git pull origin master && npm ci && npm run build
 
-# 2. Publicar frontend (estrategia atual: copia da pasta dist para /var/www/html)
-rsync -a --delete dist/ /var/www/html/
+# 2. Publicar frontend (destino = DocumentRoot do app, ex. app.clienton.com.br)
+# Confirmar: grep -R "ServerName\\|DocumentRoot" /etc/apache2/sites-enabled/
+rsync -a --delete dist/ /var/www/app/
 
 # 3. Reiniciar backend (aplica novas tabelas via ensureSchema)
 systemctl restart mvp-backend

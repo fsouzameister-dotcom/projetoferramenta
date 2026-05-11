@@ -9,6 +9,7 @@ import {
   getWhatsAppAppSecret,
   getWhatsAppWebhookVerifyToken,
   resolveLoginTenantId,
+  shouldSkipTwilioSignatureVerify,
   shouldSkipWhatsAppSignatureVerify,
 } from "./config";
 import { pool } from "./db";
@@ -25,16 +26,37 @@ import {
   updateAgentMessageStatusByProvider,
 } from "./agent-conversations";
 import protectedRoutes from "./routes/protected.routes";
-import { resolveTenantByWhatsAppPhoneNumberId } from "./whatsapp-channels";
+import { resolveTenantByTwilioWebhook, resolveTenantByWhatsAppPhoneNumberId } from "./whatsapp-channels";
 import {
   parseWhatsAppWebhookPayload,
   verifyWhatsAppWebhookSignature,
 } from "./whatsapp-cloud-api";
+import { verifyTwilioWebhookSignature } from "./whatsapp-twilio-api";
 
 export type BuildAppOptions = {
   /** Em testes, desliga logs ruidosos */
   logger?: boolean;
 };
+
+function publicUrlFromRequest(request: FastifyRequest): string {
+  const xfProto = request.headers["x-forwarded-proto"];
+  const proto =
+    typeof xfProto === "string" ? xfProto.split(",")[0].trim() : "http";
+  const host = request.headers.host ?? "localhost";
+  return `${proto}://${host}${request.url}`;
+}
+
+function mapTwilioMessageStatus(
+  raw: string | undefined
+): "sending" | "sent" | "delivered" | "read" | "failed" | null {
+  const s = (raw ?? "").toLowerCase();
+  if (["queued", "accepted", "sending", "scheduled"].includes(s)) return "sending";
+  if (s === "sent") return "sent";
+  if (s === "delivered") return "delivered";
+  if (s === "read") return "read";
+  if (["undelivered", "failed", "canceled", "cancelled"].includes(s)) return "failed";
+  return null;
+}
 
 export async function buildApp(options: BuildAppOptions = {}) {
   const app = Fastify({
@@ -56,6 +78,30 @@ export async function buildApp(options: BuildAppOptions = {}) {
         (request as FastifyRequest & { rawBody?: Buffer }).rawBody = body;
         const json: unknown = JSON.parse(body.toString("utf8"));
         done(null, json);
+      } catch (err) {
+        done(err as Error, undefined);
+      }
+    }
+  );
+
+  app.addContentTypeParser(
+    "application/x-www-form-urlencoded",
+    { parseAs: "string", bodyLimit: 2 * 1024 * 1024 },
+    function (request: FastifyRequest, body: string, done) {
+      try {
+        const url = request.url ?? "";
+        if (!url.startsWith("/webhooks/twilio")) {
+          return done(
+            new Error("Content-Type application/x-www-form-urlencoded só é aceito em /webhooks/twilio"),
+            undefined
+          );
+        }
+        const params = new URLSearchParams(body);
+        const obj: Record<string, string> = {};
+        params.forEach((v, k) => {
+          obj[k] = v;
+        });
+        done(null, obj);
       } catch (err) {
         done(err as Error, undefined);
       }
@@ -344,6 +390,110 @@ export async function buildApp(options: BuildAppOptions = {}) {
         });
       }
     }
+
+    return reply.code(200).send({ ok: true });
+  });
+
+  /** Mensagens recebidas (Twilio → "Quando uma mensagem chegar"). */
+  app.post("/webhooks/twilio/messages", async (request, reply) => {
+    const params = request.body as Record<string, string>;
+    const accountSid = params.AccountSid?.trim();
+    const to = params.To?.trim() ?? "";
+    if (!accountSid || !to) {
+      return reply.code(400).send({ ok: false });
+    }
+
+    const resolved = await resolveTenantByTwilioWebhook(accountSid, to);
+    if (!resolved) {
+      return reply.code(404).send({ ok: false });
+    }
+
+    const fullUrl = publicUrlFromRequest(request);
+    const sig = request.headers["x-twilio-signature"];
+    const sigStr = typeof sig === "string" ? sig : undefined;
+    if (!shouldSkipTwilioSignatureVerify()) {
+      if (
+        !verifyTwilioWebhookSignature({
+          authToken: resolved.authToken,
+          fullUrl,
+          params,
+          signatureHeader: sigStr,
+        })
+      ) {
+        return reply.code(403).send({ ok: false });
+      }
+    }
+
+    const from = params.From?.trim();
+    const messageSid = params.MessageSid?.trim();
+    const body = params.Body ?? "";
+    if (!from || !messageSid) {
+      return reply.code(400).send({ ok: false });
+    }
+    if (!body.trim()) {
+      return reply.code(200).send({ ok: true, skipped: true });
+    }
+
+    await recordInboundWhatsAppMessage({
+      tenantId: resolved.tenantId,
+      providerMessageId: messageSid,
+      fromWaId: from.replace(/^whatsapp:/i, ""),
+      textBody: body,
+      contactName: undefined,
+      timestampIso: new Date().toISOString(),
+    });
+
+    return reply.code(200).send({ ok: true });
+  });
+
+  /** Status de entrega (Twilio → URL de callback de status). */
+  app.post("/webhooks/twilio/status", async (request, reply) => {
+    const params = request.body as Record<string, string>;
+    const accountSid = params.AccountSid?.trim();
+    const messageSid = params.MessageSid?.trim();
+    const statusRaw = params.MessageStatus ?? params.SmsStatus;
+    if (!accountSid || !messageSid) {
+      return reply.code(400).send({ ok: false });
+    }
+
+    const to = params.To?.trim() ?? "";
+    const from = params.From?.trim() ?? "";
+    let resolved =
+      (to && (await resolveTenantByTwilioWebhook(accountSid, to))) ||
+      (from && (await resolveTenantByTwilioWebhook(accountSid, from))) ||
+      null;
+    if (!resolved) {
+      return reply.code(404).send({ ok: false });
+    }
+
+    const fullUrl = publicUrlFromRequest(request);
+    const sig = request.headers["x-twilio-signature"];
+    const sigStr = typeof sig === "string" ? sig : undefined;
+    if (!shouldSkipTwilioSignatureVerify()) {
+      if (
+        !verifyTwilioWebhookSignature({
+          authToken: resolved.authToken,
+          fullUrl,
+          params,
+          signatureHeader: sigStr,
+        })
+      ) {
+        return reply.code(403).send({ ok: false });
+      }
+    }
+
+    const mapped = mapTwilioMessageStatus(statusRaw);
+    if (!mapped) {
+      return reply.code(200).send({ ok: true, ignored: true });
+    }
+
+    await updateAgentMessageStatusByProvider({
+      tenantId: resolved.tenantId,
+      providerMessageId: messageSid,
+      deliveryStatus: mapped,
+      errorCode: params.ErrorCode?.trim() || undefined,
+      errorDescription: params.ErrorMessage?.trim() || undefined,
+    });
 
     return reply.code(200).send({ ok: true });
   });

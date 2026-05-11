@@ -1,6 +1,11 @@
 import { pool } from "./db";
-import { getOutboundWhatsAppContext } from "./whatsapp-channels";
+import {
+  getOutboundWhatsAppContext,
+  WHATSAPP_PROVIDER_CLOUD,
+  WHATSAPP_PROVIDER_TWILIO,
+} from "./whatsapp-channels";
 import { sendWhatsAppTextMessage } from "./whatsapp-cloud-api";
+import { sendTwilioWhatsAppTextMessage } from "./whatsapp-twilio-api";
 
 export type AgentConversationStatus = "em_espera" | "em_andamento" | "historico";
 export type AgentMessageType = "text" | "contact" | "location";
@@ -571,12 +576,23 @@ export async function appendAgentMessage(
   }
 
   if (useWhatsApp && waCtx && outboundMessageId) {
-    const sendResult = await sendWhatsAppTextMessage({
-      phoneNumberId: waCtx.phoneNumberId,
-      accessToken: waCtx.accessToken,
-      toDigits: customerPhone,
-      textBody: normalizedText ?? "",
-    });
+    const sendResult =
+      waCtx.provider === WHATSAPP_PROVIDER_TWILIO
+        ? await sendTwilioWhatsAppTextMessage({
+            accountSid: waCtx.accountSid,
+            authToken: waCtx.authToken,
+            fromE164: waCtx.fromE164,
+            toDigits: customerPhone,
+            textBody: normalizedText ?? "",
+          })
+        : waCtx.provider === WHATSAPP_PROVIDER_CLOUD
+          ? await sendWhatsAppTextMessage({
+              phoneNumberId: waCtx.phoneNumberId,
+              accessToken: waCtx.accessToken,
+              toDigits: customerPhone,
+              textBody: normalizedText ?? "",
+            })
+          : { ok: false as const, message: "Provedor WhatsApp desconhecido" };
     if (sendResult.ok) {
       await patchAgentMessageWhatsAppDelivery({
         tenantId,
