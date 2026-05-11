@@ -112,6 +112,8 @@ export default function WhatsAppAdmin() {
   const [savingEditId, setSavingEditId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [copyHint, setCopyHint] = useState<string | null>(null);
+  /** Diagnóstico: qual bundle JS o browser carregou (deve mudar após cada deploy). */
+  const [entryScriptSrc, setEntryScriptSrc] = useState<string>("");
 
   const [serverSettings, setServerSettings] = useState<ServerWhatsAppSettings | null>(null);
   const [loadingServerSettings, setLoadingServerSettings] = useState(true);
@@ -153,6 +155,11 @@ export default function WhatsAppAdmin() {
     void load();
     void loadServerSettings();
   }, [load, loadServerSettings]);
+
+  useEffect(() => {
+    const el = document.querySelector('script[type="module"][src]') as HTMLScriptElement | null;
+    setEntryScriptSrc(el?.getAttribute("src")?.trim() || "(não encontrado)");
+  }, []);
 
   const flashCopy = async (text: string) => {
     const ok = await copyToClipboard(text);
@@ -295,6 +302,9 @@ export default function WhatsAppAdmin() {
       </p>
       <p className="text-xs text-gray-400 mt-1">
         Envio automático: se existir Meta e Twilio no mesmo tenant, a Meta tem prioridade na fila atual do backend.
+      </p>
+      <p className="text-[10px] text-slate-500 mt-2 font-mono break-all" title="Se após deploy esta linha não mudar, o servidor ou CDN ainda entrega build antigo.">
+        UI multicanal · bundle: {entryScriptSrc || "…"}
       </p>
 
       {error && (
@@ -733,6 +743,14 @@ export default function WhatsAppAdmin() {
           )}
         </div>
       </div>
+
+      <p className="mt-8 text-[10px] text-slate-600 max-w-3xl leading-relaxed">
+        Se você <strong className="text-slate-400">não</strong> vê o bloco &quot;Configuração global&quot;, o dropdown
+        &quot;Canal&quot; e &quot;Nova conexão&quot;, faça deploy de novo o diretório <span className="font-mono">dist/</span>{" "}
+        para o mesmo <span className="font-mono">DocumentRoot</span> do Apache do app e confira se não há outro
+        virtual host servindo este domínio. No servidor:{" "}
+        <span className="font-mono">curl -s https://app.clienton.com.br/ | grep script</span>
+      </p>
     </div>
   );
 }
