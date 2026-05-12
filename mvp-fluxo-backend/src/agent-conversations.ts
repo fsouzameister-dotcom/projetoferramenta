@@ -428,7 +428,7 @@ export async function recordInboundWhatsAppMessage(input: {
     } else {
       const created = await client.query<{ id: string }>(
         `INSERT INTO agent_conversations (tenant_id, contact_name, phone, status, tags, lifecycle_status)
-         VALUES ($1, $2, $3, 'em_andamento', '[]'::jsonb, 'open')
+         VALUES ($1, $2, $3, 'em_espera', '[]'::jsonb, 'open')
          RETURNING id`,
         [input.tenantId, input.contactName?.trim() || displayPhone, displayPhone]
       );
