@@ -1,4 +1,4 @@
-import Fastify, { type FastifyRequest } from "fastify";
+import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import * as jwt from "jsonwebtoken";
 import * as bcrypt from "bcrypt";
@@ -44,6 +44,26 @@ function publicUrlFromRequest(request: FastifyRequest): string {
   return `${proto}://${host}${request.url}`;
 }
 
+/** TwiML mínimo; sem declaração XML (menos ruído com alguns parsers Twilio). */
+const TWILIO_EMPTY_TWIML = "<Response/>";
+
+/**
+ * Webhook de mensagem recebida: a Twilio trata a resposta como TwiML.
+ * Erros 4xx/5xx com corpo “estranho” ou sem Content-Type geram 12300/11200.
+ * Estratégia: **sempre 200** + `text/xml` + TwiML vazio; falhas só em log.
+ */
+function twilioInboundAck(reply: FastifyReply) {
+  return reply
+    .code(200)
+    .header("Content-Type", "text/xml; charset=utf-8")
+    .send(TWILIO_EMPTY_TWIML);
+}
+
+/** Status callback: não é TwiML; Twilio aceita 200 + texto curto. */
+function twilioStatusAck(reply: FastifyReply) {
+  return reply.code(200).header("Content-Type", "text/plain; charset=utf-8").send("OK");
+}
+
 function mapTwilioMessageStatus(
   raw: string | undefined
 ): "sending" | "sent" | "delivered" | "read" | "failed" | null {
@@ -87,13 +107,6 @@ export async function buildApp(options: BuildAppOptions = {}) {
     { parseAs: "string", bodyLimit: 2 * 1024 * 1024 },
     function (request: FastifyRequest, body: string, done) {
       try {
-        const url = request.url ?? "";
-        if (!url.startsWith("/webhooks/twilio")) {
-          return done(
-            new Error("Content-Type application/x-www-form-urlencoded só é aceito em /webhooks/twilio"),
-            undefined
-          );
-        }
         const params = new URLSearchParams(body);
         const obj: Record<string, string> = {};
         params.forEach((v, k) => {
@@ -394,106 +407,123 @@ export async function buildApp(options: BuildAppOptions = {}) {
 
   /** Mensagens recebidas (Twilio → "Quando uma mensagem chegar"). */
   app.post("/webhooks/twilio/messages", async (request, reply) => {
-    const params = request.body as Record<string, string>;
-    const accountSid = params.AccountSid?.trim();
-    const to = params.To?.trim() ?? "";
-    if (!accountSid || !to) {
-      return reply.code(400).send({ ok: false });
-    }
-
-    const resolved = await resolveTenantByTwilioWebhook(accountSid, to);
-    if (!resolved) {
-      return reply.code(404).send({ ok: false });
-    }
-
-    const fullUrl = publicUrlFromRequest(request);
-    const sig = request.headers["x-twilio-signature"];
-    const sigStr = typeof sig === "string" ? sig : undefined;
-    if (!(await resolveShouldSkipTwilioSignatureVerify())) {
-      if (
-        !verifyTwilioWebhookSignature({
-          authToken: resolved.authToken,
-          fullUrl,
-          params,
-          signatureHeader: sigStr,
-        })
-      ) {
-        return reply.code(403).send({ ok: false });
+    try {
+      const params = request.body as Record<string, string>;
+      const accountSid = params.AccountSid?.trim();
+      const to = params.To?.trim() ?? "";
+      if (!accountSid || !to) {
+        request.log.warn({ msg: "twilio_messages_missing_account_or_to" });
+        return twilioInboundAck(reply);
       }
-    }
 
-    const from = params.From?.trim();
-    const messageSid = params.MessageSid?.trim();
-    const body = params.Body ?? "";
-    if (!from || !messageSid) {
-      return reply.code(400).send({ ok: false });
-    }
-    if (!body.trim()) {
-      return reply.code(200).send({ ok: true, skipped: true });
-    }
+      const resolved = await resolveTenantByTwilioWebhook(accountSid, to);
+      if (!resolved) {
+        request.log.warn({ msg: "twilio_messages_unknown_channel", accountSid, to });
+        return twilioInboundAck(reply);
+      }
 
-    await recordInboundWhatsAppMessage({
-      tenantId: resolved.tenantId,
-      providerMessageId: messageSid,
-      fromWaId: from.replace(/^whatsapp:/i, ""),
-      textBody: body,
-      contactName: undefined,
-      timestampIso: new Date().toISOString(),
-    });
+      const fullUrl = publicUrlFromRequest(request);
+      const sig = request.headers["x-twilio-signature"];
+      const sigStr = typeof sig === "string" ? sig : undefined;
+      if (!(await resolveShouldSkipTwilioSignatureVerify())) {
+        if (
+          !verifyTwilioWebhookSignature({
+            authToken: resolved.authToken,
+            fullUrl,
+            params,
+            signatureHeader: sigStr,
+          })
+        ) {
+          request.log.warn({ msg: "twilio_messages_invalid_signature" });
+          return twilioInboundAck(reply);
+        }
+      }
 
-    return reply.code(200).send({ ok: true });
+      const from = params.From?.trim();
+      const messageSid = params.MessageSid?.trim();
+      const body = params.Body ?? "";
+      if (!from || !messageSid) {
+        request.log.warn({ msg: "twilio_messages_missing_from_or_sid" });
+        return twilioInboundAck(reply);
+      }
+      if (!body.trim()) {
+        return twilioInboundAck(reply);
+      }
+
+      await recordInboundWhatsAppMessage({
+        tenantId: resolved.tenantId,
+        providerMessageId: messageSid,
+        fromWaId: from.replace(/^whatsapp:/i, ""),
+        textBody: body,
+        contactName: undefined,
+        timestampIso: new Date().toISOString(),
+      });
+
+      return twilioInboundAck(reply);
+    } catch (err) {
+      request.log.error({ msg: "twilio_messages_handler_error", err });
+      return twilioInboundAck(reply);
+    }
   });
 
   /** Status de entrega (Twilio → URL de callback de status). */
   app.post("/webhooks/twilio/status", async (request, reply) => {
-    const params = request.body as Record<string, string>;
-    const accountSid = params.AccountSid?.trim();
-    const messageSid = params.MessageSid?.trim();
-    const statusRaw = params.MessageStatus ?? params.SmsStatus;
-    if (!accountSid || !messageSid) {
-      return reply.code(400).send({ ok: false });
-    }
-
-    const to = params.To?.trim() ?? "";
-    const from = params.From?.trim() ?? "";
-    let resolved =
-      (to && (await resolveTenantByTwilioWebhook(accountSid, to))) ||
-      (from && (await resolveTenantByTwilioWebhook(accountSid, from))) ||
-      null;
-    if (!resolved) {
-      return reply.code(404).send({ ok: false });
-    }
-
-    const fullUrl = publicUrlFromRequest(request);
-    const sig = request.headers["x-twilio-signature"];
-    const sigStr = typeof sig === "string" ? sig : undefined;
-    if (!(await resolveShouldSkipTwilioSignatureVerify())) {
-      if (
-        !verifyTwilioWebhookSignature({
-          authToken: resolved.authToken,
-          fullUrl,
-          params,
-          signatureHeader: sigStr,
-        })
-      ) {
-        return reply.code(403).send({ ok: false });
+    try {
+      const params = request.body as Record<string, string>;
+      const accountSid = params.AccountSid?.trim();
+      const messageSid = params.MessageSid?.trim();
+      const statusRaw = params.MessageStatus ?? params.SmsStatus;
+      if (!accountSid || !messageSid) {
+        request.log.warn({ msg: "twilio_status_missing_fields" });
+        return twilioStatusAck(reply);
       }
+
+      const to = params.To?.trim() ?? "";
+      const from = params.From?.trim() ?? "";
+      let resolved =
+        (to && (await resolveTenantByTwilioWebhook(accountSid, to))) ||
+        (from && (await resolveTenantByTwilioWebhook(accountSid, from))) ||
+        null;
+      if (!resolved) {
+        request.log.warn({ msg: "twilio_status_unknown_channel", accountSid, to, from });
+        return twilioStatusAck(reply);
+      }
+
+      const fullUrl = publicUrlFromRequest(request);
+      const sig = request.headers["x-twilio-signature"];
+      const sigStr = typeof sig === "string" ? sig : undefined;
+      if (!(await resolveShouldSkipTwilioSignatureVerify())) {
+        if (
+          !verifyTwilioWebhookSignature({
+            authToken: resolved.authToken,
+            fullUrl,
+            params,
+            signatureHeader: sigStr,
+          })
+        ) {
+          request.log.warn({ msg: "twilio_status_invalid_signature" });
+          return twilioStatusAck(reply);
+        }
+      }
+
+      const mapped = mapTwilioMessageStatus(statusRaw);
+      if (!mapped) {
+        return twilioStatusAck(reply);
+      }
+
+      await updateAgentMessageStatusByProvider({
+        tenantId: resolved.tenantId,
+        providerMessageId: messageSid,
+        deliveryStatus: mapped,
+        errorCode: params.ErrorCode?.trim() || undefined,
+        errorDescription: params.ErrorMessage?.trim() || undefined,
+      });
+
+      return twilioStatusAck(reply);
+    } catch (err) {
+      request.log.error({ msg: "twilio_status_handler_error", err });
+      return twilioStatusAck(reply);
     }
-
-    const mapped = mapTwilioMessageStatus(statusRaw);
-    if (!mapped) {
-      return reply.code(200).send({ ok: true, ignored: true });
-    }
-
-    await updateAgentMessageStatusByProvider({
-      tenantId: resolved.tenantId,
-      providerMessageId: messageSid,
-      deliveryStatus: mapped,
-      errorCode: params.ErrorCode?.trim() || undefined,
-      errorDescription: params.ErrorMessage?.trim() || undefined,
-    });
-
-    return reply.code(200).send({ ok: true });
   });
 
   await app.register(protectedRoutes, { prefix: "/api" });
