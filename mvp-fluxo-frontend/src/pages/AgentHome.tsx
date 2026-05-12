@@ -53,6 +53,13 @@ type AiHintPayload = {
 };
 
 type AgentDataMode = "mock" | "api";
+
+/** Em produção, sem variável explícita, usa API real (evita deploy só com VITE_API_URL). */
+function resolveAgentDataMode(): AgentDataMode {
+  const raw = import.meta.env.VITE_AGENT_DATA_MODE as string | undefined;
+  if (raw === "api" || raw === "mock") return raw;
+  return import.meta.env.PROD ? "api" : "mock";
+}
 const emojiOptions = ["😀", "😁", "😂", "😉", "😍", "👍", "🙏", "🎯", "🚀", "✅", "🔥", "💬"];
 const templateOptions = [
   { name: "Boas-vindas", params: ["nome"] },
@@ -152,7 +159,7 @@ function deliveryClass(delivery?: MessageDelivery) {
 export default function AgentHome() {
   const userName = localStorage.getItem("user_name") || "Agente";
   const simulationEnabled = localStorage.getItem(getSimulationFeatureKey()) === "true";
-  const envMode = (import.meta.env.VITE_AGENT_DATA_MODE as AgentDataMode | undefined) || "mock";
+  const envMode = resolveAgentDataMode();
   const [resolvedMode, setResolvedMode] = useState<AgentDataMode>(envMode);
   const [modeNotice, setModeNotice] = useState<string | null>(null);
   const [loadingConversations, setLoadingConversations] = useState(envMode === "api");
