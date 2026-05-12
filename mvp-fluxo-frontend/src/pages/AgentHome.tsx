@@ -847,8 +847,12 @@ export default function AgentHome() {
                     {activeConversation?.lifecycle_status === "closed_manual"
                       ? "Encerrado manualmente"
                       : activeConversation?.lifecycle_status === "closed_window"
-                      ? "Encerrado por janela Meta"
-                      : "Em atendimento"}
+                        ? "Encerrado por janela Meta"
+                        : activeConversation?.status === "historico"
+                          ? "Histórico"
+                          : activeConversation?.status === "em_espera"
+                            ? "Aguardando resposta"
+                            : "Em atendimento"}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">

@@ -10,6 +10,8 @@ BUILD_DIR="${BUILD_DIR:-/opt/build/projetoferramenta}"
 BACKEND_DST="${BACKEND_DST:-/opt/mvp-fluxo-backend}"
 FRONTEND_DST="${FRONTEND_DST:-/var/www/app}"
 VITE_API_URL="${VITE_API_URL:-https://api.clienton.com.br}"
+# Painel do agente: "api" lê conversas reais da API (recomendado em produção).
+VITE_AGENT_DATA_MODE="${VITE_AGENT_DATA_MODE:-api}"
 APP_PUBLIC_URL="${APP_PUBLIC_URL:-https://app.clienton.com.br}"
 SYSTEMD_UNIT="${SYSTEMD_UNIT:-mvp-backend}"
 
@@ -45,7 +47,10 @@ curl -sS -i "http://127.0.0.1:3000/health" | head -n 5
 
 echo "==> 7) Build frontend + publicar"
 cd "${BUILD_DIR}/mvp-fluxo-frontend"
-echo "VITE_API_URL=${VITE_API_URL}" > .env.production
+{
+  echo "VITE_API_URL=${VITE_API_URL}"
+  echo "VITE_AGENT_DATA_MODE=${VITE_AGENT_DATA_MODE:-api}"
+} > .env.production
 npm ci
 npm run build
 rsync -av --delete dist/ "${FRONTEND_DST}/"
@@ -57,3 +62,4 @@ echo "    curl -sS ${APP_PUBLIC_URL}/ | grep -o 'assets/index-[^\"]*\\.js' | hea
 echo "No browser: Admin → WhatsApp → linha 'bundle:' deve bater com o ficheiro em ${FRONTEND_DST}/assets/"
 echo "Se alterou Apache, rode: apachectl configtest && systemctl reload apache2"
 echo "Cache do index: ver scripts/apache-app-no-cache-html.conf no repositório."
+echo "404 em /admin/... ao abrir URL direta: ver scripts/apache-app-spa-fallback.conf (mod_rewrite)."
