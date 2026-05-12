@@ -455,7 +455,7 @@ export async function recordInboundWhatsAppMessage(input: {
        SET last_customer_message_at = $1::timestamptz,
            window_expires_at = ($1::timestamptz + interval '24 hours'),
            lifecycle_status = 'open',
-           status = 'em_andamento',
+           status = CASE WHEN status = 'historico' THEN 'em_espera' ELSE status END,
            contact_name = COALESCE($3, contact_name),
            updated_at = now()
        WHERE id = $2 AND tenant_id = $4`,
