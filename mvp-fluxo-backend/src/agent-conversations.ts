@@ -317,6 +317,8 @@ export async function createAgentConversation(input: {
   phone: string;
   queue?: string;
   templateName?: string;
+  /** Twilio Content SID (HX…), quando aplicável. */
+  templateContentSid?: string;
   templateParams?: Record<string, string>;
   botName?: string;
 }): Promise<AgentConversation> {
@@ -335,6 +337,7 @@ export async function createAgentConversation(input: {
         JSON.stringify({
           queue: input.queue ?? null,
           templateName: input.templateName ?? null,
+          templateContentSid: input.templateContentSid?.trim() || null,
           templateParams: input.templateParams ?? {},
         }),
       ]
@@ -352,10 +355,13 @@ export async function createAgentConversation(input: {
           input.tenantId,
           `template-${Date.now()}`,
           normalizedBotName,
-          `${normalizedBotName}:\nTemplate "${input.templateName}" enviado`,
+          `${normalizedBotName}:\nTemplate "${input.templateName}" enviado${
+            input.templateContentSid?.trim() ? ` (${input.templateContentSid.trim()})` : ""
+          }`,
           JSON.stringify({
             queue: input.queue ?? null,
             templateName: input.templateName,
+            templateContentSid: input.templateContentSid?.trim() || null,
             templateParams: input.templateParams ?? {},
           }),
         ]
@@ -636,6 +642,7 @@ export async function updateAgentMessageStatus(input: {
     if (msg.rows.length === 0) return null;
     conversationId = msg.rows[0].conversation_id;
 
+    const persistError = input.deliveryStatus === "failed";
     await client.query(
       `UPDATE agent_messages
        SET delivery_status = $1,
@@ -644,8 +651,8 @@ export async function updateAgentMessageStatus(input: {
        WHERE id = $4 AND tenant_id = $5`,
       [
         input.deliveryStatus,
-        input.errorCode ?? null,
-        input.errorDescription ?? null,
+        persistError ? input.errorCode ?? null : null,
+        persistError ? input.errorDescription ?? null : null,
         input.messageId,
         input.tenantId,
       ]

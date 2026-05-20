@@ -9,6 +9,93 @@ function basicAuthHeader(accountSid: string, authToken: string): string {
   return `Basic ${Buffer.from(raw, "utf8").toString("base64")}`;
 }
 
+export type TwilioContentTemplateItem = {
+  contentSid: string;
+  friendlyName: string;
+  language: string | null;
+  /** Chaves alinhadas ao JSON `ContentVariables` da Twilio (ex.: `"1"`, `"2"`). */
+  variables: string[];
+};
+
+function collectTwilioPlaceholderIndices(value: unknown, acc: Set<string>): void {
+  if (typeof value === "string") {
+    const re = /\{\{(\d+)\}\}/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(value)) !== null) acc.add(m[1]!);
+    return;
+  }
+  if (value && typeof value === "object") {
+    if (Array.isArray(value)) {
+      for (const x of value) collectTwilioPlaceholderIndices(x, acc);
+    } else {
+      for (const x of Object.values(value as Record<string, unknown>)) {
+        collectTwilioPlaceholderIndices(x, acc);
+      }
+    }
+  }
+}
+
+function extractVariablesFromContentTypes(types: unknown): string[] {
+  const acc = new Set<string>();
+  collectTwilioPlaceholderIndices(types, acc);
+  return [...acc].sort((a, b) => Number(a) - Number(b));
+}
+
+type TwilioContentListMeta = {
+  next_page_url?: string | null;
+};
+
+/**
+ * Lista templates do Twilio Content API (usado com WhatsApp / ContentSid).
+ * @see https://www.twilio.com/docs/content/using-the-rest-api
+ */
+export async function fetchTwilioContentTemplates(input: {
+  accountSid: string;
+  authToken: string;
+}): Promise<TwilioContentTemplateItem[]> {
+  const auth = basicAuthHeader(input.accountSid, input.authToken);
+  const out: TwilioContentTemplateItem[] = [];
+  let url: string | null =
+    "https://content.twilio.com/v1/Content?PageSize=100";
+
+  while (url) {
+    const res = await fetch(url, { headers: { Authorization: auth } });
+    const text = await res.text();
+    let json: Record<string, unknown> = {};
+    try {
+      json = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      throw new Error(`Twilio Content: resposta inválida (${res.status})`);
+    }
+    if (!res.ok) {
+      const msg = (json?.message as string) || text.slice(0, 500);
+      throw new Error(`Twilio Content ${res.status}: ${msg}`);
+    }
+
+    const contents = json.contents as Record<string, unknown>[] | undefined;
+
+    for (const raw of contents ?? []) {
+      const sidStr = typeof raw.sid === "string" ? raw.sid : "";
+      if (!sidStr.startsWith("HX")) continue;
+      const friendly =
+        typeof raw.friendly_name === "string" ? raw.friendly_name : sidStr;
+      const lang = typeof raw.language === "string" ? raw.language : null;
+      const vars = extractVariablesFromContentTypes(raw.types);
+      out.push({
+        contentSid: sidStr,
+        friendlyName: friendly,
+        language: lang,
+        variables: vars,
+      });
+    }
+
+    const meta = json.meta as TwilioContentListMeta | undefined;
+    url = meta?.next_page_url && typeof meta.next_page_url === "string" ? meta.next_page_url : null;
+  }
+
+  return out;
+}
+
 function toWhatsAppAddress(digits: string): string {
   const d = digits.replace(/\D/g, "");
   return d.startsWith("+") ? `whatsapp:${d}` : `whatsapp:+${d}`;

@@ -1395,3 +1395,25 @@ npx tsx --test test/capturar-entrada.test.ts
 npm run build
 cd ../mvp-fluxo-frontend && npm run build
 ```
+
+---
+
+## Checkpoint deploy completo (2026-05-20) — WhatsApp + Twilio + Agent + Apache SPA
+
+### Commits no `master` (subir juntos na VPS)
+
+1. `capturar_entrada` + relatórios + `flow_response_events`
+2. WhatsApp: correção status/erro Meta (`agent-conversations`, `app`, `whatsapp-cloud-api`)
+3. Twilio Content templates (`whatsapp-twilio-api`, `whatsapp-channels`, rota agent)
+4. `AgentHome`: templates no Novo contato, exibição de erro só em `failed`
+5. `scripts/apache-app-spa-fallback.conf` — rewrite para SPA
+
+### Roteiro único na VPS
+
+Ver **`DEPLOY_COMPLETO_VPS.md`** (substitui executar os dois deploys separados).
+
+Resumo: `git clone` → `rsync` backend → `npm ci && build` → `restart mvp-backend` → build frontend → `rsync` `/var/www/app/` → (opcional) Apache rewrite → smoke Parte H do doc.
+
+### Pendência de produto (inalterada)
+
+- Envio real de template Twilio com `ContentSid` + `ContentVariables` no POST de nova conversa (hoje metadados + UI).

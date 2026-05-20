@@ -391,13 +391,20 @@ export async function buildApp(options: BuildAppOptions = {}) {
           timestampIso: ts,
         });
       } else if (ev.kind === "status") {
+        const failed = ev.status === "failed";
+        const e0 = failed ? ev.errors?.[0] : undefined;
+        const errorParts = failed
+          ? [e0?.title, e0?.message, e0?.error_data?.details].filter(
+              (x): x is string => typeof x === "string" && x.trim().length > 0
+            )
+          : [];
         await updateAgentMessageStatusByProvider({
           tenantId: resolved.tenantId,
           providerMessageId: ev.messageId,
           deliveryStatus: ev.status,
           errorCode:
-            ev.errors?.[0]?.code !== undefined ? String(ev.errors[0].code) : undefined,
-          errorDescription: ev.errors?.[0]?.title ?? undefined,
+            failed && e0?.code !== undefined ? String(e0.code) : undefined,
+          errorDescription: errorParts.length ? errorParts.join(" — ") : undefined,
         });
       }
     }

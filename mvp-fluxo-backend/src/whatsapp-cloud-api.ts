@@ -7,6 +7,14 @@ export type WhatsAppSendTextResult =
   | { ok: true; messageId: string }
   | { ok: false; message: string; code?: number; details?: string };
 
+function graphWhatsAppNumericCode(err: {
+  code?: number;
+  error_subcode?: number;
+}): number | undefined {
+  if (err.error_subcode != null) return err.error_subcode;
+  return err.code;
+}
+
 export async function sendWhatsAppTextMessage(input: {
   phoneNumberId: string;
   accessToken: string;
@@ -33,11 +41,14 @@ export async function sendWhatsAppTextMessage(input: {
 
   const json = (await res.json()) as Record<string, unknown>;
   if (!res.ok) {
-    const err = json?.error as { message?: string; code?: number } | undefined;
+    const err = json?.error as
+      | { message?: string; code?: number; error_subcode?: number }
+      | undefined;
+    const numeric = err ? graphWhatsAppNumericCode(err) : undefined;
     return {
       ok: false,
       message: err?.message ?? res.statusText ?? "Erro Graph API",
-      code: err?.code,
+      code: numeric,
       details: JSON.stringify(json),
     };
   }
@@ -67,7 +78,12 @@ export type ParsedWebhookEvent =
       messageId: string;
       status: "sent" | "delivered" | "read" | "failed";
       timestampSec: number;
-      errors?: Array<{ code?: number; title?: string }>;
+      errors?: Array<{
+        code?: number;
+        title?: string;
+        message?: string;
+        error_data?: { details?: string };
+      }>;
     };
 
 export function parseWhatsAppWebhookPayload(body: unknown): ParsedWebhookEvent[] {
@@ -101,7 +117,12 @@ export function parseWhatsAppWebhookPayload(body: unknown): ParsedWebhookEvent[]
             id?: string;
             status?: string;
             timestamp?: string;
-            errors?: Array<{ code?: number; title?: string }>;
+            errors?: Array<{
+              code?: number;
+              title?: string;
+              message?: string;
+              error_data?: { details?: string };
+            }>;
           }>
         | undefined;
 

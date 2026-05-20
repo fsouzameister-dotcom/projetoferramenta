@@ -1,5 +1,6 @@
 import { pool } from "./db";
 import { encryptSecret, decryptSecret } from "./secrets";
+import { fetchTwilioContentTemplates } from "./whatsapp-twilio-api";
 
 export const WHATSAPP_PROVIDER_CLOUD = "whatsapp_cloud_api" as const;
 export const WHATSAPP_PROVIDER_TWILIO = "twilio_whatsapp" as const;
@@ -420,4 +421,39 @@ export async function resolveTenantByTwilioWebhook(
     channelAccountId: row.channel_account_id,
     authToken: decryptSecret(row.twilio_auth_token_encrypted),
   };
+}
+
+export type TwilioContentTemplateDto = {
+  contentSid: string;
+  friendlyName: string;
+  language: string | null;
+  variables: string[];
+};
+
+/** Usa o primeiro canal Twilio do tenant (Account SID + Auth Token) para listar Content na API da Twilio. */
+export async function listTwilioContentTemplatesForTenant(
+  tenantId: string
+): Promise<TwilioContentTemplateDto[]> {
+  await ensureSchema();
+  const row = await pool.query<{
+    twilio_account_sid: string | null;
+    twilio_auth_token_encrypted: string | null;
+  }>(
+    `SELECT ws.twilio_account_sid, ws.twilio_auth_token_encrypted
+     FROM whatsapp_channel_accounts wca
+     JOIN whatsapp_channel_secrets ws ON ws.channel_account_id = wca.id
+     WHERE wca.tenant_id = $1 AND wca.provider = $2
+     ORDER BY wca.created_at ASC
+     LIMIT 1`,
+    [tenantId, WHATSAPP_PROVIDER_TWILIO]
+  );
+  const r = row.rows[0];
+  if (!r?.twilio_account_sid || !r?.twilio_auth_token_encrypted) {
+    return [];
+  }
+  const authToken = decryptSecret(r.twilio_auth_token_encrypted);
+  return fetchTwilioContentTemplates({
+    accountSid: r.twilio_account_sid,
+    authToken,
+  });
 }

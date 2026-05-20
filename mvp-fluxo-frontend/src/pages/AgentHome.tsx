@@ -42,6 +42,7 @@ type Conversation = {
   metadata?: {
     queue?: string;
     templateName?: string;
+    templateContentSid?: string;
     templateParams?: Record<string, string>;
   };
   messages: ChatMessage[];
@@ -61,11 +62,52 @@ function resolveAgentDataMode(): AgentDataMode {
   return import.meta.env.PROD ? "api" : "mock";
 }
 const emojiOptions = ["😀", "😁", "😂", "😉", "😍", "👍", "🙏", "🎯", "🚀", "✅", "🔥", "💬"];
-const templateOptions = [
-  { name: "Boas-vindas", params: ["nome"] },
-  { name: "Lembrete pagamento", params: ["nome", "vencimento", "valor"] },
-  { name: "Confirmação atendimento", params: ["protocolo"] },
+type TwilioUiTemplateOption = {
+  templateKey: string;
+  /** Sid HX… quando vem da Twilio Content API; local de demonstração não tem SID. */
+  contentSid: string | null;
+  friendlyName: string;
+  language: string | null;
+  variables: string[];
+};
+
+/** Fallback quando não há canal Twilio ou API indisponível (rótulos locais apenas). */
+const LEGACY_TEMPLATE_OPTIONS: TwilioUiTemplateOption[] = [
+  { templateKey: "legacy:boas-vindas", contentSid: null, friendlyName: "Boas-vindas", language: null, variables: ["nome"] },
+  {
+    templateKey: "legacy:lembrete",
+    contentSid: null,
+    friendlyName: "Lembrete pagamento",
+    language: null,
+    variables: ["nome", "vencimento", "valor"],
+  },
+  {
+    templateKey: "legacy:confirmacao",
+    contentSid: null,
+    friendlyName: "Confirmação atendimento",
+    language: null,
+    variables: ["protocolo"],
+  },
 ];
+
+function emptyTemplateParams(variables: string[]): Record<string, string> {
+  const o: Record<string, string> = {};
+  variables.forEach((v) => {
+    o[v] = "";
+  });
+  return o;
+}
+
+function initialNewContactFormState() {
+  const first = LEGACY_TEMPLATE_OPTIONS[0]!;
+  return {
+    contactName: "",
+    phone: "",
+    queue: "",
+    templateKey: first.templateKey,
+    templateParams: emptyTemplateParams(first.variables),
+  };
+}
 
 function getSimulationFeatureKey(): string {
   const tenantId = localStorage.getItem("tenant_id") || "default";
@@ -177,13 +219,10 @@ export default function AgentHome() {
   const [recordedAudioUrl, setRecordedAudioUrl] = useState<string | null>(null);
   const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null);
   const [showNewContactModal, setShowNewContactModal] = useState(false);
-  const [newContactForm, setNewContactForm] = useState({
-    contactName: "",
-    phone: "",
-    queue: "",
-    templateName: templateOptions[0].name,
-    templateParams: {} as Record<string, string>,
-  });
+  const [templateCatalog, setTemplateCatalog] =
+    useState<TwilioUiTemplateOption[]>(LEGACY_TEMPLATE_OPTIONS);
+  const [templateCatalogLoading, setTemplateCatalogLoading] = useState(false);
+  const [newContactForm, setNewContactForm] = useState(() => initialNewContactFormState());
   const [pendingMediaByConversation, setPendingMediaByConversation] = useState<
     Record<string, ChatMessage[]>
   >({});
@@ -231,6 +270,60 @@ export default function AgentHome() {
 
     void loadConversations();
   }, [envMode]);
+
+  useEffect(() => {
+    if (!showNewContactModal || resolvedMode !== "api") return undefined;
+    let cancelled = false;
+    setTemplateCatalogLoading(true);
+    void (async () => {
+      try {
+        const response = await api.get("/agent/twilio/content-templates");
+        const payload = unwrapApiData<
+          { contentSid: string; friendlyName: string; language: string | null; variables: string[] }[]
+        >(response.data);
+        const rows = Array.isArray(payload) ? payload : [];
+        if (cancelled) return;
+        const fromTwilio: TwilioUiTemplateOption[] = rows.map((row) => ({
+          templateKey: row.contentSid,
+          contentSid: row.contentSid,
+          friendlyName: row.friendlyName,
+          language: row.language,
+          variables: [...row.variables],
+        }));
+        const merged =
+          fromTwilio.length > 0 ? [...fromTwilio, ...LEGACY_TEMPLATE_OPTIONS] : LEGACY_TEMPLATE_OPTIONS;
+        setTemplateCatalog(merged);
+        setNewContactForm((prev) => {
+          const stillThere = merged.some((m) => m.templateKey === prev.templateKey);
+          if (stillThere) return prev;
+          const pick = merged[0]!;
+          return {
+            ...prev,
+            templateKey: pick.templateKey,
+            templateParams: emptyTemplateParams(pick.variables),
+          };
+        });
+      } catch {
+        if (!cancelled) {
+          setTemplateCatalog(LEGACY_TEMPLATE_OPTIONS);
+          setNewContactForm((prev) => {
+            if (LEGACY_TEMPLATE_OPTIONS.some((l) => l.templateKey === prev.templateKey)) return prev;
+            const pick = LEGACY_TEMPLATE_OPTIONS[0]!;
+            return {
+              ...prev,
+              templateKey: pick.templateKey,
+              templateParams: emptyTemplateParams(pick.variables),
+            };
+          });
+        }
+      } finally {
+        if (!cancelled) setTemplateCatalogLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [showNewContactModal, resolvedMode]);
 
   useEffect(() => {
     if (resolvedMode !== "api") return;
@@ -648,13 +741,16 @@ export default function AgentHome() {
       return;
     }
 
+    const selected = templateCatalog.find((t) => t.templateKey === newContactForm.templateKey);
+
     if (resolvedMode === "api") {
       try {
         const response = await api.post("/agent/conversations", {
           contactName: newContactForm.contactName.trim() || undefined,
           phone,
           queue: newContactForm.queue.trim() || undefined,
-          templateName: newContactForm.templateName || undefined,
+          templateName: selected?.friendlyName || undefined,
+          templateContentSid: selected?.contentSid || undefined,
           templateParams: newContactForm.templateParams,
           botName: "BOT",
         });
@@ -679,17 +775,20 @@ export default function AgentHome() {
       messages: [],
       metadata: {
         queue: newContactForm.queue.trim() || undefined,
-        templateName: newContactForm.templateName || undefined,
+        templateName: selected?.friendlyName,
+        templateContentSid: selected?.contentSid ?? undefined,
         templateParams: newContactForm.templateParams,
       },
     };
-    if (newContactForm.templateName) {
+    if (selected?.friendlyName) {
       newConversation.messages.push({
         id: crypto.randomUUID(),
         type: "text",
         direction: "out",
         sender_name: "BOT",
-        text: `Template "${newContactForm.templateName}" enviado`,
+        text: `Template "${selected.friendlyName}" enviado${
+          selected.contentSid ? ` (${selected.contentSid})` : ""
+        }`,
         createdAt: new Date().toLocaleTimeString("pt-BR", {
           hour: "2-digit",
           minute: "2-digit",
@@ -703,16 +802,13 @@ export default function AgentHome() {
     setShowNewContactModal(false);
   };
 
-  const handleTemplateChange = (templateName: string) => {
-    const found = templateOptions.find((t) => t.name === templateName);
-    const emptyParams: Record<string, string> = {};
-    (found?.params ?? []).forEach((param) => {
-      emptyParams[param] = "";
-    });
+  const handleTemplateChange = (templateKey: string) => {
+    const found = templateCatalog.find((t) => t.templateKey === templateKey);
+    const params = emptyTemplateParams(found?.variables ?? []);
     setNewContactForm((prev) => ({
       ...prev,
-      templateName,
-      templateParams: emptyParams,
+      templateKey,
+      templateParams: params,
     }));
   };
 
@@ -963,7 +1059,8 @@ export default function AgentHome() {
                           <span
                             className={deliveryClass(msg.delivery)}
                             title={
-                              msg.error_code || msg.error_description
+                              msg.delivery === "failed" &&
+                              (msg.error_code || msg.error_description)
                                 ? `Erro ${msg.error_code || ""} ${msg.error_description || ""}`.trim()
                                 : "Status da mensagem"
                             }
@@ -971,10 +1068,17 @@ export default function AgentHome() {
                             {deliveryLabel(msg.delivery)}
                           </span>
                         ) : null}
-                        {msg.direction === "out" && msg.error_code ? (
+                        {msg.direction === "out" &&
+                        msg.delivery === "failed" &&
+                        msg.error_code ? (
                           <span className="text-red-300"> ({msg.error_code})</span>
                         ) : null}
                       </p>
+                      {msg.direction === "out" && msg.delivery === "failed" && msg.error_description ? (
+                        <p className="text-[10px] text-red-200/90 mt-1 leading-snug border-t border-red-900/40 pt-1">
+                          {msg.error_description}
+                        </p>
+                      ) : null}
                     </div>
                   ))
                 )}
@@ -1112,6 +1216,13 @@ export default function AgentHome() {
           <div className="w-full max-w-xl bg-[#1b2540] border border-[#2f3d63] rounded-xl p-5">
             <h2 className="text-lg font-semibold text-white mb-4">Novo contato</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="md:col-span-2 flex items-center gap-2 text-[11px] text-gray-400">
+                <span>
+                  Templates carregados da Twilio Content (primeiro canal do tenant). Opções marcadas como
+                  &quot;exemplo local&quot; não enviam SID real.
+                </span>
+                {templateCatalogLoading ? <span className="text-cyan-300 whitespace-nowrap">Carregando…</span> : null}
+              </div>
               <input
                 className="bg-[#0f1a33] border border-[#314263] rounded-lg px-3 py-2 text-sm text-gray-100"
                 placeholder="Nome (opcional)"
@@ -1134,37 +1245,42 @@ export default function AgentHome() {
               />
               <select
                 className="bg-[#0f1a33] border border-[#314263] rounded-lg px-3 py-2 text-sm text-gray-100"
-                value={newContactForm.templateName}
+                value={newContactForm.templateKey}
+                disabled={templateCatalogLoading}
                 onChange={(e) => handleTemplateChange(e.target.value)}
               >
-                {templateOptions.map((tpl) => (
-                  <option key={tpl.name} value={tpl.name}>
-                    {tpl.name}
+                {templateCatalog.map((tpl) => (
+                  <option key={tpl.templateKey} value={tpl.templateKey}>
+                    {tpl.contentSid ? "" : "(exemplo) "}
+                    {tpl.friendlyName}
+                    {tpl.language ? ` — ${tpl.language}` : ""}
+                    {tpl.contentSid ? ` [${tpl.contentSid}]` : ""}
                   </option>
                 ))}
               </select>
             </div>
 
             <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-              {(templateOptions.find((t) => t.name === newContactForm.templateName)?.params ?? []).map(
-                (param) => (
-                  <input
-                    key={param}
-                    className="bg-[#0f1a33] border border-[#314263] rounded-lg px-3 py-2 text-sm text-gray-100"
-                    placeholder={`Parâmetro: ${param}`}
-                    value={newContactForm.templateParams[param] ?? ""}
-                    onChange={(e) =>
-                      setNewContactForm((prev) => ({
-                        ...prev,
-                        templateParams: {
-                          ...prev.templateParams,
-                          [param]: e.target.value,
-                        },
-                      }))
-                    }
-                  />
-                )
-              )}
+              {(
+                templateCatalog.find((t) => t.templateKey === newContactForm.templateKey)?.variables ??
+                []
+              ).map((param) => (
+                <input
+                  key={param}
+                  className="bg-[#0f1a33] border border-[#314263] rounded-lg px-3 py-2 text-sm text-gray-100"
+                  placeholder={`Parâmetro {{${param}}}`}
+                  value={newContactForm.templateParams[param] ?? ""}
+                  onChange={(e) =>
+                    setNewContactForm((prev) => ({
+                      ...prev,
+                      templateParams: {
+                        ...prev.templateParams,
+                        [param]: e.target.value,
+                      },
+                    }))
+                  }
+                />
+              ))}
             </div>
 
             <div className="mt-5 flex justify-end gap-2">
