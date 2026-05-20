@@ -22,6 +22,10 @@ import { listFlowsByTenant, createFlow, updateFlow } from "../flows";
 import { listNodesByFlow, createNode, updateNode, deleteNode } from "../nodes";
 import { executeFlow } from "../flow-executor";
 import {
+  aggregateFlowResponseOptions,
+  listFlowResponseEvents,
+} from "../flow-response-events";
+import {
   createUserForTenant,
   deleteUserForTenant,
   isAllowedRole,
@@ -32,6 +36,7 @@ import {
   createWhatsAppChannelOptionB,
   createWhatsAppChannelTwilio,
   deleteWhatsAppChannel,
+  listTwilioContentTemplatesForTenant,
   listWhatsAppChannels,
   updateWhatsAppChannelLabel,
 } from "../whatsapp-channels";
@@ -242,6 +247,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       phone: string;
       queue?: string;
       templateName?: string;
+      templateContentSid?: string;
       templateParams?: Record<string, string>;
       botName?: string;
     };
@@ -258,6 +264,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
             phone: { type: "string", minLength: 4 },
             queue: { type: "string" },
             templateName: { type: "string" },
+            templateContentSid: { type: "string" },
             templateParams: { type: "object", additionalProperties: { type: "string" } },
             botName: { type: "string" },
           },
@@ -280,6 +287,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           phone: body.phone.trim(),
           queue: body.queue?.trim() || undefined,
           templateName: body.templateName?.trim() || undefined,
+          templateContentSid: body.templateContentSid?.trim() || undefined,
           templateParams: body.templateParams ?? {},
           botName: body.botName?.trim() || undefined,
         });
@@ -1628,6 +1636,11 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       variables?: Record<string, unknown>;
       startNodeId?: string;
       maxSteps?: number;
+      userInput?: string | string[];
+      conversationId?: string;
+      phone?: string;
+      sessionId?: string;
+      persistResponses?: boolean;
     };
   }>(
     "/flows/:flowId/execute",
@@ -1641,12 +1654,22 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
             variables: { type: "object", additionalProperties: true },
             startNodeId: { type: "string", minLength: 1 },
             maxSteps: { type: "number", minimum: 1, maximum: 200 },
+            userInput: {
+              anyOf: [
+                { type: "string" },
+                { type: "array", items: { type: "string" } },
+              ],
+            },
+            conversationId: { type: "string", minLength: 1 },
+            phone: { type: "string", minLength: 1 },
+            sessionId: { type: "string", minLength: 1 },
+            persistResponses: { type: "boolean" },
           },
         },
         response: {
           200: successEnvelopeSchema({
             type: "object",
-            additionalProperties: false,
+            additionalProperties: true,
             required: [
               "flowId",
               "status",
@@ -1658,17 +1681,22 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
             ],
             properties: {
               flowId: { type: "string" },
-              status: { type: "string", enum: ["completed", "stopped"] },
+              status: {
+                type: "string",
+                enum: ["completed", "stopped", "awaiting_input"],
+              },
               stopReason: { type: "string" },
               visitedNodeIds: { type: "array", items: { type: "string" } },
               currentNodeId: { anyOf: [{ type: "string" }, { type: "null" }] },
               messages: { type: "array", items: { type: "string" } },
               variables: { type: "object", additionalProperties: true },
+              awaitingInput: { type: "object", additionalProperties: true },
+              lastResponseEventId: { type: "string" },
               trace: {
                 type: "array",
                 items: {
                   type: "object",
-                  additionalProperties: false,
+                  additionalProperties: true,
                   required: ["nodeId", "nodeType", "nodeName", "nextNodeId"],
                   properties: {
                     nodeId: { type: "string" },
@@ -1719,6 +1747,126 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           500,
           ERROR_CODES.execution.FLOW_EXECUTION_FAILED,
           "Erro ao executar fluxo"
+        );
+      }
+    }
+  );
+
+  fastify.get<{
+    Querystring: {
+      flowId?: string;
+      nodeId?: string;
+      questionKey?: string;
+      conversationId?: string;
+      from?: string;
+      to?: string;
+      limit?: number;
+    };
+  }>(
+    "/reports/flow-responses",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            flowId: { type: "string" },
+            nodeId: { type: "string" },
+            questionKey: { type: "string" },
+            conversationId: { type: "string" },
+            from: { type: "string" },
+            to: { type: "string" },
+            limit: { type: "number", minimum: 1, maximum: 500 },
+          },
+        },
+        response: {
+          200: successEnvelopeSchema({
+            type: "array",
+            items: { type: "object", additionalProperties: true },
+          }),
+          403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        },
+      },
+    },
+    async (request, reply) => {
+      ensureAdminAccess(request.user?.role_name);
+      const tenantId = request.tenant.id;
+      const q = request.query ?? {};
+      try {
+        const rows = await listFlowResponseEvents({
+          tenantId,
+          flowId: q.flowId,
+          nodeId: q.nodeId,
+          questionKey: q.questionKey,
+          conversationId: q.conversationId,
+          from: q.from,
+          to: q.to,
+          limit: q.limit,
+        });
+        return sendSuccess(request, reply, rows);
+      } catch (err) {
+        request.log.error(err);
+        throw new ApiError(
+          500,
+          ERROR_CODES.reports.FLOW_RESPONSES_LIST_FAILED,
+          "Erro ao listar respostas de fluxo"
+        );
+      }
+    }
+  );
+
+  fastify.get<{
+    Querystring: {
+      flowId?: string;
+      nodeId?: string;
+      questionKey?: string;
+      from?: string;
+      to?: string;
+    };
+  }>(
+    "/reports/flow-responses/aggregates",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            flowId: { type: "string" },
+            nodeId: { type: "string" },
+            questionKey: { type: "string" },
+            from: { type: "string" },
+            to: { type: "string" },
+          },
+        },
+        response: {
+          200: successEnvelopeSchema({
+            type: "array",
+            items: { type: "object", additionalProperties: true },
+          }),
+          403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        },
+      },
+    },
+    async (request, reply) => {
+      ensureAdminAccess(request.user?.role_name);
+      const tenantId = request.tenant.id;
+      const q = request.query ?? {};
+      try {
+        const rows = await aggregateFlowResponseOptions({
+          tenantId,
+          flowId: q.flowId,
+          nodeId: q.nodeId,
+          questionKey: q.questionKey,
+          from: q.from,
+          to: q.to,
+        });
+        return sendSuccess(request, reply, rows);
+      } catch (err) {
+        request.log.error(err);
+        throw new ApiError(
+          500,
+          ERROR_CODES.reports.FLOW_RESPONSES_AGGREGATE_FAILED,
+          "Erro ao agregar respostas de fluxo"
         );
       }
     }
@@ -1971,6 +2119,44 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
         request.log.error(error);
         if (error instanceof ApiError) throw error;
         throw new ApiError(500, ERROR_CODES.users.USER_DELETE_FAILED, "Erro ao excluir usuário");
+      }
+    }
+  );
+
+  fastify.get(
+    "/agent/twilio/content-templates",
+    {
+      schema: {
+        response: {
+          200: successEnvelopeSchema({
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["contentSid", "friendlyName", "language", "variables"],
+              properties: {
+                contentSid: { type: "string" },
+                friendlyName: { type: "string" },
+                language: { type: ["string", "null"] },
+                variables: { type: "array", items: { type: "string" } },
+              },
+            },
+          }),
+          502: errorEnvelopeSchema([ERROR_CODES.whatsapp.WHATSAPP_TWILIO_CONTENT_TEMPLATES_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      try {
+        const data = await listTwilioContentTemplatesForTenant(request.tenant.id);
+        return sendSuccess(request, reply, data);
+      } catch (error) {
+        request.log.error(error);
+        throw new ApiError(
+          502,
+          ERROR_CODES.whatsapp.WHATSAPP_TWILIO_CONTENT_TEMPLATES_FAILED,
+          error instanceof Error ? error.message : "Erro ao listar templates Twilio Content"
+        );
       }
     }
   );

@@ -120,9 +120,16 @@ Este documento consolida o que cada node faz hoje no projeto, considerando:
 
 ### `capturar_entrada`
 
-- Status: `Sem função de negócio`
-- Frontend: node visual.
-- Backend: não captura input externo/interativo no executor atual.
+- Status: `Implementado`
+- Frontend:
+  - painel com pergunta, `promptKey` (relatórios), modo (`text`, `single_choice`, `multi_choice`);
+  - opções editáveis, mínimo/máximo de seleções e variável do fluxo.
+- Backend:
+  - pausa execução com `status: awaiting_input` até receber `userInput`;
+  - valida seleções (inclui limite máximo, ex.: até 3 opções);
+  - grava variáveis (`variavel`, `variavel_labels`, `variavel_options`);
+  - persiste evento em `flow_response_events` para relatórios (`GET /api/reports/flow-responses*`).
+- Retomada: `POST /api/flows/:flowId/execute` com `startNodeId` do node de captura + `userInput`.
 
 ### `encerramento`
 
@@ -138,6 +145,7 @@ Nodes com execução de negócio real hoje:
 - `mensagem`
 - `chamada_api`
 - `decisao`
+- `capturar_entrada`
 
 Todos os demais estão com foco principal em modelagem visual e ainda precisam de implementação dedicada no executor para refletirem o comportamento esperado de produto.
 

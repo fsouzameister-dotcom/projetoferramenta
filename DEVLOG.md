@@ -1095,3 +1095,303 @@ rsync -av --delete dist/ /var/www/app/
 ```
 
 *(Confirmar `DocumentRoot` do app antes do último `rsync`.)*
+
+---
+
+## Checkpoint de sessão (2026-05-15) — retomada exata
+
+Use este bloco para continuar na **próxima sessão** sem depender do histórico do chat.
+
+### Estado do código (workspace local)
+
+- **Alterações não commitadas** na última verificação: conferir com `git status`.
+- **Ficheiro não rastreado opcional**: `scripts/apache-app-spa-fallback.conf` (Apache / SPA fallback).
+- **Antes do deploy na VPS**: `git add`, `git commit`, `git push origin master` (ou branch usada no clone `/opt/build/projetoferramenta`), depois `git pull` no servidor e fluxo `rsync` habitual.
+
+### Correções WhatsApp / entrega e UI
+
+**Backend**
+
+- `agent-conversations.ts` — `updateAgentMessageStatus`: só persiste `error_code` / `error_description` quando `delivery_status === failed'`; caso contrário limpa erro (evita “Enviada (63051)” por webhook Meta com campo `errors` em status não-failed).
+- `app.ts` — webhook `POST /webhooks/whatsapp`: só preenche erro da Meta quando `ev.status === failed'`; descrição compõe `title`, `message` e `error_data.details` quando existirem.
+- `whatsapp-cloud-api.ts` — em falha síncrona da Graph API, prioriza `error_subcode` sobre `code` ao expor código numérico ao cliente.
+
+**Frontend**
+
+- `AgentHome.tsx` — código de erro visível apenas quando `delivery === failed'`; opcionalmente mostra `error_description` por baixo em falhas.
+
+### Lista de templates Twilio Content no “Novo contato”
+
+**Backend**
+
+- `whatsapp-twilio-api.ts` — `fetchTwilioContentTemplates`: `GET https://content.twilio.com/v1/Content` (paginação), extrai SID `HX…`, nome, idioma e placeholders `{{1}}`, `{{2}}`, … dos `types`.
+- `whatsapp-channels.ts` — `listTwilioContentTemplatesForTenant`: primeiro canal **`twilio_whatsapp`** do tenant (SID + Auth Token).
+- `GET /api/agent/twilio/content-templates` — lista para o agente; falha Twilio upstream → **502**, código `WHATSAPP_TWILIO_CONTENT_TEMPLATES_FAILED` (`http.ts`).
+- `POST /api/agent/conversations` — body opcional **`templateContentSid`**; metadata da conversa e mensagem inclui `templateContentSid` quando enviado.
+
+**Frontend**
+
+- `AgentHome.tsx` — ao abrir modal Novo contato em modo API, carrega templates da rota acima; mistura templates reais com **fallback local** de 3 rótulos (marcados como exemplo); campos dinâmicos por variável (`{{n}}`); POST envia `templateName`, `templateContentSid`, `templateParams`.
+
+**Próximo passo de produto** (ainda não feito): disparar **`POST Messages` Twilio com `ContentSid` + `ContentVariables`** ao criar contato, para envio template real fora só metadados/linha na conversa.
+
+### Observações operacionais (esta sessão)
+
+- **Twilio** — Auth Token é do canal Twilio, **não** é `WHATSAPP_WEBHOOK_VERIFY_TOKEN` (só Meta Cloud API direta). Endpoint `GET /webhooks/whatsapp` pode dar **503** sem token Meta; **não bloqueia** fluxo Twilio (`/webhooks/twilio/messages` e `/status`).
+- **Erro 63051** (Twilio/Meta): “sender ou WABA locked”; painel pode mostrar **Online** — validar **log da mensagem** na Twilio e suporte se persistir.
+- **Apache API** — `ProxyPass /` para `127.0.0.1:3000` é suficiente; regras separadas `/webhooks/`, `/api/`, `/health` são redundantes se o destino for o mesmo backend.
+- **`journalctl`** — correto: `journalctl -u mvp-backend` (com **j**); qualquer diretório na VPS; grep útil: `agent/conversations|/messages|twilio`.
+- **Frontend build** — usar **`.env.production`** com `VITE_API_URL` na VPS (Node **20.19+**).
+
+### Comando local para validar antes de commit
+
+```bash
+cd c:\projetoferramenta\mvp-fluxo-backend && npm run build
+cd c:\projetoferramenta\mvp-fluxo-frontend && npm run build
+```
+
+### Próxima sessão (checklist rápido)
+
+1. `git status` / commit / push das alterações desta entrega.
+2. Deploy VPS (`DEVLOG` comandos de retomada + `DocumentRoot` `/var/www/app`).
+3. Testar **Novo contato** com template `testeclienton` e canal Twilio configurado.
+4. (Opcional) Implementar envio real de template via Twilio `ContentSid`.
+
+---
+
+## Checkpoint de sessão (2026-05-18) — deploy VPS + templates Twilio (pendente)
+
+Use este bloco para retomar o diagnóstico da **lista de templates Twilio** no modal **Novo contato** sem depender do chat.
+
+### Contexto paralelo (fora deste escopo)
+
+- Usuário em tratativa do **bloqueio Meta** (WABA/sender) em paralelo.
+- Frente **IA** adiada para sessão futura (Sprint 1 já existe no repo; ver checkpoint 2026-04-24).
+
+### O que foi feito nesta sessão (deploy produção)
+
+**Backend** (`/opt/mvp-fluxo-backend` na VPS `vps3354206`):
+
+1. `npm ci` — concluiu OK; aviso de **1 high severity** (npm audit, não bloqueia deploy).
+2. `npm run build` — OK (não registrado print, assumido antes do restart).
+3. `systemctl restart mvp-backend` — aviso: *unit file changed on disk* → executado `systemctl daemon-reload` + `restart` (procedimento correto).
+
+**Frontend** (`/opt/build/projetoferramenta/mvp-fluxo-frontend`):
+
+1. Build Vite OK (~4.35s); aviso de chunk JS > 500 kB (performance, não bloqueia).
+2. `rsync -av --delete dist/ /var/www/app/` — publicado em `/var/www/app/` (DocumentRoot correto do app).
+
+**Validação superficial**
+
+- `https://app.clienton.com.br` carrega após deploy.
+- Login e Central do Agente acessíveis.
+
+### Problema em aberto: templates Twilio não aparecem na UI
+
+**Sintoma:** em **Novo contato** → dropdown **Template**, só aparecem os 3 fallbacks locais:
+
+- Boas-vindas
+- Lembrete pagamento
+- Confirmação atendimento
+
+**Comportamento esperado quando Twilio OK:** templates reais da Content API (ex. `testeclienton`, SID `HX…`) **acima** dos 3 exemplos.
+
+**Onde a feature vive no código**
+
+- UI: `mvp-fluxo-frontend/src/pages/AgentHome.tsx` — `useEffect` ao abrir modal chama `GET /agent/twilio/content-templates` **somente se** `resolvedMode === "api"`.
+- API: `GET /api/agent/twilio/content-templates` em `protected.routes.ts` → `listTwilioContentTemplatesForTenant` (`whatsapp-channels.ts`) → `fetchTwilioContentTemplates` (`whatsapp-twilio-api.ts`).
+- Fallback: `LEGACY_TEMPLATE_OPTIONS` (3 itens) quando API falha, modo mock, ou `data: []`.
+
+### Diagnóstico tentado (sem conclusão definitiva)
+
+1. DevTools → Rede (Fetch/XHR) com modal **Novo contato** aberto — usuário **não viu** linha `content-templates` de forma clara (possível modo mock ou filtro/rede).
+2. Console: erro **`No route matches URL "/settings"`** ao clicar em **Configurações** no menu (`Sidebar.tsx` aponta `/settings` sem rota em `main.tsx`) — **não relacionado** a templates; usar `/admin/whatsapp` para canal Twilio.
+3. Lista Twilio no repositório: parte da feature pode ainda estar **só no workspace local** (conferir `git grep content-templates HEAD` antes de assumir que VPS tem o código).
+
+### Hipóteses ordenadas (para próxima sessão)
+
+| # | Hipótese | Como confirmar |
+|---|----------|----------------|
+| 1 | **Modo mock** (`resolvedMode !== "api"`) — chamada nem dispara | Faixa “Fallback para modo emulado” na Central do Agente; Rede sem `content-templates` |
+| 2 | **Canal Twilio ausente** no tenant — API 200 com `data: []` | `curl` autenticado no endpoint; psql em `whatsapp_channel_accounts` com `provider = twilio_whatsapp` |
+| 3 | **Credenciais Twilio inválidas** — 502 | Resposta `WHATSAPP_TWILIO_CONTENT_TEMPLATES_FAILED`; logs `journalctl -u mvp-backend` |
+| 4 | **Backend na VPS sem rota** — 404 | `curl` retorna 404 em `/api/agent/twilio/content-templates` |
+| 5 | **Build frontend** sem `VITE_API_URL` / modo API | `.env.production` na VPS; rebuild + `rsync` |
+
+### Comandos de diagnóstico (copiar na retomada)
+
+```bash
+# Na VPS — health
+curl -i https://api.clienton.com.br/health
+
+# Com JWT do login (substituir TOKEN)
+curl -s -H "Authorization: Bearer TOKEN" \
+  "https://api.clienton.com.br/api/agent/twilio/content-templates"
+
+# Canal Twilio no banco
+docker exec -it mvp-postgres psql -U mvp_user -d mvp_core -c \
+  "SELECT wca.tenant_id, wca.label, wca.provider, ws.twilio_account_sid IS NOT NULL AS has_sid
+   FROM whatsapp_channel_accounts wca
+   LEFT JOIN whatsapp_channel_secrets ws ON ws.channel_account_id = wca.id
+   WHERE wca.provider = 'twilio_whatsapp';"
+
+# Logs backend
+journalctl -u mvp-backend -n 100 --no-pager | grep -Ei "twilio|content-templates|template"
+```
+
+**No navegador:** `/agent` → Rede → Preservar log → Limpar → **Novo contato** → filtrar `twilio` ou `template`.
+
+**Frontend rebuild explícito (se modo API suspeito):**
+
+```bash
+cd /opt/build/projetoferramenta/mvp-fluxo-frontend
+printf '%s\n' 'VITE_API_URL=https://api.clienton.com.br' 'VITE_AGENT_DATA_MODE=api' > .env.production
+npm ci && npm run build && rsync -av --delete dist/ /var/www/app/
+```
+
+### Bug lateral registrado (menu)
+
+- `Sidebar.tsx`: item **Configurações** → `/settings` sem rota → ErrorBoundary 404.
+- Correção futura: remover link, ou criar rota (ex. redirecionar admin para `/admin/whatsapp` ou página de settings real).
+
+### Pendências de produto (inalteradas)
+
+1. Fazer lista Twilio funcionar em produção (esta sessão).
+2. Envio real de template: `POST Messages` Twilio com `ContentSid` + `ContentVariables` ao criar contato (ainda só metadados).
+3. `git status` / commit / push se alterações locais de templates ainda não estiverem no `master` usado em `/opt/build/projetoferramenta`.
+
+### Próxima sessão (checklist — templates)
+
+1. Confirmar código no servidor: `git pull` em `/opt/build/projetoferramenta` + `rsync` backend se rota `content-templates` faltar.
+2. `curl` autenticado em `/api/agent/twilio/content-templates` — anotar status e corpo.
+3. Se `data: []`, cadastrar/validar canal **twilio_whatsapp** em `/admin/whatsapp` (Account SID + Auth Token).
+4. Se mock, corrigir `VITE_AGENT_DATA_MODE=api` e conversas API 200.
+5. Retestar **Novo contato**; sucesso = ver `HX…` / `testeclienton` no dropdown.
+6. (Opcional) Corrigir rota `/settings` no menu.
+
+---
+
+## Checkpoint de sessão (2026-05-20) — `capturar_entrada` multi-escolha + relatórios
+
+### Entregas
+
+- Node **`capturar_entrada`** com modos `text`, `single_choice`, `multi_choice` (ex.: até 3 opções).
+- Executor pausa com `status: awaiting_input`; retomada via `userInput` + `startNodeId`.
+- Tabela analítica **`flow_response_events`** (criação automática via `ensureSchema` no primeiro uso).
+- APIs de relatório:
+  - `GET /api/reports/flow-responses`
+  - `GET /api/reports/flow-responses/aggregates`
+- Frontend:
+  - painel de configuração no `FlowEditor`
+  - rota **`/reports`** (Relatórios na sidebar)
+- Testes: `mvp-fluxo-backend/test/capturar-entrada.test.ts`
+- Documentação: `DOCUMENTO_NODES_FLUXO.md` atualizado (`capturar_entrada` = Implementado).
+
+### Arquivos desta entrega (para `git` / VPS)
+
+| Caminho | Papel |
+|---------|--------|
+| `mvp-fluxo-backend/src/capturar-entrada.ts` | parse, validação, prompt |
+| `mvp-fluxo-backend/src/flow-response-events.ts` | schema + persistência + agregação |
+| `mvp-fluxo-backend/src/flow-executor.ts` | branch `capturar_entrada` + `awaiting_input` |
+| `mvp-fluxo-backend/src/http.ts` | códigos `FLOW_RESPONSES_*` |
+| `mvp-fluxo-backend/src/routes/protected.routes.ts` | execute estendido + rotas `/reports/*` |
+| `mvp-fluxo-backend/test/capturar-entrada.test.ts` | testes unitários |
+| `mvp-fluxo-frontend/src/pages/FlowEditor.tsx` | UI do node |
+| `mvp-fluxo-frontend/src/components/flownodes.tsx` | preview no canvas |
+| `mvp-fluxo-frontend/src/pages/Reports.tsx` | página de relatórios |
+| `mvp-fluxo-frontend/src/main.tsx` | rota `/reports` |
+| `DOCUMENTO_NODES_FLUXO.md` | status do node |
+
+### Contrato `config` do node (exemplo multi-escolha)
+
+```json
+{
+  "prompt": "Escolha até três opções:",
+  "promptKey": "interesses_produto",
+  "inputMode": "multi_choice",
+  "minSelections": 1,
+  "maxSelections": 3,
+  "variableName": "interesses",
+  "options": [
+    { "id": "fin", "label": "Financiamento" },
+    { "id": "seg", "label": "Seguro" },
+    { "id": "srv", "label": "Serviços" }
+  ],
+  "next_node_id": "<uuid-proximo-node>"
+}
+```
+
+### Execução (API)
+
+1. **Primeira passagem** (exibe pergunta, pausa):
+
+```http
+POST /api/flows/:flowId/execute
+{ "variables": {} }
+```
+
+Resposta esperada: `status: "awaiting_input"`, `awaitingInput`, `currentNodeId`.
+
+2. **Retomada** (grava variáveis + evento para relatório):
+
+```http
+POST /api/flows/:flowId/execute
+{
+  "startNodeId": "<id-node-capturar>",
+  "userInput": ["fin", "seg"],
+  "conversationId": "<opcional>",
+  "phone": "+5511999999999"
+}
+```
+
+Variáveis no contexto: `interesses`, `interesses_labels`, `interesses_options`.
+
+### Deploy VPS — checklist (copiar na próxima subida)
+
+Repositório de build na VPS (referência): `/opt/build/projetoferramenta`. Runtime backend: `/opt/mvp-fluxo-backend`. App: `/var/www/app`.
+
+```bash
+# 1) Código
+cd /opt/build/projetoferramenta
+git pull origin master
+
+# 2) Backend
+cd mvp-fluxo-backend
+npm ci && npm run build
+rsync -av --delete dist/ node_modules/ package.json /opt/mvp-fluxo-backend/
+# (ajustar se o deploy local copia de outra forma)
+
+# 3) Frontend
+cd ../mvp-fluxo-frontend
+printf '%s\n' 'VITE_API_URL=https://api.clienton.com.br' 'VITE_AGENT_DATA_MODE=api' > .env.production
+npm ci && npm run build
+rsync -av --delete dist/ /var/www/app/
+
+# 4) Reiniciar API (cria flow_response_events no primeiro request)
+systemctl restart mvp-backend
+systemctl status mvp-backend --no-pager
+
+# 5) Smoke
+curl -sS https://api.clienton.com.br/health
+# Com JWT + x-tenant-id:
+# GET /api/reports/flow-responses/aggregates
+# POST /api/flows/:flowId/execute (awaiting_input) e retomada com userInput
+```
+
+**Banco:** não há migration SQL versionada; tabela `flow_response_events` é criada pelo backend (`CREATE TABLE IF NOT EXISTS`) ao primeiro `recordFlowResponseEvent` ou listagem de relatórios.
+
+**Permissões:** rotas `/api/reports/*` exigem perfil `admin_local`, `supervisor` ou `admin`.
+
+### Pendência pós-deploy (produto)
+
+- Integrar webhook WhatsApp para enviar lista/botões e mapear resposta inbound → `userInput` + retomada automática do fluxo (base de dados e relatórios já prontos).
+
+### Testes locais antes do push
+
+```bash
+cd mvp-fluxo-backend
+npx tsx --test test/capturar-entrada.test.ts
+npm run build
+cd ../mvp-fluxo-frontend && npm run build
+```

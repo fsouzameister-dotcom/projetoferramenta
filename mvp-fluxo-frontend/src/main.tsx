@@ -18,6 +18,7 @@ import AgentHome from "./pages/AgentHome";
 import UsersAdmin from "./pages/UsersAdmin";
 import AiAdmin from "./pages/AiAdmin";
 import WhatsAppAdmin from "./pages/WhatsAppAdmin";
+import Reports from "./pages/Reports";
 import Sidebar from "./components/Sidebar";
 
 function isSessionValid(): boolean {
@@ -151,6 +152,7 @@ const router = createBrowserRouter([
                 element: <LayoutWithSidebar />,
                 children: [
                   { path: "dashboard", element: <Dashboard /> },
+                  { path: "reports", element: <Reports /> },
                   { path: "flows", element: <Flows /> },
                   { path: "flows/new", element: <FlowForm /> },
                   { path: "flows/edit/:id", element: <FlowForm /> },

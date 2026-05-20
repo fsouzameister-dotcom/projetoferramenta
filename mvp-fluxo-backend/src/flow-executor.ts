@@ -1,3 +1,11 @@
+import {
+  buildCapturarEntradaAwaiting,
+  formatCapturarEntradaPrompt,
+  parseCapturarEntradaConfig,
+  resolveCapturarEntradaInput,
+  type CapturarEntradaAwaiting,
+} from "./capturar-entrada";
+import { recordFlowResponseEvent } from "./flow-response-events";
 import { ApiError, ERROR_CODES } from "./http";
 import { generateAiText } from "./ai";
 import { listNodesByFlow } from "./nodes";
@@ -17,6 +25,13 @@ export type ExecuteFlowInput = {
   variables?: Record<string, unknown>;
   startNodeId?: string;
   maxSteps?: number;
+  /** Resposta do usuário ao node capturar_entrada em execução */
+  userInput?: string | string[];
+  conversationId?: string;
+  phone?: string;
+  sessionId?: string;
+  /** Grava evento analítico (default: true) */
+  persistResponses?: boolean;
 };
 
 type ExecutionTraceEntry = {
@@ -29,13 +44,15 @@ type ExecutionTraceEntry = {
 
 export type ExecuteFlowResult = {
   flowId: string;
-  status: "completed" | "stopped";
+  status: "completed" | "stopped" | "awaiting_input";
   stopReason?: string;
   visitedNodeIds: string[];
   currentNodeId: string | null;
   messages: string[];
   variables: Record<string, unknown>;
   trace: ExecutionTraceEntry[];
+  awaitingInput?: CapturarEntradaAwaiting;
+  lastResponseEventId?: string;
 };
 
 function asObject(value: unknown): FlowConfig {
@@ -447,6 +464,86 @@ async function executeDecisionNode(
   };
 }
 
+async function executeCapturarEntradaNode(
+  node: FlowNode,
+  config: FlowConfig,
+  variables: Record<string, unknown>,
+  flowId: string,
+  tenantId: string,
+  input: ExecuteFlowInput
+): Promise<{
+  nextNodeId: string | null;
+  details: Record<string, unknown>;
+  awaitingInput?: CapturarEntradaAwaiting;
+  lastResponseEventId?: string;
+  capturedMessage?: string;
+}> {
+  const parsed = parseCapturarEntradaConfig(config, node.id);
+  const promptMessage = formatCapturarEntradaPrompt(parsed);
+  const hasInput = input.userInput !== undefined && input.userInput !== null;
+
+  if (!hasInput) {
+    const awaiting = buildCapturarEntradaAwaiting(node.id, parsed);
+    return {
+      nextNodeId: null,
+      awaitingInput: awaiting,
+      capturedMessage: promptMessage,
+      details: {
+        awaitingInput: true,
+        inputMode: parsed.inputMode,
+        promptKey: parsed.promptKey,
+        variableName: parsed.variableName,
+        optionsCount: parsed.options.length,
+        minSelections: parsed.minSelections,
+        maxSelections: parsed.maxSelections,
+      },
+    };
+  }
+
+  const resolved = resolveCapturarEntradaInput(parsed, input.userInput);
+  variables[resolved.variableName] = resolved.value;
+  variables[`${resolved.variableName}_labels`] = resolved.selectedOptions.map((o) => o.label);
+  variables[`${resolved.variableName}_options`] = resolved.selectedOptions;
+
+  let lastResponseEventId: string | undefined;
+  const shouldPersist = input.persistResponses !== false;
+  if (shouldPersist) {
+    const event = await recordFlowResponseEvent({
+      tenantId,
+      flowId,
+      nodeId: node.id,
+      conversationId: input.conversationId,
+      phone: input.phone,
+      sessionId: input.sessionId,
+      questionKey: resolved.promptKey,
+      promptText: resolved.prompt,
+      answerType: resolved.inputMode,
+      variableName: resolved.variableName,
+      selectedOptions: resolved.selectedOptions,
+      rawValue: Array.isArray(resolved.value) ? resolved.value.join(",") : resolved.value,
+      metadata: {
+        nodeName: node.name,
+        nodeType: node.type,
+      },
+    });
+    lastResponseEventId = event.id;
+  }
+
+  return {
+    nextNodeId: resolved.nextNodeId,
+    lastResponseEventId,
+    details: {
+      captured: true,
+      inputMode: resolved.inputMode,
+      promptKey: resolved.promptKey,
+      variableName: resolved.variableName,
+      value: resolved.value,
+      selectedOptions: resolved.selectedOptions,
+      responseEventId: lastResponseEventId ?? null,
+    },
+  };
+}
+
 export async function executeFlow(
   flowId: string,
   tenantId: string,
@@ -488,6 +585,8 @@ export async function executeFlow(
     nodes[0];
 
   let steps = 0;
+  let lastResponseEventId: string | undefined;
+  let captureInputConsumed = false;
   while (currentNode && steps < maxSteps) {
     steps += 1;
     visitedNodeIds.push(currentNode.id);
@@ -512,6 +611,48 @@ export async function executeFlow(
       const decisionResult = await executeDecisionNode(config, variables, tenantId);
       nextNodeId = decisionResult.nextNodeId;
       details = decisionResult.details;
+    } else if (currentNode.type === "capturar_entrada") {
+      const captureInput: ExecuteFlowInput = captureInputConsumed
+        ? { ...input, userInput: undefined }
+        : input;
+      const captureResult = await executeCapturarEntradaNode(
+        currentNode,
+        config,
+        variables,
+        flowId,
+        tenantId,
+        captureInput
+      );
+      if (!captureResult.awaitingInput && input.userInput !== undefined) {
+        captureInputConsumed = true;
+      }
+      if (captureResult.capturedMessage) {
+        messages.push(captureResult.capturedMessage);
+      }
+      if (captureResult.awaitingInput) {
+        trace.push({
+          nodeId: currentNode.id,
+          nodeType: currentNode.type,
+          nodeName: currentNode.name,
+          nextNodeId: null,
+          details: captureResult.details,
+        });
+        return {
+          flowId,
+          status: "awaiting_input",
+          visitedNodeIds,
+          currentNodeId: currentNode.id,
+          messages,
+          variables,
+          trace,
+          awaitingInput: captureResult.awaitingInput,
+        };
+      }
+      nextNodeId = captureResult.nextNodeId;
+      details = captureResult.details;
+      if (captureResult.lastResponseEventId) {
+        lastResponseEventId = captureResult.lastResponseEventId;
+      }
     } else {
       nextNodeId = typeof config.next_node_id === "string" ? config.next_node_id : null;
     }
@@ -533,6 +674,7 @@ export async function executeFlow(
         messages,
         variables,
         trace,
+        ...(lastResponseEventId ? { lastResponseEventId } : {}),
       };
     }
 
@@ -547,6 +689,7 @@ export async function executeFlow(
         messages,
         variables,
         trace,
+        ...(lastResponseEventId ? { lastResponseEventId } : {}),
       };
     }
   }
@@ -560,5 +703,6 @@ export async function executeFlow(
     messages,
     variables,
     trace,
+    ...(lastResponseEventId ? { lastResponseEventId } : {}),
   };
 }

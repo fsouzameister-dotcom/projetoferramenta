@@ -138,17 +138,36 @@ export const ChamadaApiNode = ({ data }: { data: any }) => (
   </div>
 );
 
-export const CapturarEntradaNode = ({ data }: { data: any }) => (
-  <div
-    className="px-4 py-3 shadow-lg rounded-lg bg-gray-900 border-2 border-lime-500 min-w-[160px] cursor-pointer hover:shadow-xl transition-shadow"
-    onClick={() => data.onSelect?.(data.id)}
-  >
-    <div className="text-xs font-bold text-lime-400 mb-1">📥 Capturar Entrada</div>
-    <div className="text-sm font-semibold text-white">{data.label}</div>
-    <Handle type="target" position={Position.Top} />
-    <Handle type="source" position={Position.Bottom} />
-  </div>
-);
+export const CapturarEntradaNode = ({ data }: { data: any }) => {
+  const mode = data.config?.inputMode || "text";
+  const optionsCount = Array.isArray(data.config?.options) ? data.config.options.length : 0;
+  const modeLabel =
+    mode === "multi_choice"
+      ? `Multi (${data.config?.minSelections ?? 1}-${data.config?.maxSelections ?? 3})`
+      : mode === "single_choice"
+        ? "Uma opção"
+        : "Texto";
+  return (
+    <div
+      className="px-4 py-3 shadow-lg rounded-lg bg-gray-900 border-2 border-lime-500 min-w-[160px] cursor-pointer hover:shadow-xl transition-shadow"
+      onClick={() => data.onSelect?.(data.id)}
+    >
+      <div className="text-xs font-bold text-lime-400 mb-1">📥 Capturar Entrada</div>
+      <div className="text-sm font-semibold text-white">{data.label}</div>
+      <div className="text-xs text-lime-300 mt-1">
+        {modeLabel}
+        {optionsCount > 0 ? ` · ${optionsCount} opção(ões)` : ""}
+      </div>
+      {data.config?.promptKey && (
+        <div className="text-[10px] text-lime-200/80 mt-1 truncate max-w-[140px]">
+          {data.config.promptKey}
+        </div>
+      )}
+      <Handle type="target" position={Position.Top} />
+      <Handle type="source" position={Position.Bottom} />
+    </div>
+  );
+};
 
 export const DecisaoNode = ({ data }: { data: any }) => (
   (() => {

@@ -384,6 +384,25 @@ export default function FlowEditor() {
     handleEditNode(node.id);
   };
 
+  const defaultConfigForNodeType = (nodeType: string): Record<string, unknown> => {
+    if (nodeType === "capturar_entrada") {
+      return {
+        prompt: "Escolha até três opções:",
+        promptKey: "escolha_multipla",
+        inputMode: "multi_choice",
+        minSelections: 1,
+        maxSelections: 3,
+        variableName: "escolha_multipla",
+        options: [
+          { id: "opcao_1", label: "Opção 1" },
+          { id: "opcao_2", label: "Opção 2" },
+          { id: "opcao_3", label: "Opção 3" },
+        ],
+      };
+    }
+    return {};
+  };
+
   const handleAddNode = async (nodeType: string) => {
     const nodeName = paletteItems.find((t) => t.id === nodeType)?.name || "Node";
     const initialPosition = {
@@ -394,7 +413,7 @@ export default function FlowEditor() {
       const response = await api.post(`/flows/${flowId}/nodes`, {
         name: nodeName,
         type: nodeType,
-        config: {},
+        config: defaultConfigForNodeType(nodeType),
         is_start: false,
         position: initialPosition,
       });
@@ -1352,6 +1371,222 @@ export default function FlowEditor() {
                 />
               </div>
             ) : null}
+
+            {selectedNodeType === "capturar_entrada" && (
+              <>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Pergunta exibida ao usuário
+                  </label>
+                  <textarea
+                    value={editNodeConfig.prompt || ""}
+                    onChange={(e) =>
+                      setEditNodeConfig({ ...editNodeConfig, prompt: e.target.value })
+                    }
+                    placeholder="Ex.: Escolha até três opções:"
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 h-24 resize-none"
+                  />
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Chave da pergunta (relatórios)
+                  </label>
+                  <input
+                    type="text"
+                    value={editNodeConfig.promptKey || ""}
+                    onChange={(e) =>
+                      setEditNodeConfig({ ...editNodeConfig, promptKey: e.target.value })
+                    }
+                    placeholder="ex.: interesses_produto"
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Identificador estável para agregar respostas em relatórios.
+                  </p>
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Modo de entrada
+                  </label>
+                  <select
+                    value={editNodeConfig.inputMode || "text"}
+                    onChange={(e) =>
+                      setEditNodeConfig({ ...editNodeConfig, inputMode: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 text-sm"
+                  >
+                    <option value="text">Texto livre</option>
+                    <option value="single_choice">Uma opção</option>
+                    <option value="multi_choice">Várias opções</option>
+                  </select>
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Variável do fluxo
+                  </label>
+                  <input
+                    type="text"
+                    value={editNodeConfig.variableName || ""}
+                    onChange={(e) =>
+                      setEditNodeConfig({ ...editNodeConfig, variableName: e.target.value })
+                    }
+                    placeholder="ex.: interesses"
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  />
+                </div>
+                {(editNodeConfig.inputMode === "single_choice" ||
+                  editNodeConfig.inputMode === "multi_choice") && (
+                  <>
+                    <div className="grid grid-cols-2 gap-3 mb-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Mínimo
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={editNodeConfig.minSelections ?? 1}
+                          onChange={(e) =>
+                            setEditNodeConfig({
+                              ...editNodeConfig,
+                              minSelections: Number(e.target.value),
+                            })
+                          }
+                          className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Máximo
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={editNodeConfig.maxSelections ?? 3}
+                          onChange={(e) =>
+                            setEditNodeConfig({
+                              ...editNodeConfig,
+                              maxSelections: Number(e.target.value),
+                            })
+                          }
+                          className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg"
+                        />
+                      </div>
+                    </div>
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Opções
+                      </label>
+                      <div className="space-y-2">
+                        {(Array.isArray(editNodeConfig.options)
+                          ? editNodeConfig.options
+                          : []
+                        ).map(
+                          (
+                            opt: { id?: string; label?: string },
+                            index: number
+                          ) => (
+                            <div key={index} className="grid grid-cols-2 gap-2">
+                              <input
+                                value={opt.id || ""}
+                                onChange={(e) => {
+                                  const current = [
+                                    ...(Array.isArray(editNodeConfig.options)
+                                      ? editNodeConfig.options
+                                      : []),
+                                  ];
+                                  current[index] = {
+                                    ...current[index],
+                                    id: e.target.value,
+                                  };
+                                  setEditNodeConfig({
+                                    ...editNodeConfig,
+                                    options: current,
+                                  });
+                                }}
+                                placeholder="id (ex.: fin)"
+                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                              />
+                              <div className="flex gap-2">
+                                <input
+                                  value={opt.label || ""}
+                                  onChange={(e) => {
+                                    const current = [
+                                      ...(Array.isArray(editNodeConfig.options)
+                                        ? editNodeConfig.options
+                                        : []),
+                                    ];
+                                    current[index] = {
+                                      ...current[index],
+                                      label: e.target.value,
+                                    };
+                                    setEditNodeConfig({
+                                      ...editNodeConfig,
+                                      options: current,
+                                    });
+                                  }}
+                                  placeholder="Rótulo exibido"
+                                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const current = [
+                                      ...(Array.isArray(editNodeConfig.options)
+                                        ? editNodeConfig.options
+                                        : []),
+                                    ];
+                                    current.splice(index, 1);
+                                    setEditNodeConfig({
+                                      ...editNodeConfig,
+                                      options: current,
+                                    });
+                                  }}
+                                  className="px-2 text-red-600"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                          )
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const current = Array.isArray(editNodeConfig.options)
+                              ? [...editNodeConfig.options]
+                              : [];
+                            const n = current.length + 1;
+                            current.push({ id: `opcao_${n}`, label: `Opção ${n}` });
+                            setEditNodeConfig({ ...editNodeConfig, options: current });
+                          }}
+                          className="px-3 py-2 rounded-lg bg-slate-700 text-white text-sm hover:bg-slate-800"
+                        >
+                          + Adicionar opção
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Próximo node (ID)
+                  </label>
+                  <input
+                    type="text"
+                    value={editNodeConfig.next_node_id || ""}
+                    onChange={(e) =>
+                      setEditNodeConfig({
+                        ...editNodeConfig,
+                        next_node_id: e.target.value,
+                      })
+                    }
+                    placeholder="id do próximo node após captura"
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  />
+                </div>
+              </>
+            )}
 
             {/* DECISÃO */}
             {selectedNodeType === "decisao" && (

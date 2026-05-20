@@ -306,3 +306,53 @@ Observacao: as tabelas `whatsapp_channel_accounts`, `whatsapp_channel_secrets`,
 `whatsapp_phone_numbers` e o indice `uq_agent_msg_tenant_wamid` sao criados automaticamente
 pelo backend no primeiro request relevante (idempotente, via `CREATE TABLE IF NOT EXISTS`).
 
+---
+
+## Deploy — Capturar Entrada (multi-escolha) + Relatorios (2026-05-20)
+
+### O que sobe nesta entrega
+
+- Node `capturar_entrada` executavel (texto, uma opcao, varias opcoes).
+- Tabela `flow_response_events` (analytics; `ensureSchema` no boot do modulo).
+- Endpoints:
+  - `POST /api/flows/:flowId/execute` — suporta `userInput`, retorna `awaiting_input`.
+  - `GET /api/reports/flow-responses` — ultimos eventos (admin/supervisor).
+  - `GET /api/reports/flow-responses/aggregates` — contagem por opcao.
+- Frontend: editor do node no FlowEditor, pagina `/reports`.
+
+### Procedimento (mesmo padrao WhatsApp acima)
+
+```bash
+cd /opt/build/projetoferramenta && git pull origin master
+
+cd mvp-fluxo-backend && npm ci && npm run build
+# publicar dist/ para /opt/mvp-fluxo-backend conforme rotina da VPS
+
+cd ../mvp-fluxo-frontend
+printf '%s\n' 'VITE_API_URL=https://api.clienton.com.br' 'VITE_AGENT_DATA_MODE=api' > .env.production
+npm ci && npm run build && rsync -av --delete dist/ /var/www/app/
+
+systemctl restart mvp-backend
+```
+
+### Validacao pos-deploy
+
+1. Login admin → **Fluxos** → node **Capturar Entrada** → salvar config com `multi_choice` e `maxSelections: 3`.
+2. `POST /api/flows/:id/execute` → resposta `awaiting_input`.
+3. Mesmo endpoint com `startNodeId` + `userInput: ["opcao_1","opcao_2"]` → `completed` e variaveis preenchidas.
+4. Menu **Relatorios** (`/reports`) ou `GET /api/reports/flow-responses/aggregates` → linhas com contagem.
+
+### Banco
+
+- Tabela: `flow_response_events` (indices em `tenant_id+created_at`, `flow_id+question_key`).
+- Nao requer script SQL manual; criada na primeira gravacao ou listagem de relatorio.
+
+### Troubleshooting
+
+| Sintoma | Causa provavel |
+|---------|----------------|
+| 403 em `/api/reports/*` | Token de agente; usar admin/supervisor |
+| `awaiting_input` nao avanca | Falta `startNodeId` igual ao `currentNodeId` na retomada |
+| Relatorio vazio | Nenhum execute com `userInput` apos pausa; ou `persistResponses: false` |
+| Opcao invalida 400 | `userInput` com id/label fora da lista `options` do node |
+
