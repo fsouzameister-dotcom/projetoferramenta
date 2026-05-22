@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api, { getApiErrorMessage, unwrapApiData } from "~api/client";
-import TenantActingBanner from "~components/TenantActingBanner";
 import {
   getHomeTenantId,
   isPlatformAdmin,
@@ -103,8 +102,7 @@ export default function PlatformTenants() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
-      <TenantActingBanner />
+    <div className="max-w-4xl mx-auto space-y-6">
       <header>
         <h1 className="text-2xl font-bold text-white">Clientes (tenants)</h1>
         <p className="text-sm text-gray-300 mt-1">
@@ -119,83 +117,102 @@ export default function PlatformTenants() {
         </div>
       )}
 
-      <section className="rounded-xl border border-zinc-600/60 bg-zinc-800/40 p-5">
-        <h2 className="text-lg font-semibold text-white mb-4">Novo cliente</h2>
-        <form onSubmit={handleCreate} className="grid gap-3 sm:grid-cols-2">
-          <label className="block text-sm">
-            <span className="text-gray-300">Nome</span>
-            <input
-              required
-              className="mt-1 w-full rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2 text-white"
-              value={form.name}
-              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="text-gray-300">Slug (URL interna)</span>
-            <input
-              required
-              className="mt-1 w-full rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2 text-white"
-              value={form.slug}
-              onChange={(e) => setForm((f) => ({ ...f, slug: e.target.value }))}
-              placeholder="pesquisas-xyz"
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="text-gray-300">Segmento</span>
-            <select
-              className="mt-1 w-full rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2 text-white"
-              value={form.segment}
-              onChange={(e) => setForm((f) => ({ ...f, segment: e.target.value }))}
-            >
-              {SEGMENTS.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block text-sm">
-            <span className="text-gray-300">Admin inicial — nome</span>
-            <input
-              required
-              className="mt-1 w-full rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2 text-white"
-              value={form.initial_admin_name}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, initial_admin_name: e.target.value }))
-              }
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="text-gray-300">Admin inicial — e-mail (único na plataforma)</span>
-            <input
-              required
-              type="email"
-              className="mt-1 w-full rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2 text-white"
-              value={form.initial_admin_email}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, initial_admin_email: e.target.value }))
-              }
-            />
-          </label>
-          <label className="block text-sm sm:col-span-2">
-            <span className="text-gray-300">Senha inicial do admin do cliente</span>
-            <input
-              required
-              type="password"
-              minLength={6}
-              className="mt-1 w-full max-w-md rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2 text-white"
-              value={form.initial_admin_password}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, initial_admin_password: e.target.value }))
-              }
-            />
-          </label>
-          <div className="sm:col-span-2">
+      <section className="rounded-xl border border-zinc-600/60 bg-zinc-800/40 p-6">
+        <h2 className="text-lg font-semibold text-white mb-1">Novo cliente</h2>
+        <p className="text-sm text-gray-400 mb-6">
+          Cria o tenant e o primeiro administrador do ambiente do cliente.
+        </p>
+        <form onSubmit={handleCreate} className="space-y-8">
+          <fieldset className="space-y-4">
+            <legend className="text-sm font-semibold text-cyan-200/90 uppercase tracking-wide">
+              Dados do cliente
+            </legend>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block text-sm sm:col-span-1">
+                <span className="text-gray-300">Nome</span>
+                <input
+                  required
+                  className="mt-1.5 w-full rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2.5 text-white"
+                  value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                />
+              </label>
+              <label className="block text-sm sm:col-span-1">
+                <span className="text-gray-300">Slug (URL interna)</span>
+                <input
+                  required
+                  className="mt-1.5 w-full rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2.5 text-white"
+                  value={form.slug}
+                  onChange={(e) => setForm((f) => ({ ...f, slug: e.target.value }))}
+                  placeholder="pesquisas-xyz"
+                />
+              </label>
+              <label className="block text-sm sm:col-span-2 sm:max-w-xs">
+                <span className="text-gray-300">Segmento</span>
+                <select
+                  className="mt-1.5 w-full rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2.5 text-white"
+                  value={form.segment}
+                  onChange={(e) => setForm((f) => ({ ...f, segment: e.target.value }))}
+                >
+                  {SEGMENTS.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset className="space-y-4 border-t border-zinc-700/80 pt-6">
+            <legend className="text-sm font-semibold text-cyan-200/90 uppercase tracking-wide">
+              Administrador inicial
+            </legend>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block text-sm">
+                <span className="text-gray-300">Nome</span>
+                <input
+                  required
+                  className="mt-1.5 w-full rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2.5 text-white"
+                  value={form.initial_admin_name}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, initial_admin_name: e.target.value }))
+                  }
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="text-gray-300">E-mail (único na plataforma)</span>
+                <input
+                  required
+                  type="email"
+                  className="mt-1.5 w-full rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2.5 text-white"
+                  value={form.initial_admin_email}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, initial_admin_email: e.target.value }))
+                  }
+                />
+              </label>
+              <label className="block text-sm sm:col-span-2 sm:max-w-md">
+                <span className="text-gray-300">Senha inicial</span>
+                <input
+                  required
+                  type="password"
+                  minLength={6}
+                  className="mt-1.5 w-full rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2.5 text-white"
+                  value={form.initial_admin_password}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, initial_admin_password: e.target.value }))
+                  }
+                />
+              </label>
+            </div>
+          </fieldset>
+
+          <div className="pt-2">
             <button
               type="submit"
               disabled={creating}
-              className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-accent-dark transition-colors disabled:opacity-50"
             >
               {creating ? "Criando…" : "Criar tenant"}
             </button>
