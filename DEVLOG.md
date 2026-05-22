@@ -2,9 +2,10 @@
 
 ## Checkpoint atual
 
-- Data: 2026-04-19
-- Commit de referência: `9a1b77a`
-- Status: baseline funcional validado manualmente (backend + frontend)
+- Data: 2026-05-22
+- Escopo vigente: ver seção **[Escopo vigente — maio/2026](#escopo-vigente--maio2026)** (fonte única para prioridades atuais)
+- Commit de referência: `cafc3ed` (`master` alinhado com `origin/master`)
+- Status: produção em `app.clienton.com.br` / `api.clienton.com.br`; entregas de maio no `master`; pendências de produto listadas no escopo vigente
 
 ## O que foi implementado
 
@@ -309,6 +310,76 @@ Plataforma omnicanal multi-tenant com:
   - serviço central reutilizável por agente e por análises administrativas em lote
 - Status:
   - planejado para fase de voz/chamadas (com base preparada no roadmap)
+
+> **Nota:** o roadmap acima (2026-04-23) mantém a visão de longo prazo. Para o que está **dentro/fora da release atual**, use o bloco abaixo.
+
+---
+
+## Escopo vigente — maio/2026
+
+Documento de referência único para priorização. Atualizar este bloco quando mudar o que entra ou sai da frente ativa. Checkpoints históricos abaixo permanecem como log de sessão.
+
+**Última revisão:** 2026-05-22
+
+### Visão (inalterada)
+
+Plataforma omnicanal **multi-tenant**: construtor e execução de fluxos, operação de atendimento (agente), canais WhatsApp (Meta Cloud API e Twilio), relatórios operacionais. **IA textual completa (RAG, insights)** e **voz/transcrição** permanecem no programa, mas **fora da frente ativa** até nova decisão explícita.
+
+### Dentro do escopo (entregue ou em manutenção)
+
+| Área | O que está no escopo | Estado |
+|------|----------------------|--------|
+| **Produção** | VPS InterServer, `app.` / `api.clienton.com.br`, Apache, SSL, backup Postgres | Operacional — ver `RUNBOOK_OPERACAO.md` |
+| **Core fluxos** | Editor, CRUD, execução: `inicio`, `mensagem`, `chamada_api`, `decisao` (modos avançados + IA no node) | Entregue |
+| **Capturar entrada** | `text`, `single_choice`, `multi_choice`; `awaiting_input`; eventos `flow_response_events` | Entregue (API); integração inbound WhatsApp **pendente** |
+| **Relatórios** | `/reports`, `GET /api/reports/flow-responses*` | Entregue |
+| **Admin** | Usuários/perfis, dashboard, fluxos, IA admin (personas/scripts — base), WhatsApp (`/admin/whatsapp`) | Entregue |
+| **Agente** | Portal `/agent`, conversas, ciclo open/closed/reabertura, envio texto e tipos auxiliares, simulação inbound (admin) | Entregue |
+| **WhatsApp Meta** | Adapter `whatsapp_cloud_api`, webhook `/webhooks/whatsapp`, outbound texto, status delivery | Fase 1 entregue; templates/mídia **parcial** |
+| **WhatsApp Twilio** | Canal `twilio_whatsapp`, webhooks Twilio, listagem Content templates no Novo contato | Entregue (lista); envio real com `ContentSid` **pendente** |
+| **Deploy** | `DEPLOY_COMPLETO_VPS.md`, `DEPLOY_WHATSAPP_VPS_COMPLETO.md` | Documentado |
+
+Detalhe de nodes: `DOCUMENTO_NODES_FLUXO.md`.
+
+### Fora do escopo imediato (não priorizar sem replanejar este bloco)
+
+- **IA programa completo:** RAG (Sprint 2), insights on demand (Sprint 3), voz/STT/TTS (Sprint 4) — base Sprint 1 existe no repo; retomada = decisão explícita.
+- **Embedded Signup Meta** (Fase 2 WhatsApp) — hoje Opção B (credenciais coladas).
+- **Nodes só visuais** no executor: `conversa`, `funcao`, `transferir_chamada`, `digitar_tecla`, `transferir_agente`, `sms`, `extrair_variavel`, `mcp` — permanecem na paleta; sem promessa de execução nesta fase.
+- **BSPs adicionais** (360dialog, Zenvia, etc.) — só sob demanda de cliente.
+- **Identidade de cliente consolidada** (múltiplos números → um cadastro mestre) — discutido; não implementado.
+- **Seleção de número outbound** por conversa com múltiplos números no tenant.
+- **Upload persistente** de mídia (imagem/anexo/áudio) com URL definitiva.
+- **Correção de rota** `/settings` no menu (bug lateral; usar `/admin/whatsapp`).
+
+### Pendências de produto (próxima onda — ordem sugerida)
+
+1. **Templates Twilio em produção** — dropdown do Novo contato deve listar Content API (`HX…`); se só 3 exemplos locais → diagnóstico (modo API, canal, credenciais, deploy) — ver checkpoint 2026-05-18.
+2. **Envio real de template Twilio** — `POST Messages` com `ContentSid` + `ContentVariables` ao criar conversa (hoje metadados + UI).
+3. **Webhook WhatsApp → fluxo** — resposta inbound (lista/botões) mapeada para `userInput` e retomada de `capturar_entrada`.
+4. **Templates Meta** sincronizados para retomada de conversa (janela fechada).
+5. **Mídia** WhatsApp (envio/recepção) e fechamento do item “upload persistente” no agente.
+
+### Contexto paralelo (não bloqueia escopo técnico acima)
+
+- Tratativa **bloqueio Meta** (WABA/sender) em andamento pelo negócio.
+- **IA** adiada de propósito; não contar como atraso de sprint operacional.
+
+### Critério para mudar este escopo
+
+- Entrada de nova feature: atualizar tabelas **Dentro** / **Fora** / **Pendências** e data em **Última revisão**.
+- Conclusão de pendência: mover linha para **Dentro** (entregue) ou remover; registrar no checkpoint de sessão abaixo.
+- Roadmap de 2026-04-23 e sprints de IA: alterar só se a **visão de longo prazo** mudar; caso contrário, só este bloco governa a release.
+
+### Documentos relacionados
+
+| Documento | Uso |
+|-----------|-----|
+| `DEVLOG.md` (checkpoints) | Histórico de sessões |
+| `DOCUMENTO_NODES_FLUXO.md` | Escopo técnico por node |
+| `RUNBOOK_OPERACAO.md` | Operação VPS |
+| `DEPLOY_COMPLETO_VPS.md` | Deploy unificado `master` |
+| `DEPLOY_WHATSAPP_VPS_COMPLETO.md` | Meta Cloud API + credenciais |
 
 ---
 
@@ -1417,3 +1488,5 @@ Resumo: `git clone` → `rsync` backend → `npm ci && build` → `restart mvp-b
 ### Pendência de produto (inalterada)
 
 - Envio real de template Twilio com `ContentSid` + `ContentVariables` no POST de nova conversa (hoje metadados + UI).
+
+> Pendências consolidadas: **[Escopo vigente — maio/2026](#escopo-vigente--maio2026)**.

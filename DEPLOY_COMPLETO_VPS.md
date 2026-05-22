@@ -202,7 +202,7 @@ tail -n 80 /var/log/apache2/error.log
 | `DEPLOY_WHATSAPP_VPS_COMPLETO.md` | Meta webhook, credenciais, proxy |
 | `DEPLOY_CAPTURAR_ENTRADA_VPS.md` | Só multi-escolha + relatórios |
 | `RUNBOOK_OPERACAO.md` | Operação diária, backup, logs |
-| `DEVLOG.md` | Histórico e checkpoints |
+| `DEVLOG.md` | Histórico, checkpoints e **[Escopo vigente — maio/2026](DEVLOG.md#escopo-vigente--maio2026)** |
 
 ---
 

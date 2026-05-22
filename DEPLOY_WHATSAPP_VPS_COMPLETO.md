@@ -265,7 +265,8 @@ tail -n 80 /var/log/apache2/error.log
 ## Referência cruzada
 
 - Operação geral da VPS (systemd, backup, SSL): `RUNBOOK_OPERACAO.md`
-- Histórico de decisões do projeto: `DEVLOG.md`
+- Escopo vigente e prioridades: `DEVLOG.md` → [Escopo vigente — maio/2026](DEVLOG.md#escopo-vigente--maio2026)
+- Histórico de decisões do projeto: `DEVLOG.md` (checkpoints)
 
 ---
 

@@ -2,6 +2,8 @@
 
 ## Escopo
 
+Este runbook cobre **operacao** de producao (nao define escopo de produto). Prioridades e entregas: `DEVLOG.md` → [Escopo vigente — maio/2026](DEVLOG.md#escopo-vigente--maio2026).
+
 Este runbook cobre operacao basica de producao para:
 
 - backend (`mvp-backend` em systemd)

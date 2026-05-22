@@ -2,6 +2,8 @@
 
 ## Contexto
 
+Escopo de produto e prioridades da release: **`DEVLOG.md` → [Escopo vigente — maio/2026](DEVLOG.md#escopo-vigente--maio2026)**.
+
 Este documento consolida o que cada node faz hoje no projeto, considerando:
 
 - representação e configuração no `FlowEditor` (frontend);
@@ -149,16 +151,32 @@ Nodes com execução de negócio real hoje:
 
 Todos os demais estão com foco principal em modelagem visual e ainda precisam de implementação dedicada no executor para refletirem o comportamento esperado de produto.
 
-## Proposta de adequação (prioridade)
+Escopo de produto e prioridades da release: **`DEVLOG.md` → [Escopo vigente — maio/2026](DEVLOG.md#escopo-vigente--maio2026)**.
 
-1. Definir quais nodes serão oficialmente suportados na fase atual (evitar catálogo grande sem execução).
-2. Para os nodes fora de escopo imediato:
-   - ocultar da paleta, ou
-   - marcar como "em breve".
-3. Implementar em ondas, começando por maior impacto operacional:
-   - `capturar_entrada`
-   - `transferir_agente`
-   - `transferir_chamada`
-   - `extrair_variavel`
-4. Criar teste automatizado por node implementado no executor.
+## Fase atual e próximas ondas (atualizado 2026-05-22)
+
+### Suportados na release (executor)
+
+| Node | Status |
+|------|--------|
+| `inicio`, `mensagem`, `chamada_api`, `decisao`, `capturar_entrada` | `Implementado` |
+
+### Fora da fase imediata (paleta / UI apenas)
+
+Permanecem editáveis no editor, **sem** lógica no executor: `conversa`, `funcao`, `transferir_chamada`, `digitar_tecla`, `transferir_agente`, `sms`, `extrair_variavel`, `mcp`. `divisao_logica` e `encerramento` são `Parcial`.
+
+Opções de UX (não obrigatório nesta fase): ocultar da paleta ou marcar como "em breve".
+
+### Próxima onda sugerida (após decisão no escopo vigente)
+
+Ordem por impacto operacional — **nenhum item abaixo está comprometido até replanejamento explícito**:
+
+1. `transferir_agente` — roteamento para fila/agente humano.
+2. `transferir_chamada` — telefonia (depende de integração externa).
+3. `extrair_variavel` — parser/extração no contexto do fluxo.
+4. Integração **inbound WhatsApp** com `capturar_entrada` (lista/botões → `userInput`).
+
+### Qualidade
+
+- Manter teste automatizado no executor para cada node promovido a `Implementado` (padrão: `mvp-fluxo-backend/test/capturar-entrada.test.ts`).
 
