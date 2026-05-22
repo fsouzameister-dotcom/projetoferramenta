@@ -59,6 +59,7 @@ type PaletteItem = { id: string; name: string; icon: string };
 const productionPaletteItems: PaletteItem[] = [
   { id: "inicio", name: "Início", icon: "▶️" },
   { id: "mensagem", name: "Mensagem", icon: "📨" },
+  { id: "receber_mensagem", name: "Receber Mensagem", icon: "📩" },
   { id: "capturar_entrada", name: "Capturar Entrada", icon: "📥" },
   { id: "decisao", name: "Decisão", icon: "⚖️" },
   { id: "chamada_api", name: "Chamada API", icon: "🔌" },
@@ -309,8 +310,29 @@ export default function FlowEditor() {
             initialEdges.push({
               id: `e${node.id}-${node.data.config.next_node_id}`,
               source: node.id,
+              sourceHandle:
+                node.data.type === "receber_mensagem" ? "default" : undefined,
               target: node.data.config.next_node_id,
               animated: true,
+              label: node.data.type === "receber_mensagem" ? "Resposta" : undefined,
+            });
+          }
+          if (
+            node.data.type === "receber_mensagem" &&
+            (node.data.config?.next_node_id_on_timeout ||
+              node.data.config?.nextNodeIdOnTimeout)
+          ) {
+            const timeoutTarget =
+              node.data.config.next_node_id_on_timeout ||
+              node.data.config.nextNodeIdOnTimeout;
+            initialEdges.push({
+              id: `e${node.id}-timeout-${timeoutTarget}`,
+              source: node.id,
+              sourceHandle: "timeout",
+              target: timeoutTarget,
+              animated: true,
+              label: "Timeout",
+              style: { stroke: "#fbbf24" },
             });
           }
           // Lógica para nós de decisão ou divisão lógica com múltiplos next_node_id
@@ -395,6 +417,14 @@ export default function FlowEditor() {
   };
 
   const defaultConfigForNodeType = (nodeType: string): Record<string, unknown> => {
+    if (nodeType === "receber_mensagem") {
+      return {
+        wait_hint: "Aguardando sua mensagem…",
+        promptKey: "mensagem_cliente",
+        variableName: "mensagem_recebida",
+        wait_timeout_seconds: 0,
+      };
+    }
     if (nodeType === "capturar_entrada") {
       return {
         prompt: "Escolha até três opções:",
@@ -861,6 +891,16 @@ export default function FlowEditor() {
             updatedConfig.next_node_id_true = undefined; // Limpa os de decisão se for conexão padrão
             updatedConfig.next_node_id_false = undefined;
           }
+        } else if (
+          sourceNode.type === "receber_mensagem" &&
+          params.sourceHandle === "timeout"
+        ) {
+          updatedConfig.next_node_id_on_timeout = params.target;
+        } else if (
+          sourceNode.type === "receber_mensagem" &&
+          (params.sourceHandle === "default" || !params.sourceHandle)
+        ) {
+          updatedConfig.next_node_id = params.target;
         } else {
           updatedConfig.next_node_id = params.target;
         }
@@ -934,6 +974,11 @@ export default function FlowEditor() {
             } else {
               updatedConfig.next_node_id = undefined;
             }
+          } else if (
+            sourceNode.type === "receber_mensagem" &&
+            edge.sourceHandle === "timeout"
+          ) {
+            updatedConfig.next_node_id_on_timeout = undefined;
           } else {
             updatedConfig.next_node_id = undefined;
           }
@@ -1405,18 +1450,131 @@ export default function FlowEditor() {
 
             {/* Outros tipos de Node (Conversa, Mensagem, etc.) */}
             {selectedNodeType === "conversa" || selectedNodeType === "mensagem" ? (
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Conteúdo da Mensagem
-                </label>
-                <textarea
-                  value={resolveTemplate(editNodeContent)}
-                  onChange={(e) => setEditNodeContent(e.target.value)}
-                  placeholder="Digite a mensagem aqui. Use {{variavel}} para variáveis."
-                  className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 h-32 resize-none"
-                />
-              </div>
+              <>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Conteúdo da Mensagem
+                  </label>
+                  <textarea
+                    value={resolveTemplate(editNodeContent)}
+                    onChange={(e) => setEditNodeContent(e.target.value)}
+                    placeholder="Digite a mensagem aqui. Use {{variavel}} para variáveis."
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 h-32 resize-none"
+                  />
+                </div>
+                {selectedNodeType === "mensagem" && (
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Enviar após (segundos)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={300}
+                      value={
+                        editNodeConfig.send_delay_seconds ??
+                        editNodeConfig.delay_after_seconds ??
+                        0
+                      }
+                      onChange={(e) =>
+                        setEditNodeConfig({
+                          ...editNodeConfig,
+                          send_delay_seconds: Math.max(0, Number(e.target.value) || 0),
+                          delay_after_seconds: undefined,
+                        })
+                      }
+                      className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Tempo de espera depois que o fluxo chega neste node (ex.: após{" "}
+                      <strong>Receber Mensagem</strong>) e antes de enviar o texto ao cliente
+                      (máx. 300s). 0 = envio imediato.
+                    </p>
+                  </div>
+                )}
+              </>
             ) : null}
+
+            {selectedNodeType === "receber_mensagem" && (
+              <>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Texto exibido enquanto aguarda (opcional)
+                  </label>
+                  <textarea
+                    value={editNodeConfig.wait_hint || editNodeConfig.waitHint || ""}
+                    onChange={(e) =>
+                      setEditNodeConfig({ ...editNodeConfig, wait_hint: e.target.value })
+                    }
+                    placeholder="Ex.: Envie sua resposta em texto livre."
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 h-20 resize-none"
+                  />
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Variável do fluxo
+                  </label>
+                  <input
+                    type="text"
+                    value={editNodeConfig.variableName || ""}
+                    onChange={(e) =>
+                      setEditNodeConfig({ ...editNodeConfig, variableName: e.target.value })
+                    }
+                    placeholder="mensagem_recebida"
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    O texto enviado pelo cliente será salvo nesta variável (e em relatórios).
+                  </p>
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Chave do recebimento (relatórios)
+                  </label>
+                  <input
+                    type="text"
+                    value={editNodeConfig.promptKey || ""}
+                    onChange={(e) =>
+                      setEditNodeConfig({ ...editNodeConfig, promptKey: e.target.value })
+                    }
+                    placeholder="mensagem_cliente"
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  />
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Tempo máximo por resposta (segundos)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={editNodeConfig.wait_timeout_seconds ?? 0}
+                    onChange={(e) =>
+                      setEditNodeConfig({
+                        ...editNodeConfig,
+                        wait_timeout_seconds: Math.max(0, Number(e.target.value) || 0),
+                      })
+                    }
+                    placeholder="0 = sem limite automático"
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Se o cliente não responder neste prazo, o fluxo segue pela saída{" "}
+                    <strong>Timeout</strong> (conecte no canvas à direita do node). Requer{" "}
+                    <code className="text-[10px]">conversationId</code>,{" "}
+                    <code className="text-[10px]">sessionId</code> ou{" "}
+                    <code className="text-[10px]">phone</code> na execução para agendar no
+                    servidor.
+                  </p>
+                </div>
+                <p className="text-xs text-gray-500">
+                  Pausa o fluxo até o cliente enviar uma mensagem (WhatsApp ou simulação no
+                  teste). Par de <strong>Mensagem</strong> (envio). Use{" "}
+                  <strong>Capturar Entrada</strong> para opções, múltipla escolha ou pergunta
+                  estruturada.
+                </p>
+              </>
+            )}
 
             {selectedNodeType === "transferir_agente" && (
               <>

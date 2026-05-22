@@ -27,6 +27,10 @@ export type CapturarEntradaAwaiting = {
   minSelections: number;
   maxSelections: number;
   variableName: string;
+  waitTimeoutSeconds?: number;
+  timeoutAt?: string;
+  nextNodeIdOnTimeout?: string | null;
+  awaitingStartedAt?: string;
 };
 
 export type CapturarEntradaResolved = {

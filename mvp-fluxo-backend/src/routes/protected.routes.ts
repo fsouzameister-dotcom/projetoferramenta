@@ -1656,6 +1656,8 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       startNodeId?: string;
       maxSteps?: number;
       userInput?: string | string[];
+      awaitingStartedAt?: string;
+      resumeReason?: "timeout" | "input";
       conversationId?: string;
       phone?: string;
       sessionId?: string;
@@ -1679,6 +1681,8 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
                 { type: "array", items: { type: "string" } },
               ],
             },
+            awaitingStartedAt: { type: "string", minLength: 1 },
+            resumeReason: { type: "string", enum: ["timeout", "input"] },
             conversationId: { type: "string", minLength: 1 },
             phone: { type: "string", minLength: 1 },
             sessionId: { type: "string", minLength: 1 },

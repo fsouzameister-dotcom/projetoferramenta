@@ -7,11 +7,26 @@ import {
 } from "./capturar-entrada";
 import { applyFlowAgentHandoff } from "./agent-conversations";
 import { executeEncerramentoNode } from "./encerramento";
+import {
+  toCapturarEntradaConfigFromReceber,
+  parseReceberMensagemConfig,
+} from "./receber-mensagem";
 import { executeTransferirAgenteNode } from "./transferir-agente";
 import { recordFlowResponseEvent } from "./flow-response-events";
 import { ApiError, ERROR_CODES } from "./http";
 import { generateAiText } from "./ai";
 import { listNodesByFlow } from "./nodes";
+import {
+  applyResponseTimeoutVariables,
+  isWaitTimeoutElapsed,
+  parseFlowMessageSendDelayConfig,
+  parseFlowWaitTimeoutConfig,
+  sleepMs,
+} from "./flow-wait-timeout";
+import {
+  cancelFlowWaitSchedule,
+  scheduleFlowWaitTimeout,
+} from "./flow-wait-scheduler";
 
 type FlowNode = {
   id: string;
@@ -30,6 +45,10 @@ export type ExecuteFlowInput = {
   maxSteps?: number;
   /** Resposta do usuário ao node capturar_entrada em execução */
   userInput?: string | string[];
+  /** ISO — início da espera (para checar timeout na retomada) */
+  awaitingStartedAt?: string;
+  /** `timeout` = seguir pelo ramo de tempo esgotado (sem userInput) */
+  resumeReason?: "timeout" | "input";
   conversationId?: string;
   phone?: string;
   sessionId?: string;
@@ -482,14 +501,71 @@ async function executeCapturarEntradaNode(
   capturedMessage?: string;
 }> {
   const parsed = parseCapturarEntradaConfig(config, node.id);
+  const waitTimeout = parseFlowWaitTimeoutConfig(config);
   const promptMessage = formatCapturarEntradaPrompt(parsed);
   const hasInput = input.userInput !== undefined && input.userInput !== null;
+  const forceTimeout = input.resumeReason === "timeout";
+  const elapsedTimeout =
+    !hasInput &&
+    !forceTimeout &&
+    waitTimeout.waitTimeoutSeconds > 0 &&
+    isWaitTimeoutElapsed(input.awaitingStartedAt, waitTimeout.waitTimeoutSeconds);
+
+  if (hasInput && !forceTimeout) {
+    await cancelFlowWaitSchedule({
+      tenantId,
+      flowId,
+      nodeId: node.id,
+      conversationId: input.conversationId,
+      sessionId: input.sessionId,
+      phone: input.phone,
+    });
+  }
+
+  if (forceTimeout || elapsedTimeout) {
+    if (!waitTimeout.nextNodeIdOnTimeout) {
+      throw new ApiError(
+        400,
+        ERROR_CODES.execution.FLOW_EXECUTION_INVALID,
+        "Tempo de espera esgotado, mas o node não possui saída de timeout configurada"
+      );
+    }
+    applyResponseTimeoutVariables(variables, parsed.variableName);
+    variables[parsed.variableName] = null;
+    return {
+      nextNodeId: waitTimeout.nextNodeIdOnTimeout,
+      details: {
+        timedOut: true,
+        waitTimeoutSeconds: waitTimeout.waitTimeoutSeconds,
+        nextNodeIdOnTimeout: waitTimeout.nextNodeIdOnTimeout,
+        variableName: parsed.variableName,
+        resumeReason: forceTimeout ? "timeout" : "elapsed",
+      },
+    };
+  }
 
   if (!hasInput) {
     const awaiting = buildCapturarEntradaAwaiting(node.id, parsed);
+    const awaitingStartedAt = new Date().toISOString();
+    const timeoutAt =
+      waitTimeout.waitTimeoutSeconds > 0
+        ? new Date(
+            Date.now() + waitTimeout.waitTimeoutSeconds * 1000
+          ).toISOString()
+        : undefined;
+    const awaitingWithTimeout: CapturarEntradaAwaiting = {
+      ...awaiting,
+      awaitingStartedAt,
+      waitTimeoutSeconds:
+        waitTimeout.waitTimeoutSeconds > 0
+          ? waitTimeout.waitTimeoutSeconds
+          : undefined,
+      timeoutAt,
+      nextNodeIdOnTimeout: waitTimeout.nextNodeIdOnTimeout,
+    };
     return {
       nextNodeId: null,
-      awaitingInput: awaiting,
+      awaitingInput: awaitingWithTimeout,
       capturedMessage: promptMessage,
       details: {
         awaitingInput: true,
@@ -499,6 +575,10 @@ async function executeCapturarEntradaNode(
         optionsCount: parsed.options.length,
         minSelections: parsed.minSelections,
         maxSelections: parsed.maxSelections,
+        waitTimeoutSeconds: waitTimeout.waitTimeoutSeconds,
+        timeoutAt,
+        nextNodeIdOnTimeout: waitTimeout.nextNodeIdOnTimeout,
+        awaitingStartedAt,
       },
     };
   }
@@ -601,11 +681,18 @@ export async function executeFlow(
     if (currentNode.type === "inicio") {
       nextNodeId = typeof config.next_node_id === "string" ? config.next_node_id : null;
     } else if (currentNode.type === "mensagem") {
+      const sendDelay = parseFlowMessageSendDelayConfig(config);
+      if (sendDelay.sendDelaySeconds > 0) {
+        await sleepMs(sendDelay.sendDelaySeconds * 1000);
+      }
       const content = typeof config.content === "string" ? config.content : "";
       const rendered = resolveTemplate(content, variables);
       messages.push(rendered);
       nextNodeId = typeof config.next_node_id === "string" ? config.next_node_id : null;
-      details = { renderedContent: rendered };
+      details = {
+        renderedContent: rendered,
+        sendDelaySeconds: sendDelay.sendDelaySeconds,
+      };
     } else if (currentNode.type === "chamada_api") {
       const apiResult = await executeApiCallNode(config, variables);
       nextNodeId = apiResult.nextNodeId;
@@ -614,6 +701,77 @@ export async function executeFlow(
       const decisionResult = await executeDecisionNode(config, variables, tenantId);
       nextNodeId = decisionResult.nextNodeId;
       details = decisionResult.details;
+    } else if (currentNode.type === "receber_mensagem") {
+      const parsedReceber = parseReceberMensagemConfig(config, currentNode.id);
+      const capturarConfig = toCapturarEntradaConfigFromReceber(parsedReceber);
+      const syntheticNode: FlowNode = {
+        ...currentNode,
+        type: "capturar_entrada",
+        config: capturarConfig,
+      };
+      const captureInput: ExecuteFlowInput = captureInputConsumed
+        ? { ...input, userInput: undefined }
+        : input;
+      const captureResult = await executeCapturarEntradaNode(
+        syntheticNode,
+        capturarConfig,
+        variables,
+        flowId,
+        tenantId,
+        captureInput
+      );
+      if (!captureResult.awaitingInput && input.userInput !== undefined) {
+        captureInputConsumed = true;
+      }
+      if (captureResult.capturedMessage) {
+        messages.push(captureResult.capturedMessage);
+      }
+      if (captureResult.awaitingInput) {
+        trace.push({
+          nodeId: currentNode.id,
+          nodeType: currentNode.type,
+          nodeName: currentNode.name,
+          nextNodeId: null,
+          details: { ...captureResult.details, nodeKind: "receber_mensagem" },
+        });
+        const waitTimeout = parseReceberMensagemConfig(config, currentNode.id).waitTimeout;
+        if (
+          waitTimeout.waitTimeoutSeconds > 0 &&
+          waitTimeout.nextNodeIdOnTimeout
+        ) {
+          await scheduleFlowWaitTimeout({
+            tenantId,
+            flowId,
+            nodeId: currentNode.id,
+            nodeType: currentNode.type,
+            waitTimeoutSeconds: waitTimeout.waitTimeoutSeconds,
+            nextNodeIdOnTimeout: waitTimeout.nextNodeIdOnTimeout,
+            executeInput: {
+              ...input,
+              variables: { ...variables },
+              startNodeId: currentNode.id,
+              awaitingStartedAt:
+                captureResult.awaitingInput.awaitingStartedAt ??
+                new Date().toISOString(),
+            },
+          });
+        }
+        return {
+          flowId,
+          status: "awaiting_input",
+          visitedNodeIds,
+          currentNodeId: currentNode.id,
+          messages,
+          variables,
+          trace,
+          awaitingInput: captureResult.awaitingInput,
+        };
+      }
+      nextNodeId = captureResult.nextNodeId;
+      details = { ...captureResult.details, nodeKind: "receber_mensagem" };
+      if (captureResult.lastResponseEventId) {
+        lastResponseEventId = captureResult.lastResponseEventId;
+      }
     } else if (currentNode.type === "capturar_entrada") {
       const captureInput: ExecuteFlowInput = captureInputConsumed
         ? { ...input, userInput: undefined }
@@ -640,6 +798,28 @@ export async function executeFlow(
           nextNodeId: null,
           details: captureResult.details,
         });
+        const waitTimeout = parseFlowWaitTimeoutConfig(config);
+        if (
+          waitTimeout.waitTimeoutSeconds > 0 &&
+          waitTimeout.nextNodeIdOnTimeout
+        ) {
+          await scheduleFlowWaitTimeout({
+            tenantId,
+            flowId,
+            nodeId: currentNode.id,
+            nodeType: currentNode.type,
+            waitTimeoutSeconds: waitTimeout.waitTimeoutSeconds,
+            nextNodeIdOnTimeout: waitTimeout.nextNodeIdOnTimeout,
+            executeInput: {
+              ...input,
+              variables: { ...variables },
+              startNodeId: currentNode.id,
+              awaitingStartedAt:
+                captureResult.awaitingInput.awaitingStartedAt ??
+                new Date().toISOString(),
+            },
+          });
+        }
         return {
           flowId,
           status: "awaiting_input",

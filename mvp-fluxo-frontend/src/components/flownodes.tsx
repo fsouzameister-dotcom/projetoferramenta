@@ -112,17 +112,64 @@ export const McpNode = ({ data }: { data: any }) => (
   </div>
 );
 
-export const MensagemNode = ({ data }: { data: any }) => (
-  <div
-    className="px-4 py-3 shadow-lg rounded-lg bg-gray-900 border-2 border-teal-500 min-w-[160px] cursor-pointer hover:shadow-xl transition-shadow"
-    onClick={() => data.onSelect?.(data.id)}
-  >
-    <div className="text-xs font-bold text-teal-400 mb-1">📨 Mensagem</div>
-    <div className="text-sm font-semibold text-white">{data.label}</div>
-    <Handle type="target" position={Position.Top} />
-    <Handle type="source" position={Position.Bottom} />
-  </div>
-);
+export const MensagemNode = ({ data }: { data: any }) => {
+  const delay =
+    data.config?.send_delay_seconds ??
+    data.config?.sendDelaySeconds ??
+    data.config?.delay_after_seconds ??
+    data.config?.delayAfterSeconds ??
+    0;
+  return (
+    <div
+      className="px-4 py-3 shadow-lg rounded-lg bg-gray-900 border-2 border-teal-500 min-w-[160px] cursor-pointer hover:shadow-xl transition-shadow"
+      onClick={() => data.onSelect?.(data.id)}
+    >
+      <div className="text-xs font-bold text-teal-400 mb-1">📨 Mensagem</div>
+      <div className="text-sm font-semibold text-white">{data.label}</div>
+      {delay > 0 ? (
+        <div className="text-[10px] text-teal-200/90 mt-1">⏳ +{delay}s</div>
+      ) : null}
+      <Handle type="target" position={Position.Top} />
+      <Handle type="source" position={Position.Bottom} />
+    </div>
+  );
+};
+
+export const ReceberMensagemNode = ({ data }: { data: any }) => {
+  const timeoutSec =
+    data.config?.wait_timeout_seconds ?? data.config?.waitTimeoutSeconds ?? 0;
+  return (
+    <div
+      className="px-4 py-3 shadow-lg rounded-lg bg-gray-900 border-2 border-sky-500 min-w-[160px] cursor-pointer hover:shadow-xl transition-shadow relative"
+      onClick={() => data.onSelect?.(data.id)}
+    >
+      <div className="text-xs font-bold text-sky-400 mb-1">📩 Receber Mensagem</div>
+      <div className="text-sm font-semibold text-white">{data.label}</div>
+      {data.config?.variableName ? (
+        <div className="text-xs text-sky-300 mt-1">→ {data.config.variableName}</div>
+      ) : null}
+      {timeoutSec > 0 ? (
+        <div className="text-[10px] text-amber-200/90 mt-1">⏱ {timeoutSec}s</div>
+      ) : null}
+      <Handle type="target" position={Position.Top} />
+      <Handle type="source" position={Position.Bottom} id="default" />
+      {timeoutSec > 0 ? (
+        <>
+          <Handle
+            type="source"
+            position={Position.Right}
+            id="timeout"
+            style={{ top: "70%", background: "#fbbf24" }}
+          />
+          <div className="absolute top-[62%] -right-10 text-[10px] text-amber-300">
+            Timeout
+          </div>
+        </>
+      ) : null}
+      <div className="absolute -bottom-5 left-2 text-[10px] text-sky-300">Resposta</div>
+    </div>
+  );
+};
 
 export const ChamadaApiNode = ({ data }: { data: any }) => (
   <div
@@ -297,6 +344,7 @@ export const nodeTypes = {
   extrair_variavel: ExtrairVariavelNode,
   mcp: McpNode,
   mensagem: MensagemNode,
+  receber_mensagem: ReceberMensagemNode,
   chamada_api: ChamadaApiNode,
   capturar_entrada: CapturarEntradaNode,
   decisao: DecisaoNode,

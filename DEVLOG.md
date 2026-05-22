@@ -1613,7 +1613,16 @@ Use este bloco para retomar **sem depender do histórico do chat**.
 
 - Telefonia piloto; RAG se necessário; refinamento métricas.
 
+### Implementado (sessão — nodes Mensagem / Receber)
+
+- **`receber_mensagem`:** par do node Mensagem; pausa até `userInput`; variável configurável; saída **Timeout** (`next_node_id_on_timeout` + `wait_timeout_seconds`); scheduler Redis (`flow-wait-scheduler`, poll 5s) com `conversationId` / `sessionId` / `phone`.
+- **`mensagem`:** **`send_delay_seconds`** — espera **antes** de enviar (tempo após chegar no node, ex. após receber resposta do cliente).
+- Frontend: paleta Produção, handles Resposta/Timeout, painéis no `FlowEditor`.
+- Docs: `DOCUMENTO_NODES_FLUXO.md`; testes: `receber-mensagem.test.ts`, `flow-wait-timeout.test.ts`.
+
 ### Épico sugerido para próxima sessão de código
+
+**Inbound WhatsApp → `executeFlow`** (retomar com `userInput` / cancelar timeout agendado).
 
 **“Pesquisa WhatsApp ponta a ponta”** — itens 1–3 do plano 30 dias (sem ads/insights na primeira leva), para o cliente testar questionário real no número.
 
