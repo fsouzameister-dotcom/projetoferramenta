@@ -54,22 +54,32 @@ type DecisionRouteRule = DecisionRule & {
   next_node_id: string;
 };
 
-const paletteItems = [
+type PaletteItem = { id: string; name: string; icon: string };
+
+const productionPaletteItems: PaletteItem[] = [
   { id: "inicio", name: "Início", icon: "▶️" },
+  { id: "mensagem", name: "Mensagem", icon: "📨" },
+  { id: "capturar_entrada", name: "Capturar Entrada", icon: "📥" },
+  { id: "decisao", name: "Decisão", icon: "⚖️" },
+  { id: "chamada_api", name: "Chamada API", icon: "🔌" },
+  { id: "transferir_agente", name: "Transferir Agente", icon: "👤" },
+  { id: "encerramento", name: "Encerramento", icon: "⏹️" },
+];
+
+const comingSoonPaletteItems: PaletteItem[] = [
   { id: "conversa", name: "Conversa", icon: "💬" },
   { id: "funcao", name: "Função", icon: "⚡" },
   { id: "transferir_chamada", name: "Transferir Chamada", icon: "📞" },
   { id: "digitar_tecla", name: "Digitar Tecla", icon: "🔢" },
   { id: "divisao_logica", name: "Divisão Lógica", icon: "🔀" },
-  { id: "transferir_agente", name: "Transferir Agente", icon: "👤" },
   { id: "sms", name: "SMS", icon: "💬" },
   { id: "extrair_variavel", name: "Extrair Variável", icon: "📦" },
   { id: "mcp", name: "MCP", icon: "🔗" },
-  { id: "mensagem", name: "Mensagem", icon: "📨" },
-  { id: "chamada_api", name: "Chamada API", icon: "🔌" },
-  { id: "capturar_entrada", name: "Capturar Entrada", icon: "📥" },
-  { id: "decisao", name: "Decisão", icon: "⚖️" },
-  { id: "encerramento", name: "Encerramento", icon: "⏹️" },
+];
+
+const paletteItems: PaletteItem[] = [
+  ...productionPaletteItems,
+  ...comingSoonPaletteItems,
 ];
 
 export default function FlowEditor() {
@@ -398,6 +408,19 @@ export default function FlowEditor() {
           { id: "opcao_2", label: "Opção 2" },
           { id: "opcao_3", label: "Opção 3" },
         ],
+      };
+    }
+    if (nodeType === "transferir_agente") {
+      return {
+        queue: "Geral",
+        handoff_message: "",
+        priority: "normal",
+      };
+    }
+    if (nodeType === "encerramento") {
+      return {
+        end_message: "Obrigado pelo contato!",
+        reason_key: "flow_completed",
       };
     }
     return {};
@@ -1012,8 +1035,11 @@ export default function FlowEditor() {
         <p className="text-[11px] text-gray-500 mb-2">
           Clique para adicionar. Dê duplo clique no node para editar.
         </p>
-        <div className="space-y-1.5">
-          {paletteItems.map((item) => (
+        <p className="text-[10px] font-semibold text-teal-700 mb-1 uppercase tracking-wide">
+          Produção
+        </p>
+        <div className="space-y-1.5 mb-3">
+          {productionPaletteItems.map((item) => (
             <button
               key={item.id}
               onClick={() => handleAddNode(item.id)}
@@ -1023,6 +1049,26 @@ export default function FlowEditor() {
                 {item.icon}
               </span>
               <span className="text-xs font-medium text-white leading-tight">
+                {item.name}
+              </span>
+            </button>
+          ))}
+        </div>
+        <p className="text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">
+          Em breve
+        </p>
+        <div className="space-y-1.5 opacity-80">
+          {comingSoonPaletteItems.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => handleAddNode(item.id)}
+              title="Executor ainda não implementado — apenas modelagem"
+              className="group w-full flex items-center gap-2 p-1.5 bg-[#111827] hover:bg-[#0f172a] rounded-md border border-dashed border-[#374151] text-left transition-all"
+            >
+              <span className="w-6 h-6 rounded-full bg-[#0b1220] border border-[#334155] text-sm flex items-center justify-center">
+                {item.icon}
+              </span>
+              <span className="text-xs font-medium text-gray-300 leading-tight">
                 {item.name}
               </span>
             </button>
@@ -1371,6 +1417,102 @@ export default function FlowEditor() {
                 />
               </div>
             ) : null}
+
+            {selectedNodeType === "transferir_agente" && (
+              <>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Fila de atendimento
+                  </label>
+                  <input
+                    type="text"
+                    value={editNodeConfig.queue || "Geral"}
+                    onChange={(e) =>
+                      setEditNodeConfig({ ...editNodeConfig, queue: e.target.value })
+                    }
+                    placeholder="Ex.: Pesquisa, Vendas, SAC"
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg"
+                  />
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Mensagem ao cliente (opcional)
+                  </label>
+                  <textarea
+                    value={editNodeConfig.handoff_message || ""}
+                    onChange={(e) =>
+                      setEditNodeConfig({
+                        ...editNodeConfig,
+                        handoff_message: e.target.value,
+                      })
+                    }
+                    placeholder="Deixe vazio para mensagem padrão de handoff"
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg h-20 resize-none"
+                  />
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Prioridade
+                  </label>
+                  <select
+                    value={editNodeConfig.priority || "normal"}
+                    onChange={(e) =>
+                      setEditNodeConfig({ ...editNodeConfig, priority: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg text-sm"
+                  >
+                    <option value="normal">Normal</option>
+                    <option value="alta">Alta</option>
+                  </select>
+                </div>
+                <p className="text-xs text-gray-500 mb-4">
+                  Encerra o fluxo automático e coloca a conversa em espera na fila (quando
+                  houver <code className="text-[10px]">conversationId</code> na execução).
+                  Conecte uma saída abaixo apenas se quiser continuar o fluxo após o handoff.
+                </p>
+              </>
+            )}
+
+            {selectedNodeType === "encerramento" && (
+              <>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Mensagem final (opcional)
+                  </label>
+                  <textarea
+                    value={editNodeConfig.end_message || ""}
+                    onChange={(e) =>
+                      setEditNodeConfig({
+                        ...editNodeConfig,
+                        end_message: e.target.value,
+                      })
+                    }
+                    placeholder="Ex.: Obrigado! Até logo."
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg h-20 resize-none"
+                  />
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Chave do motivo (relatórios)
+                  </label>
+                  <input
+                    type="text"
+                    value={editNodeConfig.reason_key || ""}
+                    onChange={(e) =>
+                      setEditNodeConfig({
+                        ...editNodeConfig,
+                        reason_key: e.target.value,
+                      })
+                    }
+                    placeholder="flow_completed"
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg"
+                  />
+                </div>
+                <p className="text-xs text-gray-500">
+                  Encerra o fluxo. Não possui saída — conecte apenas entradas.
+                </p>
+              </>
+            )}
 
             {selectedNodeType === "capturar_entrada" && (
               <>

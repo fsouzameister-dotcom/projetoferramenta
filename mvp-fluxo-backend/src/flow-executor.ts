@@ -5,6 +5,9 @@ import {
   resolveCapturarEntradaInput,
   type CapturarEntradaAwaiting,
 } from "./capturar-entrada";
+import { applyFlowAgentHandoff } from "./agent-conversations";
+import { executeEncerramentoNode } from "./encerramento";
+import { executeTransferirAgenteNode } from "./transferir-agente";
 import { recordFlowResponseEvent } from "./flow-response-events";
 import { ApiError, ERROR_CODES } from "./http";
 import { generateAiText } from "./ai";
@@ -653,6 +656,73 @@ export async function executeFlow(
       if (captureResult.lastResponseEventId) {
         lastResponseEventId = captureResult.lastResponseEventId;
       }
+    } else if (currentNode.type === "transferir_agente") {
+      let handoffApplied = false;
+      if (input.conversationId) {
+        handoffApplied = await applyFlowAgentHandoff({
+          tenantId,
+          conversationId: input.conversationId,
+          queue:
+            typeof config.queue === "string" && config.queue.trim()
+              ? config.queue.trim()
+              : "Geral",
+          flowId,
+          nodeId: currentNode.id,
+        });
+      }
+      const handoffResult = executeTransferirAgenteNode({
+        config,
+        variables,
+        handoffApplied,
+      });
+      if (handoffResult.message) {
+        messages.push(handoffResult.message);
+      }
+      nextNodeId = handoffResult.nextNodeId;
+      details = handoffResult.details;
+      if (handoffResult.stopFlow) {
+        trace.push({
+          nodeId: currentNode.id,
+          nodeType: currentNode.type,
+          nodeName: currentNode.name,
+          nextNodeId: null,
+          details,
+        });
+        return {
+          flowId,
+          status: "completed",
+          stopReason: "transferir_agente",
+          visitedNodeIds,
+          currentNodeId: currentNode.id,
+          messages,
+          variables,
+          trace,
+          ...(lastResponseEventId ? { lastResponseEventId } : {}),
+        };
+      }
+    } else if (currentNode.type === "encerramento") {
+      const endResult = executeEncerramentoNode({ config, variables });
+      if (endResult.message) {
+        messages.push(endResult.message);
+      }
+      trace.push({
+        nodeId: currentNode.id,
+        nodeType: currentNode.type,
+        nodeName: currentNode.name,
+        nextNodeId: null,
+        details: endResult.details,
+      });
+      return {
+        flowId,
+        status: "completed",
+        stopReason: "encerramento",
+        visitedNodeIds,
+        currentNodeId: currentNode.id,
+        messages,
+        variables,
+        trace,
+        ...(lastResponseEventId ? { lastResponseEventId } : {}),
+      };
     } else {
       nextNodeId = typeof config.next_node_id === "string" ? config.next_node_id : null;
     }

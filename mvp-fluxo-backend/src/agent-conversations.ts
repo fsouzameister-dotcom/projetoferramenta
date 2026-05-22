@@ -806,3 +806,36 @@ export async function updateAgentMessageStatusByProvider(input: {
     errorDescription: input.errorDescription,
   });
 }
+
+/** Handoff disparado pelo executor de fluxo (node transferir_agente). */
+export async function applyFlowAgentHandoff(input: {
+  tenantId: string;
+  conversationId: string;
+  queue: string;
+  flowId?: string;
+  nodeId?: string;
+}): Promise<boolean> {
+  await ensureSchema();
+  const meta = {
+    queue: input.queue,
+    flowHandoff: true,
+    flowId: input.flowId ?? null,
+    handoffNodeId: input.nodeId ?? null,
+    handoffAt: new Date().toISOString(),
+  };
+  const result = await pool.query(
+    `UPDATE agent_conversations
+     SET status = 'em_espera',
+         metadata = COALESCE(metadata, '{}'::jsonb) || $1::jsonb,
+         tags = (
+           CASE
+             WHEN COALESCE(tags, '[]'::jsonb) @> '["Handoff fluxo"]'::jsonb THEN tags
+             ELSE COALESCE(tags, '[]'::jsonb) || '["Handoff fluxo"]'::jsonb
+           END
+         ),
+         updated_at = now()
+     WHERE id = $2 AND tenant_id = $3`,
+    [JSON.stringify(meta), input.conversationId, input.tenantId]
+  );
+  return (result.rowCount ?? 0) > 0;
+}

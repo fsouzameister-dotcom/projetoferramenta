@@ -68,6 +68,9 @@ export const TransferirAgenteNode = ({ data }: { data: any }) => (
   >
     <div className="text-xs font-bold text-blue-300 mb-1">👤 Transferir Agente</div>
     <div className="text-sm font-semibold text-white">{data.label}</div>
+    {data.config?.queue ? (
+      <div className="text-xs text-blue-200 mt-1">Fila: {data.config.queue}</div>
+    ) : null}
     <Handle type="target" position={Position.Top} />
     <Handle type="source" position={Position.Bottom} />
   </div>
@@ -263,6 +266,11 @@ export const EncerramentoNode = ({ data }: { data: any }) => (
   >
     <div className="text-xs font-bold text-red-400 mb-1">⏹️ Encerramento</div>
     <div className="text-sm font-semibold text-white">{data.label}</div>
+    {data.config?.reason_key || data.config?.reason ? (
+      <div className="text-xs text-red-200 mt-1">
+        {data.config.reason_key || data.config.reason}
+      </div>
+    ) : null}
     <Handle type="target" position={Position.Top} />
   </div>
 );
