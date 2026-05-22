@@ -13,3 +13,23 @@ body,
 body {
   @apply m-0 bg-gray-50 text-gray-800 font-sans;
 }
+
+.flow-editor-canvas .react-flow__attribution {
+  display: none;
+}
+
+.flow-editor-canvas .react-flow__pane {
+  cursor: default;
+}
+
+.flow-node-config-panel label {
+  @apply text-gray-300;
+}
+
+.flow-node-config-panel .text-gray-700 {
+  @apply text-gray-300;
+}
+
+.flow-node-config-panel .text-gray-500 {
+  @apply text-gray-400;
+}

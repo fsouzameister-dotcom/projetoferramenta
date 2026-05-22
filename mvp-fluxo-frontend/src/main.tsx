@@ -143,7 +143,6 @@ const router = createBrowserRouter([
                   { path: "flows", element: <Flows /> },
                   { path: "flows/new", element: <FlowForm /> },
                   { path: "flows/edit/:id", element: <FlowForm /> },
-                  { path: "flows/:flowId", element: <FlowEditor /> },
                   { path: "admin/users", element: <UsersAdmin /> },
                   { path: "admin/ai", element: <AiAdmin /> },
                   { path: "admin/whatsapp", element: <WhatsAppAdmin /> },
@@ -153,6 +152,7 @@ const router = createBrowserRouter([
                   },
                 ],
               },
+              { path: "flows/:flowId", element: <FlowEditor /> },
             ],
           },
           {

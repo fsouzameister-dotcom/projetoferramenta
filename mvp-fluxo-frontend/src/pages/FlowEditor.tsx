@@ -4,8 +4,6 @@ import ReactFlow, {
   addEdge,
   useNodesState,
   useEdgesState,
-  MiniMap,
-  Controls,
   Background,
   applyNodeChanges,
   type NodeChange,
@@ -109,6 +107,26 @@ export default function FlowEditor() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [decisionAssistantGoal, setDecisionAssistantGoal] = useState("");
   const [decisionAssistantLoading, setDecisionAssistantLoading] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+
+  const goToFlowsList = () => navigate("/flows");
+
+  const handleBack = () => {
+    if (hasUnsavedChanges) {
+      setShowLeaveConfirm(true);
+      return;
+    }
+    goToFlowsList();
+  };
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [hasUnsavedChanges]);
 
   const parseJsonText = <T,>(text: string, fallback: T): T => {
     try {
@@ -491,8 +509,8 @@ export default function FlowEditor() {
     }
   };
 
-  const handleSaveFlow = async () => {
-    if (!flowId || nodes.length === 0) return;
+  const handleSaveFlow = async (): Promise<boolean> => {
+    if (!flowId || nodes.length === 0) return false;
     setSavingFlow(true);
     try {
       await Promise.all(
@@ -529,11 +547,21 @@ export default function FlowEditor() {
 
       setHasUnsavedChanges(false);
       alert("Fluxo salvo com sucesso.");
+      return true;
     } catch (err) {
       console.error("Erro ao salvar fluxo:", err);
       alert(getApiErrorMessage(err, "Erro ao salvar fluxo."));
+      return false;
     } finally {
       setSavingFlow(false);
+    }
+  };
+
+  const handleSaveFlowAndLeave = async () => {
+    const saved = await handleSaveFlow();
+    if (saved) {
+      setShowLeaveConfirm(false);
+      goToFlowsList();
     }
   };
 
@@ -1018,10 +1046,10 @@ export default function FlowEditor() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gray-100">
+      <div className="flex items-center justify-center h-screen bg-[#0a0f1a]">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-500 mx-auto mb-4"></div>
-          <p className="text-gray-700 font-medium">Carregando fluxo...</p>
+          <p className="text-gray-300 font-medium">Carregando fluxo...</p>
         </div>
       </div>
     );
@@ -1029,12 +1057,12 @@ export default function FlowEditor() {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gray-100">
+      <div className="flex items-center justify-center h-screen bg-[#0a0f1a]">
         <div className="text-center">
-          <p className="text-red-600 font-medium mb-4">{error}</p>
+          <p className="text-red-400 font-medium mb-4">{error}</p>
           <button
-            onClick={() => navigate("/flows")}
-            className="px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600"
+            onClick={goToFlowsList}
+            className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700"
           >
             Voltar
           </button>
@@ -1044,40 +1072,47 @@ export default function FlowEditor() {
   }
 
   return (
-    <div className="flex h-screen bg-white">
-      {/* Painel Esquerdo */}
-      <div className="w-64 bg-white shadow-lg p-4 overflow-y-auto border-r border-gray-200 flex flex-col">
-        <div className="mb-3">
-          <button
-            onClick={() => navigate("/flows")}
-            className="text-[11px] text-teal-600 hover:underline mb-1 flex items-center gap-1"
-          >
-            ← Voltar para Fluxos
-          </button>
-          <h2 className="text-lg font-semibold text-gray-800">
+    <div className="flex flex-col h-screen bg-[#0a0f1a] text-gray-100">
+      <header className="flex items-center gap-4 px-4 py-3 border-b border-[#1e293b] bg-[#111827] shrink-0">
+        <button
+          type="button"
+          onClick={handleBack}
+          className="px-3 py-2 rounded-lg border border-[#334155] text-sm font-medium text-gray-200 hover:bg-[#1e293b] transition-colors"
+        >
+          ← Voltar
+        </button>
+        <div className="flex-1 min-w-0">
+          <h1 className="text-lg font-semibold text-white truncate">
             {flowData?.name || "Editor de Fluxo"}
-          </h2>
-          <p className="text-xs text-gray-500">
-            {flowData?.channel ? `Canal: ${flowData.channel}` : ""}
-          </p>
-          <button
-            onClick={handleSaveFlow}
-            disabled={savingFlow}
-            className="mt-2 w-full px-3 py-1.5 bg-teal-600 text-white text-sm rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-60"
-          >
-            {savingFlow ? "Salvando fluxo..." : "Salvar fluxo"}
-          </button>
-          <p
-            className={`mt-2 text-xs ${
-              hasUnsavedChanges ? "text-amber-600" : "text-emerald-600"
-            }`}
-          >
-            {hasUnsavedChanges ? "Alterações não salvas" : "Tudo salvo"}
-          </p>
+          </h1>
+          {flowData?.channel ? (
+            <p className="text-xs text-gray-400">Canal: {flowData.channel}</p>
+          ) : null}
         </div>
+        <span
+          className={`text-xs font-medium px-2 py-1 rounded-full ${
+            hasUnsavedChanges
+              ? "bg-amber-500/20 text-amber-200 border border-amber-500/40"
+              : "bg-emerald-500/20 text-emerald-200 border border-emerald-500/40"
+          }`}
+        >
+          {hasUnsavedChanges ? "Não salvo" : "Salvo"}
+        </span>
+        <button
+          type="button"
+          onClick={handleSaveFlow}
+          disabled={savingFlow}
+          className="px-4 py-2 bg-teal-600 text-white text-sm font-semibold rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-60"
+        >
+          {savingFlow ? "Salvando…" : "Salvar fluxo"}
+        </button>
+      </header>
 
-        <h3 className="text-sm font-semibold text-gray-700 mb-2">Paleta de Nós</h3>
-        <p className="text-[11px] text-gray-500 mb-2">
+      <div className="flex flex-1 min-h-0">
+      {/* Painel Esquerdo */}
+      <div className="w-64 bg-[#111827] shadow-lg p-4 overflow-y-auto border-r border-[#1e293b] flex flex-col shrink-0">
+        <h3 className="text-sm font-semibold text-gray-200 mb-2">Paleta de Nós</h3>
+        <p className="text-[11px] text-gray-400 mb-2">
           Clique para adicionar. Dê duplo clique no node para editar.
         </p>
         <p className="text-[10px] font-semibold text-teal-700 mb-1 uppercase tracking-wide">
@@ -1121,8 +1156,8 @@ export default function FlowEditor() {
         </div>
       </div>
 
-      {/* Área do ReactFlow */}
-      <div className="flex-1 relative">
+      {/* Área de construção do fluxo */}
+      <div className="flex-1 relative bg-[#0b1220] flow-editor-canvas">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -1130,27 +1165,26 @@ export default function FlowEditor() {
           onEdgesChange={onEdgesChange}
           onNodeDoubleClick={handleNodeDoubleClick}
           onConnect={onConnect}
-          onEdgesDelete={onEdgesDelete} // Adicionado: Lidar com a exclusão de arestas
+          onEdgesDelete={onEdgesDelete}
           nodeTypes={nodeTypes}
           fitView
+          proOptions={{ hideAttribution: true }}
         >
-          <MiniMap />
-          <Controls />
           <Background
-            id="1"
-            gap={12}
+            id="flow-grid"
+            gap={16}
             size={1}
-            variant={BackgroundVariant.Dots} // CORRIGIDO AQUI
-            color="#eee"
+            variant={BackgroundVariant.Dots}
+            color="#334155"
           />
         </ReactFlow>
       </div>
 
       {/* Painel Direito (Configurações do Node) */}
       {selectedNodeId && (
-        <div className="w-80 bg-white shadow-lg p-6 overflow-y-auto border-l border-gray-200">
+        <div className="w-80 bg-[#111827] shadow-lg p-6 overflow-y-auto border-l border-[#1e293b] shrink-0 flow-node-config-panel">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold text-gray-800">
+            <h3 className="text-lg font-semibold text-gray-100">
               Configurar Node
             </h3>
             <button
@@ -1161,7 +1195,7 @@ export default function FlowEditor() {
                 setShowTestResult(false);
                 setTestResult(null);
               }}
-              className="text-gray-500 hover:text-gray-700"
+              className="text-gray-400 hover:text-gray-200"
             >
               ✕
             </button>
@@ -2362,6 +2396,56 @@ export default function FlowEditor() {
                 className="flex-1 px-6 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition-colors disabled:opacity-50"
               >
                 {editingNode ? "Salvando..." : "Salvar Node"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      </div>
+
+      {showLeaveConfirm && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="leave-flow-title"
+        >
+          <div className="w-full max-w-md rounded-xl border border-[#334155] bg-[#111827] p-6 shadow-2xl">
+            <h2
+              id="leave-flow-title"
+              className="text-lg font-semibold text-white mb-2"
+            >
+              Alterações não salvas
+            </h2>
+            <p className="text-sm text-gray-300 mb-6">
+              Você tem alterações neste fluxo que ainda não foram salvas. O que
+              deseja fazer?
+            </p>
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setShowLeaveConfirm(false)}
+                className="px-4 py-2 rounded-lg border border-[#475569] text-gray-200 hover:bg-[#1e293b] text-sm font-medium"
+              >
+                Continuar editando
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLeaveConfirm(false);
+                  goToFlowsList();
+                }}
+                className="px-4 py-2 rounded-lg border border-amber-500/50 text-amber-200 hover:bg-amber-500/10 text-sm font-medium"
+              >
+                Sair sem salvar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveFlowAndLeave}
+                disabled={savingFlow}
+                className="px-4 py-2 rounded-lg bg-teal-600 text-white hover:bg-teal-700 text-sm font-semibold disabled:opacity-60"
+              >
+                {savingFlow ? "Salvando…" : "Salvar e sair"}
               </button>
             </div>
           </div>
