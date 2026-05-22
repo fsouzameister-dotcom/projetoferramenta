@@ -20,7 +20,10 @@ export async function tenantMiddleware(
     const client = await pool.connect();
     try {
       const result = await client.query(
-        `SELECT id, name, plan, is_active, max_users, max_flows FROM tenants WHERE id = $1 AND is_active = TRUE`,
+        `SELECT id, name, plan, is_active, max_users, max_flows,
+                COALESCE(tenant_type, 'customer') AS tenant_type,
+                segment
+         FROM tenants WHERE id = $1 AND is_active = TRUE`,
         [tenantId]
       );
       if (result.rows.length === 0) {

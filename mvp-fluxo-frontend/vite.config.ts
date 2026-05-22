@@ -13,6 +13,8 @@ export default defineConfig({
     alias: {
       // Adicione este alias para o Vite
       '~api': path.resolve(__dirname, './src/api'),
+      '~lib': path.resolve(__dirname, './src/lib'),
+      '~components': path.resolve(__dirname, './src/components'),
       // Se você quiser um alias geral para 'src', pode adicionar:
       // '@': path.resolve(__dirname, './src'),
     },

@@ -25,7 +25,9 @@
     // --- Configurações adicionadas/modificadas para resolução de módulos ---
     "baseUrl": ".", // Define a base para a resolução de módulos como a raiz do projeto
     "paths": {
-      "~api/*": ["./src/api/*"] // Mapeia "~api/client" para "./src/api/client"
+      "~api/*": ["./src/api/*"],
+      "~lib/*": ["./src/lib/*"],
+      "~components/*": ["./src/components/*"]
     },
     "esModuleInterop": true, // Permite interoperabilidade entre módulos CommonJS e ES Modules
     "forceConsistentCasingInFileNames": true // Garante consistência no uso de maiúsculas/minúsculas em nomes de arquivos

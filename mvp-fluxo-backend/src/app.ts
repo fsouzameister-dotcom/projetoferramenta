@@ -5,6 +5,7 @@ import * as bcrypt from "bcrypt";
 
 import { JWT_SECRET, getCorsOrigin, resolveLoginTenantId } from "./config";
 import { pool } from "./db";
+import { findUserByEmail } from "./tenant-platform";
 import {
   ApiError,
   ERROR_CODES,
@@ -180,13 +181,23 @@ export async function buildApp(options: BuildAppOptions = {}) {
           200: successEnvelopeSchema({
             type: "object",
             additionalProperties: false,
-            required: ["message", "token", "tenant_id", "role_name", "name"],
+            required: [
+              "message",
+              "token",
+              "tenant_id",
+              "role_name",
+              "name",
+              "tenant_type",
+              "is_platform_admin",
+            ],
             properties: {
               message: { type: "string" },
               token: { type: "string" },
               tenant_id: { type: "string" },
               role_name: { type: "string" },
               name: { type: "string" },
+              tenant_type: { type: "string" },
+              is_platform_admin: { type: "boolean" },
             },
           }),
           400: errorEnvelopeSchema([
@@ -216,27 +227,61 @@ export async function buildApp(options: BuildAppOptions = {}) {
       );
     }
 
-    const tenantId = resolveLoginTenantId(tenantFromBody);
-    if (!tenantId) {
-      throw new ApiError(
-        400,
-        ERROR_CODES.tenant.TENANT_REQUIRED,
-        "tenantId é obrigatório em produção. Em desenvolvimento, defina DEFAULT_LOGIN_TENANT_ID no .env ou passe tenantId no body."
-      );
-    }
-
     let client;
     try {
       client = await pool.connect();
-      const userResult = await client.query(
-        `SELECT u.id, u.email, u.name, u.password_hash, u.tenant_id, u.role_id, COALESCE(r.name, 'agente') AS role_name
-         FROM users u
-         LEFT JOIN roles r ON r.id = u.role_id
-         WHERE u.email = $1 AND u.tenant_id = $2`,
-        [email, tenantId]
-      );
 
-      const user = userResult.rows[0];
+      let user: {
+        id: string;
+        email: string;
+        name: string;
+        password_hash: string;
+        tenant_id: string;
+        role_id: string;
+        role_name: string;
+        tenant_type?: string;
+      } | null = null;
+
+      try {
+        const byEmail = await findUserByEmail(email);
+        if (byEmail) {
+          user = byEmail;
+        }
+      } catch (lookupErr) {
+        if (
+          lookupErr instanceof Error &&
+          lookupErr.message === "MULTIPLE_USERS_FOR_EMAIL"
+        ) {
+          throw new ApiError(
+            500,
+            ERROR_CODES.auth.LOGIN_FAILED,
+            "E-mail associado a mais de uma conta; contate o suporte"
+          );
+        }
+        throw lookupErr;
+      }
+
+      if (!user) {
+        const tenantId = resolveLoginTenantId(tenantFromBody);
+        if (!tenantId) {
+          throw new ApiError(
+            400,
+            ERROR_CODES.tenant.TENANT_REQUIRED,
+            "Credenciais inválidas ou tenantId ausente"
+          );
+        }
+        const userResult = await client.query(
+          `SELECT u.id, u.email, u.name, u.password_hash, u.tenant_id, u.role_id,
+                  COALESCE(r.name, 'agente') AS role_name,
+                  COALESCE(t.tenant_type, 'customer') AS tenant_type
+           FROM users u
+           LEFT JOIN roles r ON r.id = u.role_id
+           JOIN tenants t ON t.id = u.tenant_id
+           WHERE LOWER(u.email) = LOWER($1) AND u.tenant_id = $2`,
+          [email, tenantId]
+        );
+        user = userResult.rows[0] ?? null;
+      }
 
       if (!user) {
         throw new ApiError(
@@ -268,12 +313,18 @@ export async function buildApp(options: BuildAppOptions = {}) {
         { expiresIn: "24h" }
       );
 
+      const tenantType =
+        (user.tenant_type as string | undefined) ?? "customer";
+      const isPlatformAdmin = user.role_name === "platform_admin";
+
       return sendSuccess(request, reply, {
         message: "Login successful",
         token,
         tenant_id: user.tenant_id,
         role_name: user.role_name,
         name: user.name ?? user.email,
+        tenant_type: tenantType,
+        is_platform_admin: isPlatformAdmin,
       });
     } catch (error) {
       if (error instanceof ApiError) {

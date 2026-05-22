@@ -26,6 +26,18 @@ import {
   listFlowResponseEvents,
 } from "../flow-response-events";
 import {
+  hasAdminAccess,
+  isAllowedRoleForTenant,
+  isPlatformAdmin,
+} from "../auth-roles";
+import {
+  createCustomerTenant,
+  ensurePlatformTenantSchema,
+  getTenantById,
+  listCustomerTenants,
+  type TenantSegment,
+} from "../tenant-platform";
+import {
   createUserForTenant,
   deleteUserForTenant,
   isAllowedRole,
@@ -168,15 +180,22 @@ const whatsappChannelIdParamSchema = {
 
 // Declaração do plugin Fastify
 const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
-  const hasAdminAccess = (roleName?: string) =>
-    roleName === "admin_local" || roleName === "supervisor" || roleName === "admin";
-
   const ensureAdminAccess = (roleName?: string) => {
     if (!hasAdminAccess(roleName)) {
       throw new ApiError(
         403,
         ERROR_CODES.users.FORBIDDEN_ROLE,
-        "Apenas admin local e supervisor podem gerenciar usuários"
+        "Apenas administradores podem executar esta ação"
+      );
+    }
+  };
+
+  const ensurePlatformAdmin = (roleName?: string) => {
+    if (!isPlatformAdmin(roleName)) {
+      throw new ApiError(
+        403,
+        ERROR_CODES.platform.PLATFORM_FORBIDDEN,
+        "Apenas operadores platform_admin podem gerenciar tenants de clientes"
       );
     }
   };
@@ -1933,7 +1952,15 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
             name: { type: "string", minLength: 2 },
             email: { type: "string", minLength: 5 },
             password: { type: "string", minLength: 6 },
-            role_name: { type: "string", enum: ["admin_local", "supervisor", "agente"] },
+            role_name: {
+              type: "string",
+              enum: [
+                "platform_admin",
+                "admin_local",
+                "supervisor",
+                "agente",
+              ],
+            },
           },
         },
         response: {
@@ -1965,6 +1992,26 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           400,
           ERROR_CODES.users.ROLE_REQUIRED,
           "Perfil de usuário inválido"
+        );
+      }
+      const tenantMeta = await getTenantById(request.tenant.id);
+      const tenantType =
+        tenantMeta?.tenant_type === "platform" ? "platform" : "customer";
+      if (!isAllowedRoleForTenant(role_name, tenantType)) {
+        throw new ApiError(
+          400,
+          ERROR_CODES.users.ROLE_REQUIRED,
+          "Perfil não permitido neste tenant"
+        );
+      }
+      if (
+        role_name === "platform_admin" &&
+        !isPlatformAdmin(request.user?.role_name)
+      ) {
+        throw new ApiError(
+          403,
+          ERROR_CODES.users.FORBIDDEN_ROLE,
+          "Apenas platform_admin pode criar outro platform_admin"
         );
       }
       try {
@@ -2480,6 +2527,195 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           "Erro ao atualizar status da mensagem"
         );
       }
+    }
+  );
+
+  // ── Platform (tenant principal — platform_admin) ─────────────────────
+  fastify.get(
+    "/platform/tenants",
+    {
+      schema: {
+        response: {
+          200: successEnvelopeSchema({
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: true,
+            },
+          }),
+          403: errorEnvelopeSchema([ERROR_CODES.platform.PLATFORM_FORBIDDEN]),
+          500: errorEnvelopeSchema([ERROR_CODES.platform.TENANTS_LIST_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      ensurePlatformAdmin(request.user?.role_name);
+      try {
+        await ensurePlatformTenantSchema();
+        const tenants = await listCustomerTenants();
+        return sendSuccess(request, reply, tenants);
+      } catch (error) {
+        request.log.error(error);
+        throw new ApiError(
+          500,
+          ERROR_CODES.platform.TENANTS_LIST_FAILED,
+          "Erro ao listar tenants de clientes"
+        );
+      }
+    }
+  );
+
+  fastify.post<{
+    Body: {
+      name: string;
+      slug: string;
+      segment?: TenantSegment;
+      plan?: string;
+      initial_admin_name: string;
+      initial_admin_email: string;
+      initial_admin_password: string;
+    };
+  }>(
+    "/platform/tenants",
+    {
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: [
+            "name",
+            "slug",
+            "initial_admin_name",
+            "initial_admin_email",
+            "initial_admin_password",
+          ],
+          properties: {
+            name: { type: "string", minLength: 2 },
+            slug: { type: "string", minLength: 2 },
+            segment: {
+              type: "string",
+              enum: ["pesquisa", "atendimento", "captacao", "vendas", "misto"],
+            },
+            plan: { type: "string" },
+            initial_admin_name: { type: "string", minLength: 2 },
+            initial_admin_email: { type: "string", minLength: 5 },
+            initial_admin_password: { type: "string", minLength: 6 },
+          },
+        },
+        response: {
+          201: successEnvelopeSchema({
+            type: "object",
+            additionalProperties: true,
+          }),
+          400: errorEnvelopeSchema([
+            ERROR_CODES.platform.TENANT_SLUG_INVALID,
+            ERROR_CODES.users.ROLE_REQUIRED,
+          ]),
+          403: errorEnvelopeSchema([ERROR_CODES.platform.PLATFORM_FORBIDDEN]),
+          409: errorEnvelopeSchema([
+            ERROR_CODES.platform.TENANT_SLUG_EXISTS,
+            ERROR_CODES.users.USER_EMAIL_ALREADY_EXISTS,
+          ]),
+          500: errorEnvelopeSchema([ERROR_CODES.platform.TENANT_CREATE_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      ensurePlatformAdmin(request.user?.role_name);
+      const body = request.body;
+      try {
+        await ensurePlatformTenantSchema();
+        const result = await createCustomerTenant({
+          name: body.name,
+          slug: body.slug,
+          segment: body.segment ?? null,
+          plan: body.plan,
+          initialAdmin: {
+            name: body.initial_admin_name,
+            email: body.initial_admin_email,
+            password: body.initial_admin_password,
+          },
+        });
+        return sendSuccess(request, reply, result, 201);
+      } catch (error) {
+        request.log.error(error);
+        if (error instanceof Error) {
+          if (error.message === "SLUG_ALREADY_EXISTS") {
+            throw new ApiError(
+              409,
+              ERROR_CODES.platform.TENANT_SLUG_EXISTS,
+              "Já existe um tenant com este slug"
+            );
+          }
+          if (error.message === "INVALID_SLUG") {
+            throw new ApiError(
+              400,
+              ERROR_CODES.platform.TENANT_SLUG_INVALID,
+              "Slug inválido"
+            );
+          }
+        }
+        if (
+          error &&
+          typeof error === "object" &&
+          "code" in error &&
+          (error as { code?: string }).code === "23505"
+        ) {
+          throw new ApiError(
+            409,
+            ERROR_CODES.users.USER_EMAIL_ALREADY_EXISTS,
+            "Já existe um usuário com este e-mail na plataforma"
+          );
+        }
+        throw new ApiError(
+          500,
+          ERROR_CODES.platform.TENANT_CREATE_FAILED,
+          "Erro ao criar tenant de cliente"
+        );
+      }
+    }
+  );
+
+  fastify.get(
+    "/platform/session",
+    {
+      schema: {
+        response: {
+          200: successEnvelopeSchema({
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "home_tenant_id",
+              "acting_tenant_id",
+              "is_impersonating",
+              "role_name",
+            ],
+            properties: {
+              home_tenant_id: { type: "string" },
+              acting_tenant_id: { type: "string" },
+              is_impersonating: { type: "boolean" },
+              role_name: { type: "string" },
+              acting_tenant_name: { type: "string" },
+            },
+          }),
+        },
+      },
+    },
+    async (request, reply) => {
+      const home = request.homeTenantId ?? request.user?.tenant_id ?? "";
+      const acting = request.actingTenantId ?? request.tenant.id;
+      let actingName = request.tenant.name;
+      if (acting !== request.tenant.id) {
+        const t = await getTenantById(acting);
+        if (t) actingName = t.name;
+      }
+      return sendSuccess(request, reply, {
+        home_tenant_id: home,
+        acting_tenant_id: acting,
+        is_impersonating: home !== acting,
+        role_name: request.user?.role_name ?? "agente",
+        acting_tenant_name: actingName,
+      });
     }
   );
 

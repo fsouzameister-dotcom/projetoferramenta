@@ -1,7 +1,15 @@
 import bcrypt from "bcrypt";
 import { pool } from "./db";
+import {
+  type AppRole,
+  CUSTOMER_ROLES,
+  isAllowedRole,
+  isAllowedRoleForTenant,
+} from "./auth-roles";
+import { getTenantById } from "./tenant-platform";
 
-export type AppRole = "admin_local" | "supervisor" | "agente";
+export type { AppRole } from "./auth-roles";
+export { isAllowedRole, CUSTOMER_ROLES };
 
 export type TenantUser = {
   id: string;
@@ -12,12 +20,6 @@ export type TenantUser = {
   role_name: string;
 };
 
-const ALLOWED_ROLES: AppRole[] = ["admin_local", "supervisor", "agente"];
-
-export function isAllowedRole(role: string): role is AppRole {
-  return ALLOWED_ROLES.includes(role as AppRole);
-}
-
 export async function listUsersByTenant(tenantId: string): Promise<TenantUser[]> {
   const client = await pool.connect();
   try {
@@ -26,7 +28,7 @@ export async function listUsersByTenant(tenantId: string): Promise<TenantUser[]>
        FROM users u
        LEFT JOIN roles r ON r.id = u.role_id
        WHERE u.tenant_id = $1
-       ORDER BY u.created_at DESC NULLS LAST, u.email ASC`,
+       ORDER BY u.email ASC`,
       [tenantId]
     );
     return result.rows;
@@ -59,6 +61,25 @@ export async function getOrCreateRoleId(
   }
 }
 
+export async function emailExistsGlobally(
+  email: string,
+  excludeUserId?: string
+): Promise<boolean> {
+  const normalized = email.trim().toLowerCase();
+  const client = await pool.connect();
+  try {
+    const result = await client.query(
+      excludeUserId
+        ? `SELECT 1 FROM users WHERE LOWER(email) = $1 AND id <> $2 LIMIT 1`
+        : `SELECT 1 FROM users WHERE LOWER(email) = $1 LIMIT 1`,
+      excludeUserId ? [normalized, excludeUserId] : [normalized]
+    );
+    return result.rows.length > 0;
+  } finally {
+    client.release();
+  }
+}
+
 export async function createUserForTenant(input: {
   tenantId: string;
   name: string;
@@ -66,6 +87,20 @@ export async function createUserForTenant(input: {
   password: string;
   roleName: AppRole;
 }): Promise<TenantUser> {
+  const tenant = await getTenantById(input.tenantId);
+  const tenantType =
+    tenant?.tenant_type === "platform" ? "platform" : "customer";
+
+  if (!isAllowedRoleForTenant(input.roleName, tenantType)) {
+    throw new Error("ROLE_NOT_ALLOWED_FOR_TENANT");
+  }
+
+  if (await emailExistsGlobally(input.email)) {
+    const err = new Error("EMAIL_EXISTS") as Error & { code?: string };
+    err.code = "23505";
+    throw err;
+  }
+
   const roleId = await getOrCreateRoleId(input.tenantId, input.roleName);
   const passwordHash = await bcrypt.hash(input.password, 10);
   const client = await pool.connect();
@@ -74,7 +109,13 @@ export async function createUserForTenant(input: {
       `INSERT INTO users (id, email, name, password_hash, tenant_id, role_id)
        VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)
        RETURNING id, email, name, tenant_id, role_id`,
-      [input.email.trim().toLowerCase(), input.name.trim(), passwordHash, input.tenantId, roleId]
+      [
+        input.email.trim().toLowerCase(),
+        input.name.trim(),
+        passwordHash,
+        input.tenantId,
+        roleId,
+      ]
     );
     return {
       ...inserted.rows[0],
@@ -100,6 +141,24 @@ export async function updateUserForTenant(input: {
       [input.userId, input.tenantId]
     );
     if (checks.rows.length === 0) return null;
+
+    if (input.email !== undefined) {
+      const taken = await emailExistsGlobally(input.email, input.userId);
+      if (taken) {
+        const err = new Error("EMAIL_EXISTS") as Error & { code?: string };
+        err.code = "23505";
+        throw err;
+      }
+    }
+
+    if (input.roleName !== undefined) {
+      const tenant = await getTenantById(input.tenantId);
+      const tenantType =
+        tenant?.tenant_type === "platform" ? "platform" : "customer";
+      if (!isAllowedRoleForTenant(input.roleName, tenantType)) {
+        throw new Error("ROLE_NOT_ALLOWED_FOR_TENANT");
+      }
+    }
 
     const updates: string[] = [];
     const values: unknown[] = [];
@@ -159,7 +218,10 @@ export async function updateUserForTenant(input: {
   }
 }
 
-export async function deleteUserForTenant(tenantId: string, userId: string): Promise<boolean> {
+export async function deleteUserForTenant(
+  tenantId: string,
+  userId: string
+): Promise<boolean> {
   const client = await pool.connect();
   try {
     const deleted = await client.query(

@@ -1,20 +1,26 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import logoClienton from "../../logo-clienton.png";
+import { isPlatformAdmin } from "~lib/session";
 
-const navItems = [
+const baseNavItems = [
   { label: "Painel", path: "/dashboard", icon: "⊞" },
   { label: "Fluxos", path: "/flows", icon: "⬡" },
   { label: "Usuários", path: "/admin/users", icon: "👤" },
   { label: "IA", path: "/admin/ai", icon: "🤖" },
   { label: "WhatsApp", path: "/admin/whatsapp", icon: "💬" },
   { label: "Relatórios", path: "/reports", icon: "📊" },
-  { label: "Configurações", path: "/settings", icon: "⚙" },
 ];
 
 export default function Sidebar() {
   const location = useLocation();
   const [logoFailed, setLogoFailed] = useState(false);
+  const navItems = isPlatformAdmin()
+    ? [
+        { label: "Clientes", path: "/admin/platform/tenants", icon: "🏢" },
+        ...baseNavItems,
+      ]
+    : baseNavItems;
 
   return (
     <aside className="w-60 bg-gradient-to-b from-zinc-800 to-zinc-900 min-h-screen flex flex-col border-r border-zinc-700/80 shadow-2xl">

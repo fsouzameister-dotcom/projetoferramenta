@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getApiErrorMessage, loginRequest, unwrapApiData } from "~api/client";
+import { persistLoginSession } from "~lib/session";
 import logoClienton from "../../logo-clienton.png";
 
 export default function Login() {
-  const defaultTenantId =
-    (import.meta.env.VITE_DEFAULT_TENANT_ID as string | undefined)?.trim() ||
-    "00000000-0000-4000-8000-000000000001";
+  const defaultTenantId = (
+    import.meta.env.VITE_DEFAULT_TENANT_ID as string | undefined
+  )?.trim();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -23,29 +24,31 @@ export default function Login() {
       const response = await loginRequest({
         email,
         password,
-        tenantId: defaultTenantId,
+        tenantId: defaultTenantId || undefined,
       });
 
-      const { token, tenant_id: tenantId } = unwrapApiData<{
-        token: string;
-        tenant_id: string;
-        role_name?: string;
-        name?: string;
-      }>(response.data);
-
-      localStorage.setItem("jwt_token", token);
-      localStorage.setItem("tenant_id", tenantId);
       const payload = unwrapApiData<{
         token: string;
         tenant_id: string;
         role_name?: string;
         name?: string;
+        tenant_type?: string;
+        is_platform_admin?: boolean;
       }>(response.data);
-      localStorage.setItem("user_role", payload.role_name || "agente");
-      localStorage.setItem("user_name", payload.name || email);
+
+      persistLoginSession({
+        token: payload.token,
+        tenant_id: payload.tenant_id,
+        role_name: payload.role_name,
+        name: payload.name || email,
+        tenant_type: payload.tenant_type,
+        is_platform_admin: payload.is_platform_admin,
+      });
 
       if ((payload.role_name || "agente") === "agente") {
         navigate("/agent");
+      } else if (payload.role_name === "platform_admin") {
+        navigate("/admin/platform/tenants");
       } else {
         navigate("/dashboard");
       }

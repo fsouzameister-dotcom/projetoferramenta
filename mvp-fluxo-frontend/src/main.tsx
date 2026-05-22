@@ -19,36 +19,13 @@ import UsersAdmin from "./pages/UsersAdmin";
 import AiAdmin from "./pages/AiAdmin";
 import WhatsAppAdmin from "./pages/WhatsAppAdmin";
 import Reports from "./pages/Reports";
+import PlatformTenants from "./pages/PlatformTenants";
 import Sidebar from "./components/Sidebar";
-
-function isSessionValid(): boolean {
-  const token = localStorage.getItem("jwt_token");
-  const tenantId = localStorage.getItem("tenant_id");
-  if (!token || !tenantId) return false;
-
-  try {
-    const payloadBase64 = token.split(".")[1];
-    if (!payloadBase64) return false;
-    const normalized = payloadBase64.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
-    const payloadJson = atob(padded);
-    const payload = JSON.parse(payloadJson) as { exp?: number };
-    if (!payload.exp) return false;
-    return payload.exp * 1000 > Date.now();
-  } catch {
-    return false;
-  }
-}
+import TenantActingBanner from "./components/TenantActingBanner";
+import { clearSession, isSessionValid } from "./lib/session";
 
 function getUserRole(): string {
   return localStorage.getItem("user_role") || "agente";
-}
-
-function clearSession() {
-  localStorage.removeItem("jwt_token");
-  localStorage.removeItem("tenant_id");
-  localStorage.removeItem("user_role");
-  localStorage.removeItem("user_name");
 }
 
 function SessionActionButton() {
@@ -114,6 +91,7 @@ const LayoutWithSidebar = () => (
   <div className="flex h-screen">
     <Sidebar />
     <main className="flex-1 p-5 overflow-auto bg-gradient-to-br from-primary-dark via-[#132a55] to-[#0f1e3d] text-gray-100">
+      <TenantActingBanner />
       <Outlet />
     </main>
   </div>
@@ -146,7 +124,16 @@ const router = createBrowserRouter([
         element: <RequireAuth />,
         children: [
           {
-            element: <RequireRoles allowed={["admin_local", "supervisor", "admin"]} />,
+            element: (
+              <RequireRoles
+                allowed={[
+                  "platform_admin",
+                  "admin_local",
+                  "supervisor",
+                  "admin",
+                ]}
+              />
+            ),
             children: [
               {
                 element: <LayoutWithSidebar />,
@@ -160,6 +147,10 @@ const router = createBrowserRouter([
                   { path: "admin/users", element: <UsersAdmin /> },
                   { path: "admin/ai", element: <AiAdmin /> },
                   { path: "admin/whatsapp", element: <WhatsAppAdmin /> },
+                  {
+                    path: "admin/platform/tenants",
+                    element: <PlatformTenants />,
+                  },
                 ],
               },
             ],

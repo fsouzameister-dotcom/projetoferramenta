@@ -8,6 +8,8 @@ interface Tenant {
   is_active: boolean;
   max_users: number;
   max_flows: number;
+  tenant_type?: string;
+  segment?: string | null;
 }
 
 // Interface para o objeto User que será injetado na requisição (após autenticação)
@@ -25,6 +27,10 @@ interface AuthenticatedUser {
 declare module 'fastify' {
   interface FastifyRequest {
     tenant: Tenant;
-    user?: AuthenticatedUser; // 'user' é opcional pois nem toda rota exige autenticação
+    user?: AuthenticatedUser;
+    /** Tenant do JWT (casa do usuário). */
+    homeTenantId?: string;
+    /** Tenant efetivo da requisição (igual a tenant.id; útil para platform_admin). */
+    actingTenantId?: string;
   }
 }

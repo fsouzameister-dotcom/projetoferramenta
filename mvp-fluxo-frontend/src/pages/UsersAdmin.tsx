@@ -1,5 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import api, { getApiErrorMessage, unwrapApiData } from "../api/client";
+import {
+  getActingTenantId,
+  getHomeTenantId,
+  isPlatformAdmin,
+} from "~lib/session";
 
 type UserRow = {
   id: string;
@@ -8,7 +13,7 @@ type UserRow = {
   role_name: string;
 };
 
-const roleOptions = [
+const customerRoleOptions = [
   { value: "admin_local", label: "Admin local" },
   { value: "supervisor", label: "Supervisor" },
   { value: "agente", label: "Agente" },
@@ -20,6 +25,18 @@ function getSimulationFeatureKey(): string {
 }
 
 export default function UsersAdmin() {
+  const roleOptions = useMemo(() => {
+    const onPlatformHome =
+      isPlatformAdmin() && getActingTenantId() === getHomeTenantId();
+    if (onPlatformHome) {
+      return [
+        { value: "platform_admin", label: "Operador plataforma (master)" },
+        ...customerRoleOptions,
+      ];
+    }
+    return customerRoleOptions;
+  }, []);
+
   const simulationFeatureKey = getSimulationFeatureKey();
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);

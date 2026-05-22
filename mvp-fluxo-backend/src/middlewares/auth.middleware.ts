@@ -2,7 +2,12 @@ import { FastifyRequest, FastifyReply } from "fastify";
 import * as jwt from "jsonwebtoken";
 import { JWT_SECRET } from "../config";
 import { pool } from "../db";
+import { isPlatformAdmin } from "../auth-roles";
 import { ApiError, ERROR_CODES } from "../http";
+import {
+  assertCustomerTenantTarget,
+  ensurePlatformTenantSchema,
+} from "../tenant-platform";
 
 export async function authMiddleware(
   request: FastifyRequest,
@@ -19,6 +24,7 @@ export async function authMiddleware(
   }
 
   const token = authHeader.split(" ")[1];
+  const headerTenantId = request.tenant?.id;
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as {
@@ -48,21 +54,43 @@ export async function authMiddleware(
       }
 
       const row = userResult.rows[0];
-      if (row.tenant_id !== request.tenant.id) {
-        throw new ApiError(
-          403,
-          ERROR_CODES.auth.TOKEN_TENANT_MISMATCH,
-          "Token does not match tenant in x-tenant-id"
-        );
+      const homeTenantId = row.tenant_id as string;
+
+      if (headerTenantId && headerTenantId !== homeTenantId) {
+        if (!isPlatformAdmin(row.role_name)) {
+          throw new ApiError(
+            403,
+            ERROR_CODES.auth.TOKEN_TENANT_MISMATCH,
+            "Token does not match tenant in x-tenant-id"
+          );
+        }
+        await ensurePlatformTenantSchema();
+        try {
+          await assertCustomerTenantTarget(headerTenantId);
+        } catch {
+          throw new ApiError(
+            403,
+            ERROR_CODES.platform.NOT_CUSTOMER_TENANT,
+            "Acesso master permitido apenas a tenants de clientes"
+          );
+        }
+        request.actingTenantId = headerTenantId;
+      } else {
+        request.actingTenantId = homeTenantId;
       }
 
+      request.homeTenantId = homeTenantId;
       request.user = row;
     } finally {
       client.release();
     }
   } catch (error) {
     if (error instanceof jwt.JsonWebTokenError) {
-      throw new ApiError(401, ERROR_CODES.auth.TOKEN_INVALID, "Invalid or expired token");
+      throw new ApiError(
+        401,
+        ERROR_CODES.auth.TOKEN_INVALID,
+        "Invalid or expired token"
+      );
     }
     if (error instanceof ApiError) {
       throw error;
