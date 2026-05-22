@@ -167,14 +167,20 @@ Permanecem editáveis no editor, **sem** lógica no executor: `conversa`, `funca
 
 Opções de UX (não obrigatório nesta fase): ocultar da paleta ou marcar como "em breve".
 
-### Próxima onda sugerida (após decisão no escopo vigente)
+### Próxima onda (primeiro cliente — pesquisas, ver escopo vigente no DEVLOG)
 
-Ordem por impacto operacional — **nenhum item abaixo está comprometido até replanejamento explícito**:
+**0–30 dias**
 
-1. `transferir_agente` — roteamento para fila/agente humano.
-2. `transferir_chamada` — telefonia (depende de integração externa).
-3. `extrair_variavel` — parser/extração no contexto do fluxo.
-4. Integração **inbound WhatsApp** com `capturar_entrada` (lista/botões → `userInput`).
+1. Integração **inbound WhatsApp** com `capturar_entrada` (lista/botões/texto → `userInput`).
+2. `transferir_agente` — roteamento para fila/agente humano.
+3. `encerramento` — branch explícita no executor.
+4. `extrair_variavel` ou IA para respostas abertas (decisão técnica na implementação).
+
+**Integrações fora de node (mesma janela):** Lead Ads + Click-to-WhatsApp (FB/IG); cadastro mestre; insights agregados + LLM on demand.
+
+**31–60 dias**
+
+1. `transferir_chamada` + stack voz/STT/TTS/transcrição (piloto 1 fluxo / 1 número).
 
 ### Qualidade
 

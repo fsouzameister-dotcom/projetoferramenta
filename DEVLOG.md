@@ -4,8 +4,9 @@
 
 - Data: 2026-05-22
 - Escopo vigente: ver seção **[Escopo vigente — maio/2026](#escopo-vigente--maio2026)** (fonte única para prioridades atuais)
-- Commit de referência: `cafc3ed` (`master` alinhado com `origin/master`)
-- Status: produção em `app.clienton.com.br` / `api.clienton.com.br`; entregas de maio no `master`; pendências de produto listadas no escopo vigente
+- Primeiro cliente: empresa de **pesquisas** (WhatsApp BOT/IA + telefonia; leads FB/IG)
+- Meta **30 dias:** ~80% = WhatsApp pesquisa + IA texto + insights completos + cadastro mestre MVP
+- Meta **31–60 dias:** telefonia piloto (1 fluxo, 1 número)
 
 ## O que foi implementado
 
@@ -319,51 +320,91 @@ Plataforma omnicanal multi-tenant com:
 
 Documento de referência único para priorização. Atualizar este bloco quando mudar o que entra ou sai da frente ativa. Checkpoints históricos abaixo permanecem como log de sessão.
 
-**Última revisão:** 2026-05-22
+**Última revisão:** 2026-05-22 (alinhamento produto — primeiro cliente pesquisas)
 
-### Visão (inalterada)
+### Primeiro cliente (comprometido)
 
-Plataforma omnicanal **multi-tenant**: construtor e execução de fluxos, operação de atendimento (agente), canais WhatsApp (Meta Cloud API e Twilio), relatórios operacionais. **IA textual completa (RAG, insights)** e **voz/transcrição** permanecem no programa, mas **fora da frente ativa** até nova decisão explícita.
+- **Vertical:** empresa de **pesquisas** (coleta estruturada, ramificações, quotas).
+- **Canais prometidos:** WhatsApp (BOT + IA + agente humano quando necessário) e, em seguida, **telefone** (BOT/IA voz).
+- **Aquisição:** contatos de **anúncios Facebook e Instagram** — **Click-to-WhatsApp (CTWA)** e **Lead Ads** (webhook com nome/telefone). **Os dois** são requisito.
+- **Operação:** automação (fluxos) e **central do agente** com a mesma importância.
+- **Canais técnicos em produção:** **Meta Cloud API + Twilio** em paralelo; bloqueio Meta não cancela Twilio.
+- **IA:** dica ao agente, decisão no fluxo, atendimento autônomo com persona; RAG documental na sequência; voz acoplada à telefonia.
+- **SMS:** fora — só em futuro distante se inevitável.
+- **BSPs adicionais** (360dialog, Zenvia, etc.): roadmap, não bloqueia go-live do primeiro cliente.
 
-### Dentro do escopo (entregue ou em manutenção)
+### Meta de entrega
+
+| Janela | Objetivo (~80% da demanda do cliente) |
+|--------|----------------------------------------|
+| **0–30 dias** | WhatsApp pesquisa ponta a ponta (ambos provedores) + `capturar_entrada` via canal + **IA texto** no fluxo/agente + **insights completos** (dashboard + resumo LLM on demand) + **cadastro mestre MVP** + integração **CTWA + Lead Ads** |
+| **31–60 dias** | **Telefonia piloto** (1 fluxo, 1 número) com BOT/IA voz e transcrição reutilizável |
+| **Métricas de sucesso** | A definir pelo negócio; candidatas: taxa de conclusão da pesquisa, abandono por pergunta, tempo por pesquisa, % BOT vs agente, custo por pesquisa, origem campanha |
+
+### Visão de plataforma
+
+Plataforma omnicanal **multi-tenant**: construtor e execução de fluxos, atendimento humano, WhatsApp (Meta + Twilio), origem paid social, analytics/insights, cadastro mestre de respondente/cliente, telefonia com IA (fase 2).
+
+### Dentro do escopo (entregue ou em construção ativa)
 
 | Área | O que está no escopo | Estado |
 |------|----------------------|--------|
-| **Produção** | VPS InterServer, `app.` / `api.clienton.com.br`, Apache, SSL, backup Postgres | Operacional — ver `RUNBOOK_OPERACAO.md` |
-| **Core fluxos** | Editor, CRUD, execução: `inicio`, `mensagem`, `chamada_api`, `decisao` (modos avançados + IA no node) | Entregue |
-| **Capturar entrada** | `text`, `single_choice`, `multi_choice`; `awaiting_input`; eventos `flow_response_events` | Entregue (API); integração inbound WhatsApp **pendente** |
-| **Relatórios** | `/reports`, `GET /api/reports/flow-responses*` | Entregue |
-| **Admin** | Usuários/perfis, dashboard, fluxos, IA admin (personas/scripts — base), WhatsApp (`/admin/whatsapp`) | Entregue |
-| **Agente** | Portal `/agent`, conversas, ciclo open/closed/reabertura, envio texto e tipos auxiliares, simulação inbound (admin) | Entregue |
-| **WhatsApp Meta** | Adapter `whatsapp_cloud_api`, webhook `/webhooks/whatsapp`, outbound texto, status delivery | Fase 1 entregue; templates/mídia **parcial** |
-| **WhatsApp Twilio** | Canal `twilio_whatsapp`, webhooks Twilio, listagem Content templates no Novo contato | Entregue (lista); envio real com `ContentSid` **pendente** |
+| **Produção** | VPS, `app.` / `api.`, Apache, SSL, backup | Operacional — `RUNBOOK_OPERACAO.md` |
+| **Core fluxos** | `inicio`, `mensagem`, `chamada_api`, `decisao`, `capturar_entrada` | Entregue no executor; ver nodes abaixo |
+| **Relatórios base** | `/reports`, `flow_response_events` | Entregue — evoluir para insights completos |
+| **Admin / agente** | Usuários, fluxos, IA admin (base), `/agent`, WhatsApp admin | Entregue — gaps listados em pendências |
+| **WhatsApp dual** | Meta + Twilio, webhooks, outbound texto, status | Parcial — templates/mídia/fluxo inbound |
+| **IA texto** | Personas, scripts, `decisao` modo AI, `/api/ai/respond`, dica agente | Base no repo — amarrar ao WhatsApp em produção |
+| **Insights (completo)** | Agregados (`/reports`+) **e** jobs LLM on demand (`ai_insight_jobs` / `ai_insight_results`) | Planejado no devlog — **prioridade 0–30 dias** |
+| **Cadastro mestre** | Cliente/respondente, N telefones/canais, origem campanha | **Prioridade 0–30 dias** — não implementado |
+| **Anúncios FB/IG** | CTWA + Lead Ads webhook → conversa/fluxo | **Prioridade 0–30 dias** — não implementado |
+| **Telefonia** | Piloto 1 fluxo / 1 número, STT/TTS/transcrição | **31–60 dias** (após WhatsApp + IA texto sólidos) |
 | **Deploy** | `DEPLOY_COMPLETO_VPS.md`, `DEPLOY_WHATSAPP_VPS_COMPLETO.md` | Documentado |
 
 Detalhe de nodes: `DOCUMENTO_NODES_FLUXO.md`.
 
-### Fora do escopo imediato (não priorizar sem replanejar este bloco)
+### Nodes necessários para produção (pesquisas)
 
-- **IA programa completo:** RAG (Sprint 2), insights on demand (Sprint 3), voz/STT/TTS (Sprint 4) — base Sprint 1 existe no repo; retomada = decisão explícita.
-- **Embedded Signup Meta** (Fase 2 WhatsApp) — hoje Opção B (credenciais coladas).
-- **Nodes só visuais** no executor: `conversa`, `funcao`, `transferir_chamada`, `digitar_tecla`, `transferir_agente`, `sms`, `extrair_variavel`, `mcp` — permanecem na paleta; sem promessa de execução nesta fase.
-- **BSPs adicionais** (360dialog, Zenvia, etc.) — só sob demanda de cliente.
-- **Identidade de cliente consolidada** (múltiplos números → um cadastro mestre) — discutido; não implementado.
-- **Seleção de número outbound** por conversa com múltiplos números no tenant.
-- **Upload persistente** de mídia (imagem/anexo/áudio) com URL definitiva.
-- **Correção de rota** `/settings` no menu (bug lateral; usar `/admin/whatsapp`).
+Implementar no executor (ou ocultar da paleta até lá):
 
-### Pendências de produto (próxima onda — ordem sugerida)
+| Node | Uso | Estado |
+|------|-----|--------|
+| `inicio`, `mensagem`, `decisao`, `capturar_entrada`, `chamada_api` | Roteiro da pesquisa + integrações | Implementado (capturar: falta bridge WhatsApp) |
+| `transferir_agente` | Escalação humana | **Implementar** |
+| `encerramento` | Fim da pesquisa no fluxo | Parcial → fechar branch |
+| `extrair_variavel` ou IA | Resposta aberta | Avaliar IA vs parser dedicado |
+| `transferir_chamada` | Telefonia fase 2 | Após piloto voz |
+| Demais (`conversa`, `funcao`, `sms`, `mcp`, …) | Não bloqueiam go-live | Ocultar ou "em breve" |
 
-1. **Templates Twilio em produção** — dropdown do Novo contato deve listar Content API (`HX…`); se só 3 exemplos locais → diagnóstico (modo API, canal, credenciais, deploy) — ver checkpoint 2026-05-18.
-2. **Envio real de template Twilio** — `POST Messages` com `ContentSid` + `ContentVariables` ao criar conversa (hoje metadados + UI).
-3. **Webhook WhatsApp → fluxo** — resposta inbound (lista/botões) mapeada para `userInput` e retomada de `capturar_entrada`.
-4. **Templates Meta** sincronizados para retomada de conversa (janela fechada).
-5. **Mídia** WhatsApp (envio/recepção) e fechamento do item “upload persistente” no agente.
+### Fora do escopo (até nova decisão)
 
-### Contexto paralelo (não bloqueia escopo técnico acima)
+- **SMS** como canal.
+- **Embedded Signup Meta** (Fase 2) — manter Opção B até demanda.
+- **BSPs** além Meta/Twilio (exceto sob contrato específico).
+- **Seleção de número outbound** por conversa (múltiplos números no tenant) — desejável, não bloqueia piloto.
+- **Upload persistente** de mídia — importante, mas após núcleo pesquisa WhatsApp.
+- Bug menu **`/settings`** — corrigir quando tocar frontend admin.
 
-- Tratativa **bloqueio Meta** (WABA/sender) em andamento pelo negócio.
-- **IA** adiada de propósito; não contar como atraso de sprint operacional.
+### Plano 0–30 dias (ordem de execução)
+
+1. **WhatsApp estável (Meta + Twilio):** templates Twilio reais (`ContentSid`), templates Meta retomada, inbound → `capturar_entrada` (listas/botões/texto).
+2. **IA texto rápida:** persona de pesquisa; fluxo autônomo + dica agente + `decisao` AI em cenários reais do cliente.
+3. **`transferir_agente`:** executor + fila no painel agente.
+4. **Cadastro mestre MVP:** entidade cliente/respondente + vínculos telefone/canal + campo origem (orgânico / CTWA / lead_id).
+5. **Anúncios FB/IG:** CTWA (deep link / referral) + Lead Ads (webhook Meta → criar contato e disparar fluxo).
+6. **Insights completos:** evoluir `/reports` (agregados, funil por pergunta) + `POST/GET /api/ai/insights/*` com jobs assíncronos e resumo em linguagem natural.
+7. **Mídia WhatsApp** e polish agente — conforme capacidade na janela.
+
+### Plano 31–60 dias
+
+1. **Telefonia piloto:** 1 número, 1 fluxo espelhando pesquisa voz; STT/TTS; transcrição para agente e para insights em lote.
+2. **RAG / documentos** (se pesquisa usar base de conhecimento).
+3. Refino métricas e dashboards por campanha/fila.
+
+### Contexto paralelo
+
+- Tratativa **bloqueio Meta** (WABA/sender) — Twilio segue como canal de teste/produção.
+- **Métricas de sucesso** — pendente definição pelo negócio.
 
 ### Critério para mudar este escopo
 
