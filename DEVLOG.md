@@ -6,7 +6,8 @@
 - Escopo vigente: **[Escopo vigente — maio/2026](#escopo-vigente--maio2026)** (prioridades atuais)
 - Retomada rápida: **[Checkpoint sessão 2026-05-22 — alinhamento produto](#checkpoint-de-sessão-2026-05-22--alinhamento-produto)**
 - Commits locais (push pendente se ainda não publicou): `7111392`, `6291e7f` + checkpoint desta sessão
-- Primeiro cliente: **pesquisas** — WhatsApp BOT/IA + agente; FB/IG (CTWA + Lead Ads); telefonia semanas 5–8
+- Plataforma **multi-vertical** (pesquisa, atendimento, captação, vendas); 1º tenant cliente = **pesquisas**
+- Multi-tenant master: vários `platform_admin`, vê tudo, impersonação total, email único global (a implementar)
 - Meta **0–30 dias:** ~80% WhatsApp pesquisa + IA texto + insights (agregados + LLM) + cadastro mestre + ads
 - Meta **31–60 dias:** telefonia piloto (1 fluxo, 1 número)
 
@@ -322,11 +323,26 @@ Plataforma omnicanal multi-tenant com:
 
 Documento de referência único para priorização. Atualizar este bloco quando mudar o que entra ou sai da frente ativa. Checkpoints históricos abaixo permanecem como log de sessão.
 
-**Última revisão:** 2026-05-22 (alinhamento produto — primeiro cliente pesquisas)
+**Última revisão:** 2026-05-22 (plataforma multi-vertical + primeiro cliente pesquisas)
 
-### Primeiro cliente (comprometido)
+### Modelo de negócio da plataforma (agnóstico a vertical)
 
-- **Vertical:** empresa de **pesquisas** (coleta estruturada, ramificações, quotas).
+A ClientOn é **plataforma omnicanal multi-tenant**, não um produto só de pesquisas. Cada **tenant cliente** pode operar um ou mais **casos de uso**, conforme contrato:
+
+| Caso de uso | Exemplos | Recursos típicos |
+|-------------|----------|------------------|
+| **Pesquisa** | questionários, quotas, CATI/CATI digital | `capturar_entrada`, relatórios por pergunta, insights |
+| **Atendimento** | SAC, suporte, pós-venda | agente, filas, `transferir_agente`, janela 24h, templates |
+| **Captação** | leads de campanha, formulários, ads | CTWA, Lead Ads, cadastro mestre, origem campanha |
+| **Vendas** | qualificação, agendamento, follow-up | fluxo + agente + IA, `chamada_api`, decisão, templates |
+
+O **mesmo núcleo** (fluxos, WhatsApp, agente, IA, insights, cadastro mestre) serve todas as verticais; o que muda é **como o tenant configura** fluxos, filas, personas e relatórios — não um fork de produto por vertical.
+
+**Primeiro tenant cliente em produção:** empresa de **pesquisas** (valida o núcleo; não restringe os próximos clientes).
+
+### Primeiro cliente (comprometido — instância pesquisas)
+
+- **Vertical deste tenant:** **pesquisas** (coleta estruturada, ramificações, quotas).
 - **Canais prometidos:** WhatsApp (BOT + IA + agente humano quando necessário) e, em seguida, **telefone** (BOT/IA voz).
 - **Aquisição:** contatos de **anúncios Facebook e Instagram** — **Click-to-WhatsApp (CTWA)** e **Lead Ads** (webhook com nome/telefone). **Os dois** são requisito.
 - **Operação:** automação (fluxos) e **central do agente** com a mesma importância.
@@ -345,7 +361,21 @@ Documento de referência único para priorização. Atualizar este bloco quando 
 
 ### Visão de plataforma
 
-Plataforma omnicanal **multi-tenant**: construtor e execução de fluxos, atendimento humano, WhatsApp (Meta + Twilio), origem paid social, analytics/insights, cadastro mestre de respondente/cliente, telefonia com IA (fase 2).
+Plataforma omnicanal **multi-tenant** (pesquisa, atendimento, captação, vendas e combinações): construtor e execução de fluxos, atendimento humano, WhatsApp (Meta + Twilio), origem paid social, analytics/insights, cadastro mestre de contato, telefonia com IA (fase 2).
+
+### Multi-tenant plataforma — decisões de produto (em discussão / a implementar)
+
+| Tema | Decisão |
+|------|---------|
+| Tenant principal | **ClientOn Platform** — todas as funcionalidades do produto **+** gestão de tenants clientes |
+| Tenants clientes | Um tenant por cliente final; vertical livre (`segment` opcional: `pesquisa`, `atendimento`, `captacao`, `vendas`, `misto`) |
+| Operadores ClientOn | **Vários** `platform_admin` no tenant principal (futuros funcionários) |
+| Visibilidade | `platform_admin` vê **todos** os tenants clientes |
+| Acesso ao ambiente do cliente | **Total** (incl. usuários, segredos WhatsApp, apagar dados) via impersonação (`x-tenant-id` ativo) |
+| Email / login | **Único global** — um email = um usuário em um tenant; login por email + senha (tenant resolvido no backend) |
+| Cliente pesquisas | Criado como **segundo tenant** (não reutilizar tenant dev como produção do cliente) |
+
+Detalhe técnico previsto: ver discussão em sessão; implementação em fases (role, APIs `/api/platform/tenants`, impersonação, UI Clientes).
 
 ### Dentro do escopo (entregue ou em construção ativa)
 
@@ -365,17 +395,18 @@ Plataforma omnicanal **multi-tenant**: construtor e execução de fluxos, atendi
 
 Detalhe de nodes: `DOCUMENTO_NODES_FLUXO.md`.
 
-### Nodes necessários para produção (pesquisas)
+### Nodes prioritários para produção (qualquer vertical)
 
-Implementar no executor (ou ocultar da paleta até lá):
+Implementar no executor (ou ocultar da paleta até lá). Exemplos de uso por vertical entre parênteses.
 
-| Node | Uso | Estado |
-|------|-----|--------|
-| `inicio`, `mensagem`, `decisao`, `capturar_entrada`, `chamada_api` | Roteiro da pesquisa + integrações | Implementado (capturar: falta bridge WhatsApp) |
-| `transferir_agente` | Escalação humana | **Implementar** |
-| `encerramento` | Fim da pesquisa no fluxo | Parcial → fechar branch |
-| `extrair_variavel` ou IA | Resposta aberta | Avaliar IA vs parser dedicado |
-| `transferir_chamada` | Telefonia fase 2 | Após piloto voz |
+| Node | Uso transversal | Estado |
+|------|-----------------|--------|
+| `inicio`, `mensagem`, `decisao`, `chamada_api` | Qualquer fluxo (vendas, SAC, captação) | Implementado |
+| `capturar_entrada` | Pesquisa, qualificação, formulários WhatsApp | Implementado (falta bridge inbound WhatsApp) |
+| `transferir_agente` | Atendimento, vendas, exceção em pesquisa | **Implementar** |
+| `encerramento` | Fim de fluxo / pesquisa / protocolo | Parcial → fechar branch |
+| `extrair_variavel` ou IA | Lead scoring, parsing de resposta livre | Avaliar IA vs parser |
+| `transferir_chamada` | Telefonia (todas as verticais com voz) | Fase 2 |
 | Demais (`conversa`, `funcao`, `sms`, `mcp`, …) | Não bloqueiam go-live | Ocultar ou "em breve" |
 
 ### Fora do escopo (até nova decisão)
@@ -390,7 +421,7 @@ Implementar no executor (ou ocultar da paleta até lá):
 ### Plano 0–30 dias (ordem de execução)
 
 1. **WhatsApp estável (Meta + Twilio):** templates Twilio reais (`ContentSid`), templates Meta retomada, inbound → `capturar_entrada` (listas/botões/texto).
-2. **IA texto rápida:** persona de pesquisa; fluxo autônomo + dica agente + `decisao` AI em cenários reais do cliente.
+2. **IA texto rápida:** personas por tenant (pesquisa, vendas, SAC…); fluxo autônomo + dica agente + `decisao` AI.
 3. **`transferir_agente`:** executor + fila no painel agente.
 4. **Cadastro mestre MVP:** entidade cliente/respondente + vínculos telefone/canal + campo origem (orgânico / CTWA / lead_id).
 5. **Anúncios FB/IG:** CTWA (deep link / referral) + Lead Ads (webhook Meta → criar contato e disparar fluxo).

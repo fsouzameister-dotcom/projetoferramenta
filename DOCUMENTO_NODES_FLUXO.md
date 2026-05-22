@@ -167,7 +167,9 @@ Permanecem editáveis no editor, **sem** lógica no executor: `conversa`, `funca
 
 Opções de UX (não obrigatório nesta fase): ocultar da paleta ou marcar como "em breve".
 
-### Próxima onda (primeiro cliente — pesquisas, ver escopo vigente no DEVLOG)
+### Próxima onda (produção — qualquer tenant cliente; 1º go-live = pesquisas)
+
+Ver escopo vigente no DEVLOG (plataforma agnóstica: pesquisa, atendimento, captação, vendas).
 
 **0–30 dias**
 
