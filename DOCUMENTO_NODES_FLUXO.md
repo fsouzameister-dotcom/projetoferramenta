@@ -144,6 +144,10 @@ Este documento consolida o que cada node faz hoje no projeto, considerando:
 
 ### `sms`
 
+- Status: `Sem função de negócio`
+- Frontend: node visual (paleta "Em breve").
+- Backend: sem envio de SMS no executor.
+
 ## Conclusão objetiva
 
 Nodes com execução de negócio real hoje:
