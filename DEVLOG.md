@@ -3,9 +3,11 @@
 ## Checkpoint atual
 
 - Data: 2026-05-22
-- Escopo vigente: ver seção **[Escopo vigente — maio/2026](#escopo-vigente--maio2026)** (fonte única para prioridades atuais)
-- Primeiro cliente: empresa de **pesquisas** (WhatsApp BOT/IA + telefonia; leads FB/IG)
-- Meta **30 dias:** ~80% = WhatsApp pesquisa + IA texto + insights completos + cadastro mestre MVP
+- Escopo vigente: **[Escopo vigente — maio/2026](#escopo-vigente--maio2026)** (prioridades atuais)
+- Retomada rápida: **[Checkpoint sessão 2026-05-22 — alinhamento produto](#checkpoint-de-sessão-2026-05-22--alinhamento-produto)**
+- Commits locais (push pendente se ainda não publicou): `7111392`, `6291e7f` + checkpoint desta sessão
+- Primeiro cliente: **pesquisas** — WhatsApp BOT/IA + agente; FB/IG (CTWA + Lead Ads); telefonia semanas 5–8
+- Meta **0–30 dias:** ~80% WhatsApp pesquisa + IA texto + insights (agregados + LLM) + cadastro mestre + ads
 - Meta **31–60 dias:** telefonia piloto (1 fluxo, 1 número)
 
 ## O que foi implementado
@@ -1531,3 +1533,76 @@ Resumo: `git clone` → `rsync` backend → `npm ci && build` → `restart mvp-b
 - Envio real de template Twilio com `ContentSid` + `ContentVariables` no POST de nova conversa (hoje metadados + UI).
 
 > Pendências consolidadas: **[Escopo vigente — maio/2026](#escopo-vigente--maio2026)**.
+
+---
+
+## Checkpoint de sessão (2026-05-22) — alinhamento produto
+
+Use este bloco para retomar **sem depender do histórico do chat**.
+
+### O que foi feito nesta sessão (documentação)
+
+1. Criado bloco **[Escopo vigente — maio/2026](#escopo-vigente--maio2026)** no `DEVLOG.md` (fonte única de prioridades).
+2. Alinhados `DOCUMENTO_NODES_FLUXO.md`, `RUNBOOK_OPERACAO.md`, `DEPLOY_*` com links ao escopo.
+3. Workshop de produto com o primeiro cliente (**empresa de pesquisas**) — decisões abaixo gravadas no escopo vigente.
+4. Commits (verificar `git push` antes de deploy na VPS):
+   - `7111392` — docs: consolidar escopo vigente maio/2026
+   - `6291e7f` — docs: alinhar escopo ao primeiro cliente de pesquisas
+   - *(esta sessão)* — checkpoint de retomada
+
+### Decisões de produto (fechadas)
+
+| Tema | Decisão |
+|------|---------|
+| Cliente ideal | Pesquisas; WhatsApp BOT/IA; telefone com BOT/IA depois |
+| Dia feliz ~30 dias | ~**80%** da demanda acima (ver tabela no escopo vigente) |
+| Canais | **Meta + Twilio** em produção; bloqueio Meta não cancela Twilio |
+| Fluxo vs agente | **Ambos** (automação + central do agente) |
+| IA | Dica agente, decisão no fluxo, persona autônoma; voz com telefonia; **rápido após WhatsApp** |
+| Anúncios FB/IG | **Click-to-WhatsApp e Lead Ads** (os dois) |
+| Telefonia | **Semanas 5–8**, piloto 1 fluxo / 1 número (não entra nos 30 dias do 80%) |
+| Insights | **Logo de cara, completo:** dashboard agregados **+** jobs LLM on demand |
+| Cadastro mestre | **Prioridade 0–30 dias** (MVP) |
+| SMS | Fora (futuro distante, se necessário) |
+| BSPs | Outros provedores no roadmap futuro |
+| Nodes | Só os necessários para produção, **funcionais**; ocultar resto na paleta |
+| Métricas de sucesso | **A definir** pelo negócio (candidatas no escopo vigente) |
+
+### Plano 0–30 dias (ordem no escopo — não implementado ainda)
+
+1. WhatsApp dual estável (templates Twilio/Meta, inbound → `capturar_entrada`).
+2. IA texto no fluxo e agente.
+3. `transferir_agente` no executor.
+4. Cadastro mestre MVP + origem campanha.
+5. CTWA + Lead Ads → contato/fluxo.
+6. Insights completos (`/reports` + `/api/ai/insights/*`).
+7. Mídia WhatsApp se couber.
+
+### Plano 31–60 dias
+
+- Telefonia piloto; RAG se necessário; refinamento métricas.
+
+### Épico sugerido para próxima sessão de código
+
+**“Pesquisa WhatsApp ponta a ponta”** — itens 1–3 do plano 30 dias (sem ads/insights na primeira leva), para o cliente testar questionário real no número.
+
+Alternativa: desenhar fluxo **CTWA + Lead Ads** (entrada automática vs fila agente) antes de codar.
+
+### Comandos de retomada
+
+```powershell
+cd c:\projetoferramenta
+git pull origin master
+git log -3 --oneline
+```
+
+Ler: `DEVLOG.md` → [Escopo vigente — maio/2026](#escopo-vigente--maio2026).
+
+Deploy VPS (quando houver código novo): `DEPLOY_COMPLETO_VPS.md`.
+
+### Pendências técnicas herdadas (ainda válidas)
+
+- Templates Twilio no Novo contato (diagnóstico checkpoint 2026-05-18).
+- Envio real `ContentSid` ao criar conversa.
+- Menu `/settings` sem rota.
+- Push dos commits de documentação desta sessão se ainda não publicados.
