@@ -5,6 +5,8 @@
 - Data: 2026-05-22
 - Escopo vigente: **[Escopo vigente — maio/2026](#escopo-vigente--maio2026)** (prioridades atuais)
 - Retomada rápida: **[Checkpoint sessão 2026-05-22 — alinhamento produto](#checkpoint-de-sessão-2026-05-22--alinhamento-produto)**
+- Telefonia (discussão pausada): **[Discussão telefonia — a retomar](#discussão-telefonia--a-retomar-2026-05-22)**
+- Benchmark mercado 2026: **[Benchmark omnichannel — matriz ClientOn](#benchmark-omnichannel-2026--matriz-clienton)**
 - Commits locais (push pendente se ainda não publicou): `7111392`, `6291e7f` + checkpoint desta sessão
 - Plataforma **multi-vertical** (pesquisa, atendimento, captação, vendas); 1º tenant cliente = **pesquisas**
 - Multi-tenant master: vários `platform_admin`, vê tudo, impersonação total, email único global (a implementar)
@@ -1612,6 +1614,249 @@ Use este bloco para retomar **sem depender do histórico do chat**.
 ### Plano 31–60 dias
 
 - Telefonia piloto; RAG se necessário; refinamento métricas.
+
+---
+
+## Benchmark omnichannel 2026 — matriz ClientOn
+
+> **Status:** referência de produto (2026-05-22). Comparação com líderes (Salesforce, Zendesk, HubSpot, Braze, VTEX, Medallia, etc.) vs **o que o repo e o escopo vigente cobrem**.  
+> **Legenda — Temos hoje:** ✅ sim · 🟡 parcial · ❌ não · **Viável:** 🟢 0–30d · 🟡 31–60d · 🟠 90d+ · 🔴 fora do core / não perseguir
+
+### Visão executiva
+
+O benchmark descreve **suite completa** (Data Cloud, Marketing Cloud, unified commerce, IoT). O ClientOn **não compete em breadth** — compete como **plataforma omnicanal enxuta**: fluxos + WhatsApp (Meta + Twilio) + agente + IA texto + pesquisa/captação, multi-tenant, caminho para voz.
+
+**Meta realista 0–90 dias:** ~**40–50%** do valor percebido do benchmark no nicho **pesquisa / atendimento WhatsApp / captação por ads**, sem replicar Data Cloud nem unified commerce.
+
+```text
+                    Mercado líder          ClientOn hoje          Viável 0–90d
+SCV omnicanal       ████████████           ██░░░░░░░░░░           ████░░░░░░
+IA agente+cliente   ████████████           ████░░░░░░░░           ██████░░░░
+Orquestração        ████████████           █████░░░░░░░           ██████░░░░
+Unified commerce    ████████████           ░░░░░░░░░░░░           █░░░░░░░░░░░
+Canais emergentes   ████████████           ██░░░░░░░░░░           ████░░░░░░
+CX analytics        ████████████           ███░░░░░░░░░           █████░░░░░░░
+```
+
+---
+
+### 1. Unificação da jornada e single customer view (SCV)
+
+**Referência mercado:** perfil único em loja, app, WhatsApp, chat, voz, e-mail, push, redes; continuidade chat→telefone; identidade persistente (gráfico cookies/login/offline).
+
+| Capacidade | Temos | Viável | Sprint / nota |
+|------------|-------|--------|----------------|
+| Multi-tenant + gestão de clientes (`platform_admin`, impersonação) | ✅ | — | Entregue |
+| Conversas WhatsApp + histórico no painel agente | 🟡 | 🟢 | Inbound → fluxo ainda incompleto |
+| Executor de fluxos (jornada lógica) | 🟡 | 🟢 | Nodes produção + `receber_mensagem` + timeout |
+| **Cadastro mestre** (1 pessoa, N telefones/canais, origem campanha) | ❌ | 🟢 | **Plano 0–30d #4** |
+| CTWA + Lead Ads → mesmo contato | ❌ | 🟢 | **Plano 0–30d #5** |
+| Continuidade automática chat → voz com contexto | ❌ | 🟡 | Após cadastro mestre + piloto voz |
+| E-mail, app, loja física, redes no mesmo perfil | ❌ | 🟠 | Roadmap; integração por `chamada_api` |
+| Gráfico de identidade / reconhecimento anônimo (CDP) | ❌ | 🔴 | Não perseguir no curto prazo |
+
+**Gap crítico para SCV no nosso nicho:** cadastro mestre + bridge inbound WhatsApp + origem ads — **viável e já priorizado**.
+
+---
+
+### 2. IA generativa (cliente + operador)
+
+**Referência mercado:** agentes resolvem transações; copiloto resume, sugere, preenche formulários (~70% tempo).
+
+| Capacidade | Temos | Viável | Sprint / nota |
+|------------|-------|--------|----------------|
+| Personas, scripts, providers (`/admin/ai`) | ✅ | — | |
+| IA no fluxo (`decisao` modo AI) | ✅ | 🟢 | |
+| `POST /api/ai/respond` | ✅ | 🟢 | |
+| Dica ao agente (`/api/ai/assist-hint`) | 🟡 | 🟢 | Amarrar AgentHome em produção |
+| BOT WhatsApp autônomo ponta a ponta | 🟡 | 🟢 | Épico inbound + executeFlow |
+| Transações ERP (pedido, reagendamento) | ❌ | 🟠 | Por tenant via `chamada_api` |
+| Resumo automático de conversa longa | ❌ | 🟢 | `ai_insight_jobs` (DEVLOG Sprint 3) |
+| Preenchimento automático de formulários | ❌ | 🟡 | Médio prazo |
+| RAG / documentos | ❌ | 🟠 | Sprint 2 DEVLOG |
+| IA voz / tom emocional | ❌ | 🟡 | Ver [telefonia](#discussão-telefonia--a-retomar-2026-05-22) |
+
+**Posicionamento:** acima de chatbot simples; abaixo de “agente transacional” Salesforce — suficiente para **pesquisa + SAC leve**.
+
+---
+
+### 3. Orquestração de jornadas (eventos, personalização, preditivo)
+
+**Referência mercado:** fluxos multi-canal; abandono carrinho → push → WhatsApp → ligação; ML escolhe melhor ação.
+
+| Capacidade | Temos | Viável | Sprint / nota |
+|------------|-------|--------|----------------|
+| Editor visual + executor de fluxos | ✅ | — | |
+| Regras, API, handoff, encerramento, timeout | ✅ | 🟢 | |
+| Agendamento por tempo (`flow-wait-scheduler`) | ✅ | 🟢 | Redis |
+| Webhooks WhatsApp (evento entrada) | 🟡 | 🟢 | Grava conversa; falta disparar fluxo |
+| Lead Ads / CTWA como gatilho de jornada | ❌ | 🟢 | Plano 0–30d |
+| Push, e-mail, SMS na mesma jornada | ❌ | 🔴 SMS fora de escopo | |
+| Orquestração **preditiva** (melhor canal/ação) | ❌ | 🔴 | Regras bastam no piloto; ML fase 3+ |
+| Discador / campanha outbound em massa | ❌ | 🟠 | Protótipo telefonia |
+
+**Posicionamento:** “mini-Braze” só para **WhatsApp + regras** — adequado a pesquisa e captação.
+
+---
+
+### 4. Comércio unificado (unified commerce)
+
+**Referência mercado:** estoque infinito, POS, OMS, pagamento omnichannel, retirada em loja (Shopify, VTEX, Adyen).
+
+| Capacidade | Temos | Viável | Sprint / nota |
+|------------|-------|--------|----------------|
+| Catálogo, estoque, POS, pagamento | ❌ | 🔴 | **Fora do core ClientOn** |
+| Consulta sistemas do cliente | 🟡 | 🟢 | Node `chamada_api` por integração |
+
+**Decisão:** ClientOn = **camada de conversação e jornada**; commerce fica nos sistemas do cliente.
+
+---
+
+### 5. Canais emergentes e atendimento proativo
+
+**Referência mercado:** RCS, vídeo no chat, voz IA emocional, IoT abre chamado (Field Service).
+
+| Capacidade | Temos | Viável | Sprint / nota |
+|------------|-------|--------|----------------|
+| WhatsApp texto + templates (Meta + Twilio) | 🟡 | 🟢 | Templates reais em polish |
+| Voz + IA tempo real | ❌ | 🟡 | 31–60d; protótipo ou Twilio |
+| RCS, vídeo nativo no chat | ❌ | 🟠 | |
+| IoT / field service proativo | ❌ | 🔴 | Não competir com SF Field Service |
+| Outbound proativo (empresa inicia) | 🟡 | 🟠 | Templates; discador depois |
+
+---
+
+### 6. Análise da experiência e circuito fechado (CX)
+
+**Referência mercado:** NPS/CSAT pós-interação; sentiment journey; alerta supervisor; escalonamento automático (Medallia, Qualtrics, Zendesk).
+
+| Capacidade | Temos | Viável | Sprint / nota |
+|------------|-------|--------|----------------|
+| Relatórios por pergunta (`/reports`, `flow_response_events`) | ✅ | 🟢 | |
+| Agregados por `promptKey` / opções | ✅ | 🟢 | |
+| Jobs LLM insights (resumo, riscos, oportunidades) | ❌ | 🟢 | Sprint 3 DEVLOG — **0–30d meta** |
+| NPS/CSAT pós-atendimento | ❌ | 🟢 | Node + evento |
+| Sentiment journey score em tempo real | ❌ | 🟠 | Após insights + filas |
+| Escalonamento automático por score | ❌ | 🟡 | Primeiro: `decisao` + `transferir_agente` |
+
+---
+
+### Priorização derivada do benchmark (checklist produto)
+
+**0–30 dias (fecha maior parte do gap viável)**
+
+| # | Item | Benchmark atende |
+|---|------|------------------|
+| 1 | WhatsApp estável + inbound → `executeFlow` | Orquestração + IA cliente |
+| 2 | Cadastro mestre MVP | SCV |
+| 3 | CTWA + Lead Ads | SCV + captação |
+| 4 | IA texto fluxo + dica agente produção | IA operador + cliente |
+| 5 | Insights agregados + jobs LLM MVP | CX analytics |
+| 6 | `transferir_agente` em produção real | Handoff |
+
+**31–60 dias**
+
+| # | Item | Benchmark atende |
+|---|------|------------------|
+| 7 | Telefonia piloto + transcrição | SCV + canais emergentes |
+| 8 | Mesmo contato WhatsApp ↔ voz | SCV |
+
+**Não fazer agora (benchmark sim, produto não)**
+
+- Unified commerce / POS / OMS  
+- Identity graph / CDP enterprise  
+- Orquestração preditiva multi-canal (ML)  
+- IoT field service  
+- RCS / SMS (SMS já fora de escopo)  
+
+### Diferencial honesto ClientOn
+
+- Fluxo visual + **executor próprio** (não só inbox)  
+- **Dois BSPs** WhatsApp (Meta + Twilio)  
+- **Multi-tenant plataforma** com impersonação  
+- Foco **pesquisa + captação + atendimento** — não suite horizontal completa  
+
+### Próxima revisão desta matriz
+
+Atualizar quando fechar: cadastro mestre, inbound→fluxo, CTWA/Lead Ads, insights jobs — marcar ✅ na tabela acima.
+
+---
+
+## Discussão telefonia — a retomar (2026-05-22)
+
+> **Status:** decisão de arquitetura **não fechada**. Retomar quando WhatsApp + fluxos + IA texto estiverem sólidos (meta 31–60 dias).  
+> **Contexto:** existe **protótipo próprio** de telefonia que pode ser embarcado no ClientOn.
+
+### Pergunta central
+
+Central que origina ligações, conversa com IA e responde em **tempo real** — é o modelo certo de produto; a dúvida é **como implementar** (Twilio-only vs protótipo vs híbrido).
+
+### Twilio em grande volume
+
+| Camada | Twilio escala bem? | Observação |
+|--------|-------------------|------------|
+| Telecom clássica (SIP, gravação, status, fila, transfer) | Sim | Limites de CPS/concorrência sobem com contrato |
+| IA voz tempo real (STT → LLM → TTS) | Depende da **nossa** arquitetura | Latência, throttling, pipeline em série afetam “qualidade” percebida |
+| Brasil | Atenção | Rota, CLI, custo/minuto, compliance |
+| Concentração | Risco | WhatsApp + voz na mesma conta = incidente amplo |
+
+**Conclusão provisória:** Twilio aguenta volume em telefonia tradicional; para BOT de voz em escala, consistência vem do **design do pipeline** + observabilidade (tempo de turno, abandono por etapa, por tenant), não só do provedor.
+
+### Quatro eixos de “qualidade” a medir no piloto
+
+1. **Telecom** — chamada estável, sem quedas.  
+2. **Conversação** — turn-taking, PT-BR, frases curtas.  
+3. **Negócio** — mesmo fluxo/persona/tenant; handoff agente; transcrição alinhada ao WhatsApp.  
+4. **Escala** — degradação controlada (filas, cap por tenant), não colapso total.
+
+### Três modelos em discussão
+
+| Modelo | Prós | Contras | Quando |
+|--------|------|---------|--------|
+| **A) Twilio-only** (voz + WhatsApp) | Menos ops, piloto rápido | Custo escala, voz IA, dependência | Piloto 1 número se protótipo não estiver pronto |
+| **B) Protótipo-only** (central própria) | Controle, custo, features já feitas | Ops SIP/qualidade/fraude 24/7 | Se protótipo já tem SLA/volume real |
+| **C) Híbrido** (recomendado a avaliar) | WhatsApp Twilio + voz no protótipo; ClientOn orquestra | Duas integrações | Produto maduro multi-canal |
+
+### Arquitetura alvo (híbrido / embarque do protótipo)
+
+```text
+ClientOn (multi-tenant, fluxos, IA, agente, insights, cadastro mestre)
+        │ eventos / comandos (webhook, como WhatsApp)
+        ▼
+Protótipo voz (SIP, mídia, discador, gravação)     Twilio (WhatsApp + voz fallback opcional)
+```
+
+**Contrato de integração sugerido (não implementado):**
+
+- Eventos: `call.started`, `call.ended`, `audio.turn`, `dtmf`  
+- Comandos: `speak`, `listen`, `transfer`, `hangup`, `run_flow_step`  
+- Sempre: `tenant_id`, `conversation_id`, `flow_id`, gravação para relatórios  
+- Abstração futura: `VoiceProvider` (`twilio` | `prototype` | outro)
+
+### Perguntas abertas sobre o protótipo (preencher na retomada)
+
+1. Inbound, outbound ou ambos? (pesquisa discada muda compliance e arquitetura)  
+2. Chamadas simultâneas já testadas em produção?  
+3. Latência média cliente fala → resposta TTS (ms)?  
+4. STT/TTS: interno ou qual API?  
+5. Gravação + transcrição prontas para agente/insights?  
+6. Transferência para humano: como (fila, ramal, WebRTC)?  
+7. Multi-tenant nativo ou single-tenant?  
+8. Substituir Twilio Voice ou conviver (WhatsApp Twilio + voz protótipo)?
+
+### Decisão de roadmap (provisória)
+
+| Janela | Foco |
+|--------|------|
+| **0–30 dias** | Não dividir foco — WhatsApp + fluxos + IA texto + cadastro mestre |
+| **31–60 dias** | Piloto: 1 fluxo pesquisa voz, 1 número; protótipo se mídia estável, senão Twilio Voice para validar UX |
+| **Nodes** | `transferir_chamada` / `digitar_tecla` → adaptador de voz, não Twilio direto no executor |
+
+### Próximo passo na retomada
+
+Responder as 8 perguntas acima + escolher A/B/C; então desenhar sequência do piloto (1 fluxo) mapeando nodes existentes (`mensagem`/`receber_mensagem` em voz, `decisao`, `transferir_agente`, `encerramento`).
+
+---
 
 ### Implementado (sessão — nodes Mensagem / Receber)
 
