@@ -7,6 +7,7 @@
 - Retomada rápida: **[Checkpoint sessão 2026-05-22 — alinhamento produto](#checkpoint-de-sessão-2026-05-22--alinhamento-produto)**
 - Telefonia (discussão pausada): **[Discussão telefonia — a retomar](#discussão-telefonia--a-retomar-2026-05-22)**
 - Benchmark mercado 2026: **[Benchmark omnichannel — matriz ClientOn](#benchmark-omnichannel-2026--matriz-clienton)**
+- Backlog produto: **[Backlog — roadmap (produto)](#backlog--roadmap-produto)**
 - Commits locais (push pendente se ainda não publicou): `7111392`, `6291e7f` + checkpoint desta sessão
 - Plataforma **multi-vertical** (pesquisa, atendimento, captação, vendas); 1º tenant cliente = **pesquisas**
 - Multi-tenant master: vários `platform_admin`, vê tudo, impersonação total, email único global (a implementar)
@@ -435,6 +436,44 @@ Implementar no executor (ou ocultar da paleta até lá). Exemplos de uso por ver
 1. **Telefonia piloto:** 1 número, 1 fluxo espelhando pesquisa voz; STT/TTS; transcrição para agente e para insights em lote.
 2. **RAG / documentos** (se pesquisa usar base de conhecimento).
 3. Refino métricas e dashboards por campanha/fila.
+
+### Backlog — roadmap (produto)
+
+Itens **fora do escopo 0–30 / 31–60**, mas **planejados** no roadmap. Prioridade sujeita a revisão após go-live do núcleo pesquisa WhatsApp.
+
+| Prioridade | Épico | Janela sugerida | Objetivo |
+|------------|-------|-----------------|----------|
+| P2 | **Tutoriais interativos in-app (product tours)** | 61–90 dias (ou polish pós go-live) | Usuários aprendem a usar o produto sem reuniões de CS |
+| P2 | Telefonia embarcada (protótipo) | 31–60+ | Ver [Discussão telefonia](#discussão-telefonia--a-retomar-2026-05-22) |
+| P3 | Orquestração preditiva (ML) | 90d+ | Ver [Benchmark](#benchmark-omnichannel-2026--matriz-clienton) — não perseguir antes |
+| P3 | Unified commerce | — | Fora do core |
+
+#### Épico: Tutoriais interativos in-app (product tours)
+
+> **Status:** backlog — **não implementado**.  
+> **Problema:** onboarding depende de CS; cada tenant novo repete as mesmas dúvidas (fluxos, WhatsApp, agente, platform_admin).
+
+**Resultado desejado:** tours dentro do produto (destaque de UI, passos, pular/concluir, não repetir após concluir).
+
+**Abordagem recomendada:** biblioteca React open source (**Driver.js** ou **React Joyride**) + roteiros versionados no repo (JSON por **role**), seletores estáveis `data-tour="..."`.
+
+**Tours MVP (fase 1)**
+
+| # | Tour | Público |
+|---|------|---------|
+| 1 | Primeiro acesso — Clientes, abrir tenant, Fluxos | `platform_admin` |
+| 2 | Editor de fluxo — paleta, salvar, Voltar, Receber Mensagem / timeout | `admin_local`, `supervisor` |
+| 3 | Painel agente — fila, resposta, template (janela 24h) | `agente`, supervisores |
+
+**Fase 2:** WhatsApp admin; checklist “configuração mínima do tenant”; tours por vertical (`pesquisa` vs `vendas`).
+
+**Fase 3:** tour contextual ao adicionar node; métrica `tour_completed` (opcional no backend).
+
+**Dependências:** UI estável com `data-tour`; não bloqueia WhatsApp / cadastro mestre / inbound.
+
+**Fora do v1 do épico:** editor no-code de tours, SaaS externo (Appcues/Pendo) — reavaliar se escala ou LGPD exigir.
+
+**Critério de pronto (MVP):** botão “?” reabre ajuda; 3 tours concluíveis sem erro de seletor; tours distintos por role.
 
 ### Contexto paralelo
 
@@ -1768,6 +1807,8 @@ CX analytics        ████████████           ███░�
 - Orquestração preditiva multi-canal (ML)  
 - IoT field service  
 - RCS / SMS (SMS já fora de escopo)  
+
+**Backlog (roadmap, não agora):** tutoriais interativos in-app — ver [Backlog — roadmap (produto)](#backlog--roadmap-produto).
 
 ### Diferencial honesto ClientOn
 
