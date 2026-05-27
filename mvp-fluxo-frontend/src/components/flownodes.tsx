@@ -219,6 +219,50 @@ export const CapturarEntradaNode = ({ data }: { data: any }) => {
   );
 };
 
+export const ContadorNode = ({ data }: { data: any }) => {
+  const limite =
+    data.config?.limite_passagens ?? data.config?.limitePassagens ?? 3;
+  const missing =
+    (!data.config?.next_node_id_within ? 1 : 0) +
+    (!data.config?.next_node_id_exceeded ? 1 : 0);
+  return (
+    <div
+      className={`px-4 py-3 shadow-lg rounded-lg bg-gray-900 border-2 min-w-[180px] cursor-pointer hover:shadow-xl transition-shadow relative ${
+        missing > 0 ? "border-amber-400" : "border-violet-500"
+      }`}
+      onClick={() => data.onSelect?.(data.id)}
+    >
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <div className="text-xs font-bold text-violet-300">🔢 Contador</div>
+        {missing > 0 ? (
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/20 text-amber-200 border border-amber-400/40">
+            {missing} sem destino
+          </span>
+        ) : null}
+      </div>
+      <div className="text-sm font-semibold text-white">{data.label}</div>
+      <div className="text-xs text-violet-200 mt-1">Limite: {limite} passagem(ns)</div>
+      {data.config?.variableName ? (
+        <div className="text-[10px] text-violet-200/80 mt-1">{data.config.variableName}</div>
+      ) : null}
+      <Handle type="target" position={Position.Top} />
+      <Handle type="source" position={Position.Bottom} id="within" />
+      <Handle
+        type="source"
+        position={Position.Right}
+        id="exceeded"
+        style={{ top: "70%", background: "#f87171" }}
+      />
+      <div className="absolute -bottom-5 left-2 text-[10px] text-violet-300">
+        Dentro
+      </div>
+      <div className="absolute top-[62%] -right-12 text-[10px] text-red-300">
+        Ultrapassou
+      </div>
+    </div>
+  );
+};
+
 export const DecisaoNode = ({ data }: { data: any }) => (
   (() => {
     const mode = data.config?.decisionMode || "simple";
@@ -347,6 +391,7 @@ export const nodeTypes = {
   receber_mensagem: ReceberMensagemNode,
   chamada_api: ChamadaApiNode,
   capturar_entrada: CapturarEntradaNode,
+  contador: ContadorNode,
   decisao: DecisaoNode,
   encerramento: EncerramentoNode,
   inicio: InicioNode,

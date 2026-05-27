@@ -6,6 +6,7 @@ import {
   type CapturarEntradaAwaiting,
 } from "./capturar-entrada";
 import { applyFlowAgentHandoff } from "./agent-conversations";
+import { executeContadorPassagensNode } from "./contador-passagens";
 import { executeEncerramentoNode } from "./encerramento";
 import {
   toCapturarEntradaConfigFromReceber,
@@ -836,6 +837,14 @@ export async function executeFlow(
       if (captureResult.lastResponseEventId) {
         lastResponseEventId = captureResult.lastResponseEventId;
       }
+    } else if (currentNode.type === "contador") {
+      const counterResult = executeContadorPassagensNode({
+        config,
+        nodeId: currentNode.id,
+        variables,
+      });
+      nextNodeId = counterResult.nextNodeId;
+      details = counterResult.details;
     } else if (currentNode.type === "transferir_agente") {
       let handoffApplied = false;
       if (input.conversationId) {

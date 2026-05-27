@@ -59,6 +59,7 @@ const productionPaletteItems: PaletteItem[] = [
   { id: "mensagem", name: "Mensagem", icon: "📨" },
   { id: "receber_mensagem", name: "Receber Mensagem", icon: "📩" },
   { id: "capturar_entrada", name: "Capturar Entrada", icon: "📥" },
+  { id: "contador", name: "Contador", icon: "🔢" },
   { id: "decisao", name: "Decisão", icon: "⚖️" },
   { id: "chamada_api", name: "Chamada API", icon: "🔌" },
   { id: "transferir_agente", name: "Transferir Agente", icon: "👤" },
@@ -354,6 +355,29 @@ export default function FlowEditor() {
             });
           }
           // Lógica para nós de decisão ou divisão lógica com múltiplos next_node_id
+          if (node.data.type === "contador") {
+            if (node.data.config.next_node_id_within) {
+              initialEdges.push({
+                id: `e${node.id}-within-${node.data.config.next_node_id_within}`,
+                source: node.id,
+                sourceHandle: "within",
+                target: node.data.config.next_node_id_within,
+                animated: true,
+                label: "Dentro do limite",
+              });
+            }
+            if (node.data.config.next_node_id_exceeded) {
+              initialEdges.push({
+                id: `e${node.id}-exceeded-${node.data.config.next_node_id_exceeded}`,
+                source: node.id,
+                sourceHandle: "exceeded",
+                target: node.data.config.next_node_id_exceeded,
+                animated: true,
+                label: "Ultrapassou",
+                style: { stroke: "#f87171" },
+              });
+            }
+          }
           if (node.data.type === "decisao" || node.data.type === "divisao_logica") {
             const routeRules = Array.isArray(node.data.config?.routeRules)
               ? node.data.config.routeRules
@@ -456,6 +480,13 @@ export default function FlowEditor() {
           { id: "opcao_2", label: "Opção 2" },
           { id: "opcao_3", label: "Opção 3" },
         ],
+      };
+    }
+    if (nodeType === "contador") {
+      return {
+        limite_passagens: 3,
+        variableName: "tentativas_invalidas",
+        increment: 1,
       };
     }
     if (nodeType === "transferir_agente") {
@@ -919,6 +950,13 @@ export default function FlowEditor() {
             updatedConfig.next_node_id_true = undefined; // Limpa os de decisão se for conexão padrão
             updatedConfig.next_node_id_false = undefined;
           }
+        } else if (sourceNode.type === "contador") {
+          if (params.sourceHandle === "exceeded") {
+            updatedConfig.next_node_id_exceeded = params.target;
+          } else {
+            updatedConfig.next_node_id_within = params.target;
+          }
+          updatedConfig.next_node_id = undefined;
         } else if (
           sourceNode.type === "receber_mensagem" &&
           params.sourceHandle === "timeout"
@@ -1001,6 +1039,12 @@ export default function FlowEditor() {
               }
             } else {
               updatedConfig.next_node_id = undefined;
+            }
+          } else if (sourceNode.type === "contador") {
+            if (edge.sourceHandle === "exceeded") {
+              updatedConfig.next_node_id_exceeded = undefined;
+            } else if (edge.sourceHandle === "within") {
+              updatedConfig.next_node_id_within = undefined;
             }
           } else if (
             sourceNode.type === "receber_mensagem" &&
@@ -1606,6 +1650,72 @@ export default function FlowEditor() {
                   teste). Par de <strong>Mensagem</strong> (envio). Use{" "}
                   <strong>Capturar Entrada</strong> para opções, múltipla escolha ou pergunta
                   estruturada.
+                </p>
+              </>
+            )}
+
+            {selectedNodeType === "contador" && (
+              <>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Limite de passagens
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={editNodeConfig.limite_passagens ?? 3}
+                    onChange={(e) =>
+                      setEditNodeConfig({
+                        ...editNodeConfig,
+                        limite_passagens: Math.max(0, Number(e.target.value) || 0),
+                      })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    A cada vez que o fluxo passa por este node, o contador sobe +1. Ex.: limite
+                    3 permite 3 passagens; na 4ª segue pela saída <strong>Ultrapassou</strong>.
+                  </p>
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Variável do contador
+                  </label>
+                  <input
+                    type="text"
+                    value={editNodeConfig.variableName || ""}
+                    onChange={(e) =>
+                      setEditNodeConfig({ ...editNodeConfig, variableName: e.target.value })
+                    }
+                    placeholder="tentativas_invalidas"
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Use em mensagens: {"{{tentativas_invalidas}}"} · Flag automática:{" "}
+                    {"{{tentativas_invalidas_ultrapassou}}"}
+                  </p>
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Incremento por passagem
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={editNodeConfig.increment ?? 1}
+                    onChange={(e) =>
+                      setEditNodeConfig({
+                        ...editNodeConfig,
+                        increment: Math.max(1, Number(e.target.value) || 1),
+                      })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg"
+                  />
+                </div>
+                <p className="text-xs text-gray-500">
+                  Conecte no canvas: saída inferior <strong>Dentro do limite</strong> e saída
+                  direita <strong>Ultrapassou</strong> (ex.: voltar a pedir resposta vs.
+                  encerrar ou transferir agente).
                 </p>
               </>
             )}
