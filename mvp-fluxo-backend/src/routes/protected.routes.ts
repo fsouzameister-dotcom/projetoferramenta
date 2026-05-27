@@ -31,7 +31,12 @@ import {
   listTabulacoesByTenant,
   updateTabulacao,
 } from "../tabulacoes";
-import { createMasterClient, listMasterClientsByTenant } from "../clients-master";
+import {
+  createMasterClient,
+  createMasterClientPhone,
+  listMasterClientPhones,
+  listMasterClientsByTenant,
+} from "../clients-master";
 import {
   hasAdminAccess,
   isAllowedRoleForTenant,
@@ -148,6 +153,34 @@ const masterClientSchema = {
     name: { type: "string" },
     email: { anyOf: [{ type: "string" }, { type: "null" }] },
     document: { anyOf: [{ type: "string" }, { type: "null" }] },
+    metadata: { type: "object", additionalProperties: true },
+    createdAt: { type: "string" },
+    updatedAt: { type: "string" },
+  },
+} as const;
+
+const masterClientPhoneSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id",
+    "tenantId",
+    "clientId",
+    "phoneE164",
+    "isPrimary",
+    "isWhatsApp",
+    "metadata",
+    "createdAt",
+    "updatedAt",
+  ],
+  properties: {
+    id: { type: "string" },
+    tenantId: { type: "string" },
+    clientId: { type: "string" },
+    phoneE164: { type: "string" },
+    label: { anyOf: [{ type: "string" }, { type: "null" }] },
+    isPrimary: { type: "boolean" },
+    isWhatsApp: { type: "boolean" },
     metadata: { type: "object", additionalProperties: true },
     createdAt: { type: "string" },
     updatedAt: { type: "string" },
@@ -1967,6 +2000,117 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
         500,
         ERROR_CODES.clients.CLIENT_CREATE_FAILED,
         "Erro ao criar cliente"
+      );
+    }
+  });
+
+  fastify.get<{
+    Params: { clientId: string };
+  }>("/clients/:clientId/phones", {
+    schema: {
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: ["clientId"],
+        properties: { clientId: { type: "string", minLength: 1 } },
+      },
+      response: {
+        200: successEnvelopeSchema({ type: "array", items: masterClientPhoneSchema }),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        500: errorEnvelopeSchema([ERROR_CODES.clients.CLIENT_PHONES_LIST_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    const tenantId = request.tenant.id;
+    try {
+      const rows = await listMasterClientPhones({
+        tenantId,
+        clientId: request.params.clientId,
+      });
+      return sendSuccess(request, reply, rows);
+    } catch (err) {
+      request.log.error(err);
+      throw new ApiError(
+        500,
+        ERROR_CODES.clients.CLIENT_PHONES_LIST_FAILED,
+        "Erro ao listar telefones do cliente"
+      );
+    }
+  });
+
+  fastify.post<{
+    Params: { clientId: string };
+    Body: {
+      phoneE164: string;
+      label?: string;
+      isPrimary?: boolean;
+      isWhatsApp?: boolean;
+      metadata?: Record<string, unknown>;
+    };
+  }>("/clients/:clientId/phones", {
+    schema: {
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: ["clientId"],
+        properties: { clientId: { type: "string", minLength: 1 } },
+      },
+      body: {
+        type: "object",
+        additionalProperties: false,
+        required: ["phoneE164"],
+        properties: {
+          phoneE164: { type: "string", minLength: 4, maxLength: 30 },
+          label: { type: "string", maxLength: 60 },
+          isPrimary: { type: "boolean" },
+          isWhatsApp: { type: "boolean" },
+          metadata: { type: "object", additionalProperties: true },
+        },
+      },
+      response: {
+        201: successEnvelopeSchema(masterClientPhoneSchema),
+        400: errorEnvelopeSchema([ERROR_CODES.common.VALIDATION_ERROR]),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        404: errorEnvelopeSchema([ERROR_CODES.clients.CLIENT_NOT_FOUND]),
+        500: errorEnvelopeSchema([ERROR_CODES.clients.CLIENT_PHONE_CREATE_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    const tenantId = request.tenant.id;
+    const body = request.body;
+    try {
+      const created = await createMasterClientPhone({
+        tenantId,
+        clientId: request.params.clientId,
+        phoneE164: body.phoneE164,
+        label: body.label,
+        isPrimary: body.isPrimary,
+        isWhatsApp: body.isWhatsApp,
+        metadata: body.metadata,
+      });
+      return sendSuccess(request, reply, created, 201);
+    } catch (err: any) {
+      request.log.error(err);
+      if (String(err?.message ?? "").includes("CLIENT_NOT_FOUND")) {
+        throw new ApiError(
+          404,
+          ERROR_CODES.clients.CLIENT_NOT_FOUND,
+          "Cliente não encontrado"
+        );
+      }
+      if (String(err?.message ?? "").includes("INVALID_PHONE_E164")) {
+        throw new ApiError(
+          400,
+          ERROR_CODES.common.VALIDATION_ERROR,
+          "Telefone inválido"
+        );
+      }
+      throw new ApiError(
+        500,
+        ERROR_CODES.clients.CLIENT_PHONE_CREATE_FAILED,
+        "Erro ao criar telefone do cliente"
       );
     }
   });
