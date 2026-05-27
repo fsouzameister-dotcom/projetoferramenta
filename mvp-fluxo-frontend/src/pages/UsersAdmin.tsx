@@ -19,6 +19,25 @@ const customerRoleOptions = [
   { value: "agente", label: "Agente" },
 ];
 
+const USERS_ADMIN_TOUR_STORAGE_KEY = "users_admin_tour_completed_v1";
+const USERS_ADMIN_TOUR_STEPS = [
+  {
+    title: "Perfis e permissões",
+    description:
+      "Aqui você controla quem acessa o tenant e com qual papel: admin local, supervisor ou agente.",
+  },
+  {
+    title: "Criar usuário",
+    description:
+      "Cadastre nome, e-mail, senha e perfil. O nome será exibido para o cliente no atendimento.",
+  },
+  {
+    title: "Manutenção da equipe",
+    description:
+      "Use editar e excluir na tabela para manter perfis atualizados conforme operação e escala.",
+  },
+] as const;
+
 function getSimulationFeatureKey(): string {
   const tenantId = localStorage.getItem("tenant_id") || "default";
   return `agent_test_simulation_enabled_${tenantId}`;
@@ -59,6 +78,8 @@ export default function UsersAdmin() {
     () => localStorage.getItem(getSimulationFeatureKey()) === "true"
   );
   const [simulationNotice, setSimulationNotice] = useState<string | null>(null);
+  const [showTour, setShowTour] = useState(false);
+  const [tourStepIndex, setTourStepIndex] = useState(0);
 
   const loadUsers = async () => {
     setLoading(true);
@@ -75,6 +96,14 @@ export default function UsersAdmin() {
 
   useEffect(() => {
     void loadUsers();
+  }, []);
+
+  useEffect(() => {
+    const completed = localStorage.getItem(USERS_ADMIN_TOUR_STORAGE_KEY) === "true";
+    if (!completed) {
+      setTourStepIndex(0);
+      setShowTour(true);
+    }
   }, []);
 
   const onSubmit = async (e: React.FormEvent) => {
@@ -147,15 +176,38 @@ export default function UsersAdmin() {
     );
   };
 
+  const handleCloseTour = () => {
+    setShowTour(false);
+    localStorage.setItem(USERS_ADMIN_TOUR_STORAGE_KEY, "true");
+  };
+
+  const handleOpenTour = () => {
+    setTourStepIndex(0);
+    setShowTour(true);
+  };
+
   return (
     <div className="p-8">
-      <h1 className="text-2xl font-bold text-white">Usuários e Permissões</h1>
-      <p className="text-sm text-gray-300 mt-1">
-        Crie perfis de admin local, supervisor e agente.
-      </p>
-      <p className="text-xs text-gray-400 mt-1">
-        O campo de nome define como o atendente aparece nas mensagens para o cliente.
-      </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Usuários e Permissões</h1>
+          <p className="text-sm text-gray-300 mt-1">
+            Crie perfis de admin local, supervisor e agente.
+          </p>
+          <p className="text-xs text-gray-400 mt-1">
+            O campo de nome define como o atendente aparece nas mensagens para o cliente.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={handleOpenTour}
+          className="w-8 h-8 rounded-full border border-cyan-400/60 text-cyan-200 hover:bg-cyan-500/10 text-sm"
+          title="Reabrir tour de usuários"
+          aria-label="Reabrir tour de usuários"
+        >
+          ?
+        </button>
+      </div>
       <div className="mt-4 bg-white rounded-xl p-4 border border-gray-100">
         <p className="text-sm font-semibold text-gray-900">Ambiente de testes</p>
         <p className="text-xs text-gray-600 mt-1">
@@ -340,6 +392,64 @@ export default function UsersAdmin() {
           </tbody>
         </table>
       </div>
+      {showTour ? (
+        <div className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-[#111827] border border-[#334155] rounded-xl p-5">
+            <p className="text-[11px] uppercase tracking-wide text-cyan-300 mb-1">
+              Tour de usuários
+            </p>
+            <h3 className="text-lg font-semibold text-white">
+              {USERS_ADMIN_TOUR_STEPS[tourStepIndex]?.title}
+            </h3>
+            <p className="text-sm text-gray-200 mt-2 leading-relaxed">
+              {USERS_ADMIN_TOUR_STEPS[tourStepIndex]?.description}
+            </p>
+            <p className="text-[11px] text-gray-400 mt-4">
+              Passo {tourStepIndex + 1} de {USERS_ADMIN_TOUR_STEPS.length}
+            </p>
+            <div className="mt-4 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={handleCloseTour}
+                className="px-3 py-1.5 rounded-lg border border-[#475569] text-gray-200 hover:bg-[#1e293b] text-sm"
+              >
+                Fechar
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTourStepIndex((prev) => Math.max(0, prev - 1))}
+                  disabled={tourStepIndex === 0}
+                  className="px-3 py-1.5 rounded-lg border border-[#475569] text-gray-200 hover:bg-[#1e293b] text-sm disabled:opacity-50"
+                >
+                  Voltar
+                </button>
+                {tourStepIndex < USERS_ADMIN_TOUR_STEPS.length - 1 ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setTourStepIndex((prev) =>
+                        Math.min(USERS_ADMIN_TOUR_STEPS.length - 1, prev + 1)
+                      )
+                    }
+                    className="px-3 py-1.5 rounded-lg bg-teal-600 text-white hover:bg-teal-700 text-sm"
+                  >
+                    Próximo
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleCloseTour}
+                    className="px-3 py-1.5 rounded-lg bg-teal-600 text-white hover:bg-teal-700 text-sm"
+                  >
+                    Concluir
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -25,6 +25,25 @@ const SEGMENTS = [
   { value: "misto", label: "Misto" },
 ] as const;
 
+const PLATFORM_TENANTS_TOUR_STORAGE_KEY = "platform_tenants_tour_completed_v1";
+const PLATFORM_TENANTS_TOUR_STEPS = [
+  {
+    title: "Gestão de clientes",
+    description:
+      "Esta tela centraliza tenants da plataforma para ativação inicial e operação em ambiente separado.",
+  },
+  {
+    title: "Novo cliente",
+    description:
+      "Preencha os dados do tenant e do primeiro administrador para liberar o onboarding do cliente.",
+  },
+  {
+    title: "Abrir ambiente",
+    description:
+      "Use Abrir ambiente para atuar no tenant selecionado e configurar fluxos, canais e usuários locais.",
+  },
+] as const;
+
 export default function PlatformTenants() {
   const navigate = useNavigate();
   const [tenants, setTenants] = useState<CustomerTenant[]>([]);
@@ -39,6 +58,8 @@ export default function PlatformTenants() {
     initial_admin_email: "",
     initial_admin_password: "",
   });
+  const [showTour, setShowTour] = useState(false);
+  const [tourStepIndex, setTourStepIndex] = useState(0);
 
   const loadTenants = useCallback(async () => {
     setLoading(true);
@@ -62,6 +83,14 @@ export default function PlatformTenants() {
     }
     void loadTenants();
   }, [loadTenants, navigate]);
+
+  useEffect(() => {
+    const completed = localStorage.getItem(PLATFORM_TENANTS_TOUR_STORAGE_KEY) === "true";
+    if (!completed) {
+      setTourStepIndex(0);
+      setShowTour(true);
+    }
+  }, []);
 
   const openTenant = (t: CustomerTenant) => {
     setActingTenant(t.id, t.name);
@@ -101,14 +130,37 @@ export default function PlatformTenants() {
     }
   };
 
+  const handleCloseTour = () => {
+    setShowTour(false);
+    localStorage.setItem(PLATFORM_TENANTS_TOUR_STORAGE_KEY, "true");
+  };
+
+  const handleOpenTour = () => {
+    setTourStepIndex(0);
+    setShowTour(true);
+  };
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <header>
-        <h1 className="text-2xl font-bold text-white">Clientes (tenants)</h1>
-        <p className="text-sm text-gray-300 mt-1">
-          Gerencie ambientes de clientes e abra o tenant para configurar fluxos, WhatsApp e
-          agentes com acesso master.
-        </p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-white">Clientes (tenants)</h1>
+            <p className="text-sm text-gray-300 mt-1">
+              Gerencie ambientes de clientes e abra o tenant para configurar fluxos, WhatsApp e
+              agentes com acesso master.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleOpenTour}
+            className="w-8 h-8 rounded-full border border-cyan-400/60 text-cyan-200 hover:bg-cyan-500/10 text-sm"
+            title="Reabrir tour de admin"
+            aria-label="Reabrir tour de admin"
+          >
+            ?
+          </button>
+        </div>
       </header>
 
       {error && (
@@ -252,6 +304,64 @@ export default function PlatformTenants() {
           </ul>
         )}
       </section>
+      {showTour ? (
+        <div className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-[#111827] border border-[#334155] rounded-xl p-5">
+            <p className="text-[11px] uppercase tracking-wide text-cyan-300 mb-1">
+              Tour do admin
+            </p>
+            <h3 className="text-lg font-semibold text-white">
+              {PLATFORM_TENANTS_TOUR_STEPS[tourStepIndex]?.title}
+            </h3>
+            <p className="text-sm text-gray-200 mt-2 leading-relaxed">
+              {PLATFORM_TENANTS_TOUR_STEPS[tourStepIndex]?.description}
+            </p>
+            <p className="text-[11px] text-gray-400 mt-4">
+              Passo {tourStepIndex + 1} de {PLATFORM_TENANTS_TOUR_STEPS.length}
+            </p>
+            <div className="mt-4 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={handleCloseTour}
+                className="px-3 py-1.5 rounded-lg border border-[#475569] text-gray-200 hover:bg-[#1e293b] text-sm"
+              >
+                Fechar
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTourStepIndex((prev) => Math.max(0, prev - 1))}
+                  disabled={tourStepIndex === 0}
+                  className="px-3 py-1.5 rounded-lg border border-[#475569] text-gray-200 hover:bg-[#1e293b] text-sm disabled:opacity-50"
+                >
+                  Voltar
+                </button>
+                {tourStepIndex < PLATFORM_TENANTS_TOUR_STEPS.length - 1 ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setTourStepIndex((prev) =>
+                        Math.min(PLATFORM_TENANTS_TOUR_STEPS.length - 1, prev + 1)
+                      )
+                    }
+                    className="px-3 py-1.5 rounded-lg bg-teal-600 text-white hover:bg-teal-700 text-sm"
+                  >
+                    Próximo
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleCloseTour}
+                    className="px-3 py-1.5 rounded-lg bg-teal-600 text-white hover:bg-teal-700 text-sm"
+                  >
+                    Concluir
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

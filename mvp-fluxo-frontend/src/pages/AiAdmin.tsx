@@ -33,6 +33,25 @@ const voiceOptions: VoiceOption[] = [
   { id: "echo", label: "Echo", hint: "Calma e estável" },
 ];
 
+const AI_ADMIN_TOUR_STORAGE_KEY = "ai_admin_tour_completed_v1";
+const AI_ADMIN_TOUR_STEPS = [
+  {
+    title: "Provedores de IA",
+    description:
+      "Configure modelos e chave por tenant para definir qual engine de IA será usada no ambiente.",
+  },
+  {
+    title: "Personas",
+    description:
+      "Crie personas guiadas com tom, estilo e objetivo para padronizar respostas e abordagem do agente.",
+  },
+  {
+    title: "Roteiros",
+    description:
+      "Monte roteiros por etapas sem código para orientar atendimento, objeções e fechamento.",
+  },
+] as const;
+
 type ScriptStage = {
   title: string;
   whatToSay: string;
@@ -60,6 +79,8 @@ export default function AiAdmin() {
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showTour, setShowTour] = useState(false);
+  const [tourStepIndex, setTourStepIndex] = useState(0);
 
   const [providerForm, setProviderForm] = useState({
     provider: "openai" as "openai" | "gemini",
@@ -110,6 +131,14 @@ export default function AiAdmin() {
 
   useEffect(() => {
     void loadAll();
+  }, []);
+
+  useEffect(() => {
+    const completed = localStorage.getItem(AI_ADMIN_TOUR_STORAGE_KEY) === "true";
+    if (!completed) {
+      setTourStepIndex(0);
+      setShowTour(true);
+    }
   }, []);
 
   const submitProvider = async (e: FormEvent) => {
@@ -197,15 +226,36 @@ export default function AiAdmin() {
     }
   };
 
+  const handleCloseTour = () => {
+    setShowTour(false);
+    localStorage.setItem(AI_ADMIN_TOUR_STORAGE_KEY, "true");
+  };
+
+  const handleOpenTour = () => {
+    setTourStepIndex(0);
+    setShowTour(true);
+  };
+
   if (loading) {
     return <div className="text-gray-200">Carregando configurações de IA...</div>;
   }
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-white">Configurações de IA</h1>
-        <p className="text-sm text-gray-300">Gerencie provedores, personas e roteiros por tenant.</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-white">Configurações de IA</h1>
+          <p className="text-sm text-gray-300">Gerencie provedores, personas e roteiros por tenant.</p>
+        </div>
+        <button
+          type="button"
+          onClick={handleOpenTour}
+          className="w-8 h-8 rounded-full border border-cyan-400/60 text-cyan-200 hover:bg-cyan-500/10 text-sm"
+          title="Reabrir tour de IA"
+          aria-label="Reabrir tour de IA"
+        >
+          ?
+        </button>
       </div>
 
       {notice ? (
@@ -545,6 +595,64 @@ export default function AiAdmin() {
           </button>
         </form>
       </section>
+      {showTour ? (
+        <div className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-[#111827] border border-[#334155] rounded-xl p-5">
+            <p className="text-[11px] uppercase tracking-wide text-cyan-300 mb-1">
+              Tour de IA admin
+            </p>
+            <h3 className="text-lg font-semibold text-white">
+              {AI_ADMIN_TOUR_STEPS[tourStepIndex]?.title}
+            </h3>
+            <p className="text-sm text-gray-200 mt-2 leading-relaxed">
+              {AI_ADMIN_TOUR_STEPS[tourStepIndex]?.description}
+            </p>
+            <p className="text-[11px] text-gray-400 mt-4">
+              Passo {tourStepIndex + 1} de {AI_ADMIN_TOUR_STEPS.length}
+            </p>
+            <div className="mt-4 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={handleCloseTour}
+                className="px-3 py-1.5 rounded-lg border border-[#475569] text-gray-200 hover:bg-[#1e293b] text-sm"
+              >
+                Fechar
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTourStepIndex((prev) => Math.max(0, prev - 1))}
+                  disabled={tourStepIndex === 0}
+                  className="px-3 py-1.5 rounded-lg border border-[#475569] text-gray-200 hover:bg-[#1e293b] text-sm disabled:opacity-50"
+                >
+                  Voltar
+                </button>
+                {tourStepIndex < AI_ADMIN_TOUR_STEPS.length - 1 ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setTourStepIndex((prev) =>
+                        Math.min(AI_ADMIN_TOUR_STEPS.length - 1, prev + 1)
+                      )
+                    }
+                    className="px-3 py-1.5 rounded-lg bg-teal-600 text-white hover:bg-teal-700 text-sm"
+                  >
+                    Próximo
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleCloseTour}
+                    className="px-3 py-1.5 rounded-lg bg-teal-600 text-white hover:bg-teal-700 text-sm"
+                  >
+                    Concluir
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

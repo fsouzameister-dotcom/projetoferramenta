@@ -40,12 +40,32 @@ type Conversation = {
   requires_template_to_resume?: boolean;
   tags?: string[];
   metadata?: {
+    clientId?: string;
+    client_id?: string;
     queue?: string;
     templateName?: string;
     templateContentSid?: string;
     templateParams?: Record<string, string>;
   };
   messages: ChatMessage[];
+};
+
+type MasterClientPhone = {
+  id: string;
+  phoneE164: string;
+  label?: string | null;
+  isPrimary: boolean;
+  isWhatsApp: boolean;
+};
+
+type MasterClientPayload = {
+  client: {
+    id: string;
+    name: string;
+    email?: string | null;
+    document?: string | null;
+  };
+  phones: MasterClientPhone[];
 };
 
 type AiHintPayload = {
@@ -62,6 +82,24 @@ function resolveAgentDataMode(): AgentDataMode {
   return import.meta.env.PROD ? "api" : "mock";
 }
 const emojiOptions = ["😀", "😁", "😂", "😉", "😍", "👍", "🙏", "🎯", "🚀", "✅", "🔥", "💬"];
+const AGENT_TOUR_STORAGE_KEY = "agent_home_tour_completed_v1";
+const AGENT_TOUR_STEPS = [
+  {
+    title: "Fila de conversas",
+    description:
+      "Use as abas Aguardando, Em atendimento e Histórico para organizar o trabalho diário do time.",
+  },
+  {
+    title: "Ações rápidas",
+    description:
+      "No chat ativo você pode encerrar/reabrir, pedir dica IA e enviar imagem, anexo, localização, contato e áudio.",
+  },
+  {
+    title: "Cadastro mestre",
+    description:
+      "Quando disponível, a conversa mostra dados consolidados do cliente e telefone principal para evitar divergências.",
+  },
+] as const;
 type TwilioUiTemplateOption = {
   templateKey: string;
   /** Sid HX… quando vem da Twilio Content API; local de demonstração não tem SID. */
@@ -227,6 +265,11 @@ export default function AgentHome() {
     Record<string, ChatMessage[]>
   >({});
   const [loadingHint, setLoadingHint] = useState(false);
+  const [activeMasterClient, setActiveMasterClient] = useState<MasterClientPayload | null>(null);
+  const [loadingMasterClient, setLoadingMasterClient] = useState(false);
+  const [masterClientById, setMasterClientById] = useState<Record<string, MasterClientPayload>>({});
+  const [showTour, setShowTour] = useState(false);
+  const [tourStepIndex, setTourStepIndex] = useState(0);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   const mergeWithPendingMedia = (apiConversations: Conversation[]) => {
@@ -270,6 +313,14 @@ export default function AgentHome() {
 
     void loadConversations();
   }, [envMode]);
+
+  useEffect(() => {
+    const completed = localStorage.getItem(AGENT_TOUR_STORAGE_KEY) === "true";
+    if (!completed) {
+      setTourStepIndex(0);
+      setShowTour(true);
+    }
+  }, []);
 
   useEffect(() => {
     if (!showNewContactModal || resolvedMode !== "api") return undefined;
@@ -354,6 +405,10 @@ export default function AgentHome() {
 
   const activeConversation =
     conversations.find((conv) => conv.id === activeConversationId) ?? null;
+  const activeClientId =
+    (activeConversation?.metadata?.clientId as string | undefined) ||
+    (activeConversation?.metadata?.client_id as string | undefined) ||
+    null;
   const isConversationClosed = activeConversation?.lifecycle_status
     ? activeConversation.lifecycle_status !== "open"
     : activeConversation?.status === "historico";
@@ -451,6 +506,76 @@ export default function AgentHome() {
     if (resolvedMode !== "api") return;
     void requestAgentHint();
   }, [activeConversationId, resolvedMode]);
+
+  useEffect(() => {
+    if (resolvedMode !== "api") return;
+    if (!activeClientId) {
+      setActiveMasterClient(null);
+      return;
+    }
+    let cancelled = false;
+    setLoadingMasterClient(true);
+    void api
+      .get(`/clients/${activeClientId}`)
+      .then((res) => {
+        if (cancelled) return;
+        const payload = unwrapApiData<MasterClientPayload>(res.data);
+        setActiveMasterClient(payload);
+      })
+      .catch(() => {
+        if (!cancelled) setActiveMasterClient(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingMasterClient(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeClientId, resolvedMode]);
+
+  useEffect(() => {
+    if (resolvedMode !== "api") return;
+    const ids = Array.from(
+      new Set(
+        conversations
+          .map((conv) => (conv.metadata?.clientId as string | undefined) || (conv.metadata?.client_id as string | undefined))
+          .filter((id): id is string => Boolean(id))
+      )
+    ).filter((id) => !masterClientById[id]);
+    if (!ids.length) return;
+    let cancelled = false;
+    void Promise.allSettled(ids.map((id) => api.get(`/clients/${id}`))).then((results) => {
+      if (cancelled) return;
+      const next: Record<string, MasterClientPayload> = {};
+      results.forEach((result, idx) => {
+        if (result.status !== "fulfilled") return;
+        const payload = unwrapApiData<MasterClientPayload>(result.value.data);
+        if (payload?.client?.id) next[ids[idx]!] = payload;
+      });
+      if (Object.keys(next).length > 0) {
+        setMasterClientById((prev) => ({ ...prev, ...next }));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversations, masterClientById, resolvedMode]);
+
+  const getConversationDisplayPhone = (conv: Conversation) => {
+    const clientId =
+      (conv.metadata?.clientId as string | undefined) || (conv.metadata?.client_id as string | undefined);
+    if (!clientId) return conv.phone;
+    const payload = masterClientById[clientId];
+    if (!payload?.phones?.length) return conv.phone;
+    const primary = payload.phones.find((p) => p.isPrimary) ?? payload.phones[0];
+    return primary?.phoneE164 || conv.phone;
+  };
+
+  const isConversationUsingMasterClient = (conv: Conversation) => {
+    const clientId =
+      (conv.metadata?.clientId as string | undefined) || (conv.metadata?.client_id as string | undefined);
+    return Boolean(clientId && masterClientById[clientId]);
+  };
 
   const handleSendText = () => {
     if (!activeConversation || !composeText.trim()) return;
@@ -812,6 +937,16 @@ export default function AgentHome() {
     }));
   };
 
+  const handleCloseTour = () => {
+    setShowTour(false);
+    localStorage.setItem(AGENT_TOUR_STORAGE_KEY, "true");
+  };
+
+  const handleOpenTour = () => {
+    setTourStepIndex(0);
+    setShowTour(true);
+  };
+
   return (
     <div className="h-screen overflow-hidden bg-gradient-to-br from-primary-dark via-[#132a55] to-[#0f1e3d] text-gray-100 p-4 md:p-6">
       <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-4 h-[calc(100vh-2rem)]">
@@ -895,7 +1030,12 @@ export default function AgentHome() {
                   }`}
                 >
                   <p className="font-semibold text-sm text-gray-100">{conv.contactName}</p>
-                  <p className="text-xs text-gray-400">{conv.phone}</p>
+                  <p className="text-xs text-gray-400">{getConversationDisplayPhone(conv)}</p>
+                  {isConversationUsingMasterClient(conv) ? (
+                    <span className="mt-1 inline-flex text-[10px] px-2 py-0.5 rounded border bg-cyan-900/30 border-cyan-500/40 text-cyan-200">
+                      Cadastro mestre
+                    </span>
+                  ) : null}
                   {conv.tags?.length ? (
                     <div className="mt-2 flex gap-1 flex-wrap">
                       {conv.tags.map((tag) => (
@@ -917,12 +1057,23 @@ export default function AgentHome() {
               <h1 className="text-[20px] font-bold text-white tracking-tight">Central do Agente</h1>
               <p className="text-xs text-gray-300">Atendente: {userName}</p>
             </div>
-            <input
-              value={chatSearch}
-              onChange={(e) => setChatSearch(e.target.value)}
-              placeholder="Busca por texto na conversa"
-              className="w-56 bg-[#0f1a33] border border-[#314263] rounded-lg px-3 py-1.5 text-xs text-gray-100 outline-none"
-            />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleOpenTour}
+                className="w-7 h-7 rounded-full border border-cyan-400/60 text-cyan-200 hover:bg-cyan-500/10 text-xs"
+                title="Reabrir tour de ajuda"
+                aria-label="Reabrir tour de ajuda"
+              >
+                ?
+              </button>
+              <input
+                value={chatSearch}
+                onChange={(e) => setChatSearch(e.target.value)}
+                placeholder="Busca por texto na conversa"
+                className="w-56 bg-[#0f1a33] border border-[#314263] rounded-lg px-3 py-1.5 text-xs text-gray-100 outline-none"
+              />
+            </div>
           </div>
 
           {modeNotice ? (
@@ -946,6 +1097,38 @@ export default function AgentHome() {
                 <div>
                   <p className="font-semibold text-sm text-gray-100">{activeConversation?.contactName}</p>
                   <p className="text-[11px] text-gray-400">{activeConversation?.phone}</p>
+                  {activeConversation &&
+                  isConversationUsingMasterClient(activeConversation) ? (
+                    <span className="mt-1 inline-flex text-[10px] px-2 py-0.5 rounded border bg-cyan-900/30 border-cyan-500/40 text-cyan-200">
+                      Cadastro mestre
+                    </span>
+                  ) : null}
+                  {loadingMasterClient ? (
+                    <p className="text-[11px] text-gray-400 mt-0.5">Carregando cadastro mestre...</p>
+                  ) : activeMasterClient ? (
+                    <p className="text-[11px] text-cyan-200 mt-0.5">
+                      Cliente: {activeMasterClient.client.name} ·{" "}
+                      {activeMasterClient.phones.length} telefone(s)
+                    </p>
+                  ) : null}
+                  {activeMasterClient?.phones?.length ? (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {activeMasterClient.phones.map((p) => (
+                        <span
+                          key={p.id}
+                          className={`text-[10px] px-2 py-0.5 rounded border ${
+                            p.isPrimary
+                              ? "bg-cyan-900/30 border-cyan-500/40 text-cyan-200"
+                              : "bg-[#273758] border-[#3e537d] text-gray-200"
+                          }`}
+                        >
+                          {p.phoneE164}
+                          {p.isPrimary ? " (principal)" : ""}
+                          {p.label ? ` · ${p.label}` : ""}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                   <p className="text-[11px] text-cyan-200 mt-0.5">
                     {activeConversation?.lifecycle_status === "closed_manual"
                       ? "Encerrado manualmente"
@@ -1298,6 +1481,60 @@ export default function AgentHome() {
               >
                 Enviar
               </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {showTour ? (
+        <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-[#1b2540] border border-[#2f3d63] rounded-xl p-5">
+            <p className="text-[11px] uppercase tracking-wide text-cyan-300 mb-1">
+              Tour do painel do agente
+            </p>
+            <h3 className="text-lg font-semibold text-white">
+              {AGENT_TOUR_STEPS[tourStepIndex]?.title}
+            </h3>
+            <p className="text-sm text-gray-200 mt-2 leading-relaxed">
+              {AGENT_TOUR_STEPS[tourStepIndex]?.description}
+            </p>
+            <p className="text-[11px] text-gray-400 mt-4">
+              Passo {tourStepIndex + 1} de {AGENT_TOUR_STEPS.length}
+            </p>
+            <div className="mt-4 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={handleCloseTour}
+                className="px-3 py-1.5 rounded-lg bg-[#223150] text-gray-200 hover:bg-[#2b3f66] text-sm"
+              >
+                Fechar
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTourStepIndex((prev) => Math.max(0, prev - 1))}
+                  disabled={tourStepIndex === 0}
+                  className="px-3 py-1.5 rounded-lg bg-[#223150] text-gray-200 hover:bg-[#2b3f66] text-sm disabled:opacity-50"
+                >
+                  Voltar
+                </button>
+                {tourStepIndex < AGENT_TOUR_STEPS.length - 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => setTourStepIndex((prev) => Math.min(AGENT_TOUR_STEPS.length - 1, prev + 1))}
+                    className="px-3 py-1.5 rounded-lg bg-accent text-white hover:bg-accent-dark text-sm"
+                  >
+                    Próximo
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleCloseTour}
+                    className="px-3 py-1.5 rounded-lg bg-accent text-white hover:bg-accent-dark text-sm"
+                  >
+                    Concluir
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>

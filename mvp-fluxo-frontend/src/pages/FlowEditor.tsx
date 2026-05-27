@@ -91,6 +91,25 @@ const paletteItems: PaletteItem[] = [
   ...comingSoonPaletteItems,
 ];
 
+const FLOW_EDITOR_TOUR_STORAGE_KEY = "flow_editor_tour_completed_v1";
+const FLOW_EDITOR_TOUR_STEPS = [
+  {
+    title: "Paleta de nodes",
+    description:
+      "No painel esquerdo você adiciona os nodes de produção e também os itens em modelagem futura.",
+  },
+  {
+    title: "Salvar e voltar",
+    description:
+      "Use Salvar fluxo para persistir mudanças e Voltar para retornar para a lista de fluxos com proteção de alterações não salvas.",
+  },
+  {
+    title: "Receber Mensagem e timeout",
+    description:
+      "Combine o node Receber Mensagem com timeout para controlar espera do cliente e redirecionar automaticamente.",
+  },
+] as const;
+
 export default function FlowEditor() {
   const { flowId: rawFlowId } = useParams<{ flowId: string }>();
   const navigate = useNavigate();
@@ -121,6 +140,8 @@ export default function FlowEditor() {
   const [tabulacoes, setTabulacoes] = useState<TabulacaoOption[]>([]);
   const [newTabulacaoLabel, setNewTabulacaoLabel] = useState("");
   const [newTabulacaoKey, setNewTabulacaoKey] = useState("");
+  const [showTour, setShowTour] = useState(false);
+  const [tourStepIndex, setTourStepIndex] = useState(0);
 
   const goToFlowsList = () => navigate("/flows");
 
@@ -140,6 +161,24 @@ export default function FlowEditor() {
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [hasUnsavedChanges]);
+
+  useEffect(() => {
+    const completed = localStorage.getItem(FLOW_EDITOR_TOUR_STORAGE_KEY) === "true";
+    if (!completed) {
+      setTourStepIndex(0);
+      setShowTour(true);
+    }
+  }, []);
+
+  const handleCloseTour = () => {
+    setShowTour(false);
+    localStorage.setItem(FLOW_EDITOR_TOUR_STORAGE_KEY, "true");
+  };
+
+  const handleOpenTour = () => {
+    setTourStepIndex(0);
+    setShowTour(true);
+  };
 
   const parseJsonText = <T,>(text: string, fallback: T): T => {
     try {
@@ -1197,6 +1236,15 @@ export default function FlowEditor() {
           className="px-4 py-2 bg-teal-600 text-white text-sm font-semibold rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-60"
         >
           {savingFlow ? "Salvando…" : "Salvar fluxo"}
+        </button>
+        <button
+          type="button"
+          onClick={handleOpenTour}
+          className="w-8 h-8 rounded-full border border-cyan-400/60 text-cyan-200 hover:bg-cyan-500/10 text-sm"
+          title="Reabrir tour do editor"
+          aria-label="Reabrir tour do editor"
+        >
+          ?
         </button>
       </header>
 
@@ -2936,6 +2984,64 @@ export default function FlowEditor() {
           </div>
         </div>
       )}
+      {showTour ? (
+        <div className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-[#111827] border border-[#334155] rounded-xl p-5">
+            <p className="text-[11px] uppercase tracking-wide text-cyan-300 mb-1">
+              Tour do editor de fluxo
+            </p>
+            <h3 className="text-lg font-semibold text-white">
+              {FLOW_EDITOR_TOUR_STEPS[tourStepIndex]?.title}
+            </h3>
+            <p className="text-sm text-gray-200 mt-2 leading-relaxed">
+              {FLOW_EDITOR_TOUR_STEPS[tourStepIndex]?.description}
+            </p>
+            <p className="text-[11px] text-gray-400 mt-4">
+              Passo {tourStepIndex + 1} de {FLOW_EDITOR_TOUR_STEPS.length}
+            </p>
+            <div className="mt-4 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={handleCloseTour}
+                className="px-3 py-1.5 rounded-lg border border-[#475569] text-gray-200 hover:bg-[#1e293b] text-sm"
+              >
+                Fechar
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTourStepIndex((prev) => Math.max(0, prev - 1))}
+                  disabled={tourStepIndex === 0}
+                  className="px-3 py-1.5 rounded-lg border border-[#475569] text-gray-200 hover:bg-[#1e293b] text-sm disabled:opacity-50"
+                >
+                  Voltar
+                </button>
+                {tourStepIndex < FLOW_EDITOR_TOUR_STEPS.length - 1 ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setTourStepIndex((prev) =>
+                        Math.min(FLOW_EDITOR_TOUR_STEPS.length - 1, prev + 1)
+                      )
+                    }
+                    className="px-3 py-1.5 rounded-lg bg-teal-600 text-white hover:bg-teal-700 text-sm"
+                  >
+                    Próximo
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleCloseTour}
+                    className="px-3 py-1.5 rounded-lg bg-teal-600 text-white hover:bg-teal-700 text-sm"
+                  >
+                    Concluir
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

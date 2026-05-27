@@ -64,6 +64,25 @@ const CHANNEL_PLANNED_LABELS = [
   "Whapi",
 ];
 
+const WHATSAPP_ADMIN_TOUR_STORAGE_KEY = "whatsapp_admin_tour_completed_v1";
+const WHATSAPP_ADMIN_TOUR_STEPS = [
+  {
+    title: "Configuração global",
+    description:
+      "Defina verify token, app secret e flags de validação de assinatura para Meta e Twilio no servidor.",
+  },
+  {
+    title: "Nova conexão",
+    description:
+      "Escolha o provedor e cadastre credenciais por canal para conectar números WhatsApp ao tenant.",
+  },
+  {
+    title: "Conexões cadastradas",
+    description:
+      "Gerencie conexões existentes, renomeie e remova canais, além de revisar números vinculados.",
+  },
+] as const;
+
 function providerDisplayName(provider: string): string {
   if (provider === "twilio_whatsapp") return "WhatsApp — Twilio";
   if (provider === "whatsapp_cloud_api") return "WhatsApp — Meta (Cloud API)";
@@ -122,6 +141,8 @@ export default function WhatsAppAdmin() {
   const [serverMetaAppSecret, setServerMetaAppSecret] = useState("");
   const [flagSkipMetaSig, setFlagSkipMetaSig] = useState(false);
   const [flagSkipTwilioSig, setFlagSkipTwilioSig] = useState(false);
+  const [showTour, setShowTour] = useState(false);
+  const [tourStepIndex, setTourStepIndex] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -159,6 +180,14 @@ export default function WhatsAppAdmin() {
   useEffect(() => {
     const el = document.querySelector('script[type="module"][src]') as HTMLScriptElement | null;
     setEntryScriptSrc(el?.getAttribute("src")?.trim() || "(não encontrado)");
+  }, []);
+
+  useEffect(() => {
+    const completed = localStorage.getItem(WHATSAPP_ADMIN_TOUR_STORAGE_KEY) === "true";
+    if (!completed) {
+      setTourStepIndex(0);
+      setShowTour(true);
+    }
   }, []);
 
   const flashCopy = async (text: string) => {
@@ -292,17 +321,40 @@ export default function WhatsAppAdmin() {
 
   const isTwilioProvider = (p: string) => p === "twilio_whatsapp";
 
+  const handleCloseTour = () => {
+    setShowTour(false);
+    localStorage.setItem(WHATSAPP_ADMIN_TOUR_STORAGE_KEY, "true");
+  };
+
+  const handleOpenTour = () => {
+    setTourStepIndex(0);
+    setShowTour(true);
+  };
+
   return (
     <div className="p-8">
-      <h1 className="text-2xl font-bold text-white">Canais WhatsApp</h1>
-      <p className="text-sm text-gray-300 mt-1">
-        Cada número é cadastrado em <strong className="text-gray-200">um único provedor por vez</strong> (sem misturar
-        Meta e Twilio no mesmo vínculo). Você pode ter várias conexões no tenant — por exemplo uma linha na Meta e
-        outra na Twilio.
-      </p>
-      <p className="text-xs text-gray-400 mt-1">
-        Envio automático: se existir Meta e Twilio no mesmo tenant, a Meta tem prioridade na fila atual do backend.
-      </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Canais WhatsApp</h1>
+          <p className="text-sm text-gray-300 mt-1">
+            Cada número é cadastrado em <strong className="text-gray-200">um único provedor por vez</strong> (sem
+            misturar Meta e Twilio no mesmo vínculo). Você pode ter várias conexões no tenant — por exemplo uma linha
+            na Meta e outra na Twilio.
+          </p>
+          <p className="text-xs text-gray-400 mt-1">
+            Envio automático: se existir Meta e Twilio no mesmo tenant, a Meta tem prioridade na fila atual do backend.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={handleOpenTour}
+          className="w-8 h-8 rounded-full border border-cyan-400/60 text-cyan-200 hover:bg-cyan-500/10 text-sm"
+          title="Reabrir tour do WhatsApp"
+          aria-label="Reabrir tour do WhatsApp"
+        >
+          ?
+        </button>
+      </div>
       <p className="text-[10px] text-slate-500 mt-2 font-mono break-all" title="Se após deploy esta linha não mudar, o servidor ou CDN ainda entrega build antigo.">
         UI multicanal · bundle: {entryScriptSrc || "…"}
       </p>
@@ -751,6 +803,64 @@ export default function WhatsAppAdmin() {
         virtual host servindo este domínio. No servidor:{" "}
         <span className="font-mono">curl -s https://app.clienton.com.br/ | grep script</span>
       </p>
+      {showTour ? (
+        <div className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-[#111827] border border-[#334155] rounded-xl p-5">
+            <p className="text-[11px] uppercase tracking-wide text-cyan-300 mb-1">
+              Tour do WhatsApp admin
+            </p>
+            <h3 className="text-lg font-semibold text-white">
+              {WHATSAPP_ADMIN_TOUR_STEPS[tourStepIndex]?.title}
+            </h3>
+            <p className="text-sm text-gray-200 mt-2 leading-relaxed">
+              {WHATSAPP_ADMIN_TOUR_STEPS[tourStepIndex]?.description}
+            </p>
+            <p className="text-[11px] text-gray-400 mt-4">
+              Passo {tourStepIndex + 1} de {WHATSAPP_ADMIN_TOUR_STEPS.length}
+            </p>
+            <div className="mt-4 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={handleCloseTour}
+                className="px-3 py-1.5 rounded-lg border border-[#475569] text-gray-200 hover:bg-[#1e293b] text-sm"
+              >
+                Fechar
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTourStepIndex((prev) => Math.max(0, prev - 1))}
+                  disabled={tourStepIndex === 0}
+                  className="px-3 py-1.5 rounded-lg border border-[#475569] text-gray-200 hover:bg-[#1e293b] text-sm disabled:opacity-50"
+                >
+                  Voltar
+                </button>
+                {tourStepIndex < WHATSAPP_ADMIN_TOUR_STEPS.length - 1 ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setTourStepIndex((prev) =>
+                        Math.min(WHATSAPP_ADMIN_TOUR_STEPS.length - 1, prev + 1)
+                      )
+                    }
+                    className="px-3 py-1.5 rounded-lg bg-teal-600 text-white hover:bg-teal-700 text-sm"
+                  >
+                    Próximo
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleCloseTour}
+                    className="px-3 py-1.5 rounded-lg bg-teal-600 text-white hover:bg-teal-700 text-sm"
+                  >
+                    Concluir
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
