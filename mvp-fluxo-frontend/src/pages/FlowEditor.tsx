@@ -306,7 +306,7 @@ export default function FlowEditor() {
     Promise.all([
       api.get(`/flows`), // Rota para listar flows do tenant logado
       api.get(`/flows/${flowId}/nodes`),
-      api.get("/tabulacoes"),
+      api.get("/tabulacoes").catch(() => null),
     ])
       .then(([flowsRes, nodesRes, tabulacoesRes]) => {
         const flows = unwrapApiData<FlowData[]>(flowsRes.data);
@@ -321,7 +321,10 @@ export default function FlowEditor() {
         }
 
         setFlowData(flow);
-        const tabRows = unwrapApiData<TabulacaoOption[]>(tabulacoesRes.data);
+        const tabRows =
+          tabulacoesRes && tabulacoesRes.data
+            ? unwrapApiData<TabulacaoOption[]>(tabulacoesRes.data)
+            : [];
         setTabulacoes(Array.isArray(tabRows) ? tabRows : []);
         const initialNodes = unwrapApiData<NodeDataType[]>(nodesRes.data).map(
           (node: NodeDataType) => ({
