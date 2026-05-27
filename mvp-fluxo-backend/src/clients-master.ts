@@ -25,6 +25,11 @@ export type MasterClientPhoneRecord = {
   updatedAt: string;
 };
 
+export type MasterClientWithPhones = {
+  client: MasterClientRecord;
+  phones: MasterClientPhoneRecord[];
+};
+
 function mapRow(row: Record<string, unknown>): MasterClientRecord {
   const metadata =
     row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
@@ -97,6 +102,20 @@ export async function listMasterClientsByTenant(input: {
     params
   );
   return result.rows.map((row) => mapRow(row as Record<string, unknown>));
+}
+
+export async function getMasterClientById(input: {
+  tenantId: string;
+  clientId: string;
+}): Promise<MasterClientRecord | null> {
+  const result = await pool.query(
+    `SELECT * FROM clients
+     WHERE tenant_id = $1::uuid AND id = $2::uuid
+     LIMIT 1`,
+    [input.tenantId, input.clientId]
+  );
+  if (!result.rows[0]) return null;
+  return mapRow(result.rows[0] as Record<string, unknown>);
 }
 
 export async function createMasterClient(input: {
@@ -354,4 +373,20 @@ export async function deleteMasterClient(input: {
     [input.tenantId, input.clientId]
   );
   return { ok: (result.rowCount ?? 0) > 0 };
+}
+
+export async function getMasterClientWithPhones(input: {
+  tenantId: string;
+  clientId: string;
+}): Promise<MasterClientWithPhones | null> {
+  const client = await getMasterClientById({
+    tenantId: input.tenantId,
+    clientId: input.clientId,
+  });
+  if (!client) return null;
+  const phones = await listMasterClientPhones({
+    tenantId: input.tenantId,
+    clientId: input.clientId,
+  });
+  return { client, phones };
 }

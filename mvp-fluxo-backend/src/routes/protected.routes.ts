@@ -36,6 +36,7 @@ import {
   createMasterClientPhone,
   deleteMasterClient,
   deleteMasterClientPhone,
+  getMasterClientWithPhones,
   listMasterClientPhones,
   listMasterClientsByTenant,
   updateMasterClient,
@@ -188,6 +189,19 @@ const masterClientPhoneSchema = {
     metadata: { type: "object", additionalProperties: true },
     createdAt: { type: "string" },
     updatedAt: { type: "string" },
+  },
+} as const;
+
+const masterClientWithPhonesSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["client", "phones"],
+  properties: {
+    client: masterClientSchema,
+    phones: {
+      type: "array",
+      items: masterClientPhoneSchema,
+    },
   },
 } as const;
 
@@ -2082,6 +2096,46 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
   // ──────────────────────────────────────────────────────────────────
   // CLIENTS (cadastro mestre)
   // ──────────────────────────────────────────────────────────────────
+  fastify.get<{
+    Params: { clientId: string };
+  }>("/clients/:clientId", {
+    schema: {
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: ["clientId"],
+        properties: { clientId: { type: "string", minLength: 1 } },
+      },
+      response: {
+        200: successEnvelopeSchema(masterClientWithPhonesSchema),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        404: errorEnvelopeSchema([ERROR_CODES.clients.CLIENT_NOT_FOUND]),
+        500: errorEnvelopeSchema([ERROR_CODES.clients.CLIENT_GET_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    const tenantId = request.tenant.id;
+    try {
+      const data = await getMasterClientWithPhones({
+        tenantId,
+        clientId: request.params.clientId,
+      });
+      if (!data) {
+        throw new ApiError(404, ERROR_CODES.clients.CLIENT_NOT_FOUND, "Cliente não encontrado");
+      }
+      return sendSuccess(request, reply, data);
+    } catch (err) {
+      request.log.error(err);
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(
+        500,
+        ERROR_CODES.clients.CLIENT_GET_FAILED,
+        "Erro ao buscar cliente"
+      );
+    }
+  });
+
   fastify.get<{
     Querystring: { search?: string; limit?: number };
   }>("/clients", {
