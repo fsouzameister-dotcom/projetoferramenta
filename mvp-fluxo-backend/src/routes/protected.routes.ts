@@ -36,6 +36,8 @@ import {
   createMasterClientPhone,
   listMasterClientPhones,
   listMasterClientsByTenant,
+  updateMasterClient,
+  updateMasterClientPhone,
 } from "../clients-master";
 import {
   hasAdminAccess,
@@ -1749,6 +1751,65 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
     }
   });
 
+  fastify.put<{
+    Params: { clientId: string };
+    Body: {
+      name?: string;
+      email?: string | null;
+      document?: string | null;
+      externalId?: string | null;
+      metadata?: Record<string, unknown>;
+    };
+  }>("/clients/:clientId", {
+    schema: {
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: ["clientId"],
+        properties: { clientId: { type: "string", minLength: 1 } },
+      },
+      body: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          name: { type: "string", minLength: 1, maxLength: 140 },
+          email: { anyOf: [{ type: "string", maxLength: 140 }, { type: "null" }] },
+          document: { anyOf: [{ type: "string", maxLength: 40 }, { type: "null" }] },
+          externalId: { anyOf: [{ type: "string", maxLength: 120 }, { type: "null" }] },
+          metadata: { type: "object", additionalProperties: true },
+        },
+      },
+      response: {
+        200: successEnvelopeSchema(masterClientSchema),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        404: errorEnvelopeSchema([ERROR_CODES.clients.CLIENT_NOT_FOUND]),
+        500: errorEnvelopeSchema([ERROR_CODES.clients.CLIENT_UPDATE_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    const tenantId = request.tenant.id;
+    try {
+      const updated = await updateMasterClient({
+        tenantId,
+        clientId: request.params.clientId,
+        ...request.body,
+      });
+      if (!updated) {
+        throw new ApiError(404, ERROR_CODES.clients.CLIENT_NOT_FOUND, "Cliente não encontrado");
+      }
+      return sendSuccess(request, reply, updated);
+    } catch (err) {
+      request.log.error(err);
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(
+        500,
+        ERROR_CODES.clients.CLIENT_UPDATE_FAILED,
+        "Erro ao atualizar cliente"
+      );
+    }
+  });
+
   fastify.post<{
     Body: { key?: string; label: string; description?: string };
   }>("/tabulacoes", {
@@ -1948,6 +2009,81 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
         500,
         ERROR_CODES.clients.CLIENTS_LIST_FAILED,
         "Erro ao listar clientes"
+      );
+    }
+  });
+
+  fastify.put<{
+    Params: { clientId: string; phoneId: string };
+    Body: {
+      phoneE164?: string;
+      label?: string | null;
+      isPrimary?: boolean;
+      isWhatsApp?: boolean;
+      metadata?: Record<string, unknown>;
+    };
+  }>("/clients/:clientId/phones/:phoneId", {
+    schema: {
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: ["clientId", "phoneId"],
+        properties: {
+          clientId: { type: "string", minLength: 1 },
+          phoneId: { type: "string", minLength: 1 },
+        },
+      },
+      body: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          phoneE164: { type: "string", minLength: 4, maxLength: 30 },
+          label: { anyOf: [{ type: "string", maxLength: 60 }, { type: "null" }] },
+          isPrimary: { type: "boolean" },
+          isWhatsApp: { type: "boolean" },
+          metadata: { type: "object", additionalProperties: true },
+        },
+      },
+      response: {
+        200: successEnvelopeSchema(masterClientPhoneSchema),
+        400: errorEnvelopeSchema([ERROR_CODES.common.VALIDATION_ERROR]),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        404: errorEnvelopeSchema([ERROR_CODES.clients.CLIENT_PHONE_NOT_FOUND]),
+        500: errorEnvelopeSchema([ERROR_CODES.clients.CLIENT_PHONE_UPDATE_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    const tenantId = request.tenant.id;
+    try {
+      const updated = await updateMasterClientPhone({
+        tenantId,
+        clientId: request.params.clientId,
+        phoneId: request.params.phoneId,
+        ...request.body,
+      });
+      if (!updated) {
+        throw new ApiError(
+          404,
+          ERROR_CODES.clients.CLIENT_PHONE_NOT_FOUND,
+          "Telefone não encontrado"
+        );
+      }
+      return sendSuccess(request, reply, updated);
+    } catch (err: any) {
+      request.log.error(err);
+      if (err instanceof ApiError) throw err;
+      if (String(err?.message ?? "").includes("INVALID_PHONE_E164")) {
+        throw new ApiError(
+          400,
+          ERROR_CODES.common.VALIDATION_ERROR,
+          "Telefone inválido"
+        );
+      }
+      throw new ApiError(
+        500,
+        ERROR_CODES.clients.CLIENT_PHONE_UPDATE_FAILED,
+        "Erro ao atualizar telefone do cliente"
       );
     }
   });

@@ -123,6 +123,52 @@ export async function createMasterClient(input: {
   return mapRow(result.rows[0] as Record<string, unknown>);
 }
 
+export async function updateMasterClient(input: {
+  tenantId: string;
+  clientId: string;
+  name?: string;
+  email?: string | null;
+  document?: string | null;
+  externalId?: string | null;
+  metadata?: Record<string, unknown>;
+}): Promise<MasterClientRecord | null> {
+  const sets: string[] = [];
+  const values: unknown[] = [];
+  let idx = 1;
+  if (input.name !== undefined) {
+    sets.push(`name = $${idx++}`);
+    values.push(input.name.trim());
+  }
+  if (input.email !== undefined) {
+    sets.push(`email = $${idx++}`);
+    values.push(input.email ? input.email.trim() : null);
+  }
+  if (input.document !== undefined) {
+    sets.push(`document = $${idx++}`);
+    values.push(input.document ? input.document.trim() : null);
+  }
+  if (input.externalId !== undefined) {
+    sets.push(`external_id = $${idx++}`);
+    values.push(input.externalId ? input.externalId.trim() : null);
+  }
+  if (input.metadata !== undefined) {
+    sets.push(`metadata = $${idx++}::jsonb`);
+    values.push(JSON.stringify(input.metadata ?? {}));
+  }
+  if (sets.length === 0) return null;
+  sets.push("updated_at = now()");
+  values.push(input.tenantId, input.clientId);
+  const result = await pool.query(
+    `UPDATE clients
+     SET ${sets.join(", ")}
+     WHERE tenant_id = $${idx++}::uuid AND id = $${idx}::uuid
+     RETURNING *`,
+    values
+  );
+  if (!result.rows[0]) return null;
+  return mapRow(result.rows[0] as Record<string, unknown>);
+}
+
 export async function listMasterClientPhones(input: {
   tenantId: string;
   clientId: string;
@@ -187,6 +233,76 @@ export async function createMasterClientPhone(input: {
     );
     await client.query("COMMIT");
     return mapPhoneRow(inserted.rows[0] as Record<string, unknown>);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function updateMasterClientPhone(input: {
+  tenantId: string;
+  clientId: string;
+  phoneId: string;
+  phoneE164?: string;
+  label?: string | null;
+  isPrimary?: boolean;
+  isWhatsApp?: boolean;
+  metadata?: Record<string, unknown>;
+}): Promise<MasterClientPhoneRecord | null> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    let idx = 1;
+    if (input.phoneE164 !== undefined) {
+      const normalized = normalizeE164(input.phoneE164);
+      if (!normalized) throw new Error("INVALID_PHONE_E164");
+      sets.push(`phone_e164 = $${idx++}`);
+      values.push(normalized);
+    }
+    if (input.label !== undefined) {
+      sets.push(`label = $${idx++}`);
+      values.push(input.label ? input.label.trim() : null);
+    }
+    if (input.isWhatsApp !== undefined) {
+      sets.push(`is_whatsapp = $${idx++}`);
+      values.push(Boolean(input.isWhatsApp));
+    }
+    if (input.metadata !== undefined) {
+      sets.push(`metadata = $${idx++}::jsonb`);
+      values.push(JSON.stringify(input.metadata ?? {}));
+    }
+    if (sets.length === 0 && input.isPrimary === undefined) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+
+    if (input.isPrimary) {
+      await client.query(
+        `UPDATE client_phones
+         SET is_primary = false, updated_at = now()
+         WHERE tenant_id = $1::uuid AND client_id = $2::uuid`,
+        [input.tenantId, input.clientId]
+      );
+      sets.push(`is_primary = true`);
+    } else if (input.isPrimary === false) {
+      sets.push(`is_primary = false`);
+    }
+    sets.push("updated_at = now()");
+    values.push(input.tenantId, input.clientId, input.phoneId);
+    const result = await client.query(
+      `UPDATE client_phones
+       SET ${sets.join(", ")}
+       WHERE tenant_id = $${idx++}::uuid AND client_id = $${idx++}::uuid AND id = $${idx}::uuid
+       RETURNING *`,
+      values
+    );
+    await client.query("COMMIT");
+    if (!result.rows[0]) return null;
+    return mapPhoneRow(result.rows[0] as Record<string, unknown>);
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
