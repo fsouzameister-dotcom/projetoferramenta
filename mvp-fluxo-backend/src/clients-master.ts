@@ -310,3 +310,48 @@ export async function updateMasterClientPhone(input: {
     client.release();
   }
 }
+
+export async function deleteMasterClientPhone(input: {
+  tenantId: string;
+  clientId: string;
+  phoneId: string;
+}): Promise<boolean> {
+  const result = await pool.query(
+    `DELETE FROM client_phones
+     WHERE tenant_id = $1::uuid AND client_id = $2::uuid AND id = $3::uuid`,
+    [input.tenantId, input.clientId, input.phoneId]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+export async function deleteMasterClient(input: {
+  tenantId: string;
+  clientId: string;
+}): Promise<{ ok: boolean; blockedReason?: "linked_conversation" }> {
+  const linked = await pool.query(
+    `SELECT 1
+     FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name = 'agent_conversations'
+       AND column_name = 'client_id'`
+  );
+  if ((linked.rowCount ?? 0) > 0) {
+    const inUse = await pool.query(
+      `SELECT 1
+       FROM agent_conversations
+       WHERE tenant_id = $1::uuid AND client_id = $2::uuid
+       LIMIT 1`,
+      [input.tenantId, input.clientId]
+    );
+    if ((inUse.rowCount ?? 0) > 0) {
+      return { ok: false, blockedReason: "linked_conversation" };
+    }
+  }
+
+  const result = await pool.query(
+    `DELETE FROM clients
+     WHERE tenant_id = $1::uuid AND id = $2::uuid`,
+    [input.tenantId, input.clientId]
+  );
+  return { ok: (result.rowCount ?? 0) > 0 };
+}

@@ -34,6 +34,8 @@ import {
 import {
   createMasterClient,
   createMasterClientPhone,
+  deleteMasterClient,
+  deleteMasterClientPhone,
   listMasterClientPhones,
   listMasterClientsByTenant,
   updateMasterClient,
@@ -1806,6 +1808,112 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
         500,
         ERROR_CODES.clients.CLIENT_UPDATE_FAILED,
         "Erro ao atualizar cliente"
+      );
+    }
+  });
+
+  fastify.delete<{
+    Params: { clientId: string; phoneId: string };
+  }>("/clients/:clientId/phones/:phoneId", {
+    schema: {
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: ["clientId", "phoneId"],
+        properties: {
+          clientId: { type: "string", minLength: 1 },
+          phoneId: { type: "string", minLength: 1 },
+        },
+      },
+      response: {
+        200: successEnvelopeSchema({
+          type: "object",
+          additionalProperties: false,
+          required: ["success"],
+          properties: { success: { type: "boolean" } },
+        }),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        404: errorEnvelopeSchema([ERROR_CODES.clients.CLIENT_PHONE_NOT_FOUND]),
+        500: errorEnvelopeSchema([ERROR_CODES.clients.CLIENT_PHONE_DELETE_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    const tenantId = request.tenant.id;
+    try {
+      const ok = await deleteMasterClientPhone({
+        tenantId,
+        clientId: request.params.clientId,
+        phoneId: request.params.phoneId,
+      });
+      if (!ok) {
+        throw new ApiError(
+          404,
+          ERROR_CODES.clients.CLIENT_PHONE_NOT_FOUND,
+          "Telefone não encontrado"
+        );
+      }
+      return sendSuccess(request, reply, { success: true });
+    } catch (err) {
+      request.log.error(err);
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(
+        500,
+        ERROR_CODES.clients.CLIENT_PHONE_DELETE_FAILED,
+        "Erro ao remover telefone do cliente"
+      );
+    }
+  });
+
+  fastify.delete<{
+    Params: { clientId: string };
+  }>("/clients/:clientId", {
+    schema: {
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: ["clientId"],
+        properties: { clientId: { type: "string", minLength: 1 } },
+      },
+      response: {
+        200: successEnvelopeSchema({
+          type: "object",
+          additionalProperties: false,
+          required: ["success"],
+          properties: { success: { type: "boolean" } },
+        }),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        404: errorEnvelopeSchema([ERROR_CODES.clients.CLIENT_NOT_FOUND]),
+        409: errorEnvelopeSchema([ERROR_CODES.clients.CLIENT_DELETE_BLOCKED]),
+        500: errorEnvelopeSchema([ERROR_CODES.clients.CLIENT_DELETE_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    const tenantId = request.tenant.id;
+    try {
+      const result = await deleteMasterClient({
+        tenantId,
+        clientId: request.params.clientId,
+      });
+      if (!result.ok && result.blockedReason === "linked_conversation") {
+        throw new ApiError(
+          409,
+          ERROR_CODES.clients.CLIENT_DELETE_BLOCKED,
+          "Cliente vinculado a conversa. Remoção bloqueada."
+        );
+      }
+      if (!result.ok) {
+        throw new ApiError(404, ERROR_CODES.clients.CLIENT_NOT_FOUND, "Cliente não encontrado");
+      }
+      return sendSuccess(request, reply, { success: true });
+    } catch (err) {
+      request.log.error(err);
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(
+        500,
+        ERROR_CODES.clients.CLIENT_DELETE_FAILED,
+        "Erro ao remover cliente"
       );
     }
   });
