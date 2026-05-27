@@ -8,7 +8,8 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "test": "tsx --test test/*.test.ts",
-    "seed:dev": "tsx scripts/seed-dev-admin.ts"
+    "seed:dev": "tsx scripts/seed-dev-admin.ts",
+    "migrate": "tsx scripts/migrate.ts"
   },
   "keywords": [],
   "author": "",

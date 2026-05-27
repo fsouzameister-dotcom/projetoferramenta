@@ -26,6 +26,12 @@ import {
   listFlowResponseEvents,
 } from "../flow-response-events";
 import {
+  createTabulacao,
+  deleteTabulacao,
+  listTabulacoesByTenant,
+  updateTabulacao,
+} from "../tabulacoes";
+import {
   hasAdminAccess,
   isAllowedRoleForTenant,
   isPlatformAdmin,
@@ -111,6 +117,22 @@ const nodeSchema = {
         },
       ],
     },
+  },
+} as const;
+
+const tabulacaoSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "tenantId", "key", "label", "active", "createdAt", "updatedAt"],
+  properties: {
+    id: { type: "string" },
+    tenantId: { type: "string" },
+    key: { type: "string" },
+    label: { type: "string" },
+    description: { anyOf: [{ type: "string" }, { type: "null" }] },
+    active: { type: "boolean" },
+    createdAt: { type: "string" },
+    updatedAt: { type: "string" },
   },
 } as const;
 
@@ -1648,6 +1670,194 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
     }
     }
   );
+
+  // ──────────────────────────────────────────────────────────────────
+  // TABULACOES
+  // ──────────────────────────────────────────────────────────────────
+  fastify.get("/tabulacoes", {
+    schema: {
+      response: {
+        200: successEnvelopeSchema({ type: "array", items: tabulacaoSchema }),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        500: errorEnvelopeSchema([ERROR_CODES.tabulacoes.TABULACOES_LIST_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    const tenantId = request.tenant.id;
+    try {
+      const rows = await listTabulacoesByTenant(tenantId);
+      return sendSuccess(request, reply, rows);
+    } catch (err) {
+      request.log.error(err);
+      throw new ApiError(
+        500,
+        ERROR_CODES.tabulacoes.TABULACOES_LIST_FAILED,
+        "Erro ao listar tabulações"
+      );
+    }
+  });
+
+  fastify.post<{
+    Body: { key?: string; label: string; description?: string };
+  }>("/tabulacoes", {
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: false,
+        required: ["label"],
+        properties: {
+          key: { type: "string", minLength: 1, maxLength: 64 },
+          label: { type: "string", minLength: 1, maxLength: 120 },
+          description: { type: "string", maxLength: 255 },
+        },
+      },
+      response: {
+        201: successEnvelopeSchema(tabulacaoSchema),
+        400: errorEnvelopeSchema([ERROR_CODES.common.VALIDATION_ERROR]),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        409: errorEnvelopeSchema([ERROR_CODES.tabulacoes.TABULACAO_KEY_DUPLICATE]),
+        500: errorEnvelopeSchema([ERROR_CODES.tabulacoes.TABULACAO_CREATE_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    const tenantId = request.tenant.id;
+    const body = request.body;
+    try {
+      const created = await createTabulacao({
+        tenantId,
+        key: body.key ?? body.label,
+        label: body.label,
+        description: body.description,
+      });
+      return sendSuccess(request, reply, created, 201);
+    } catch (err: any) {
+      request.log.error(err);
+      if (String(err?.message ?? "").includes("duplicate key value")) {
+        throw new ApiError(
+          409,
+          ERROR_CODES.tabulacoes.TABULACAO_KEY_DUPLICATE,
+          "Já existe uma tabulação com essa chave"
+        );
+      }
+      throw new ApiError(
+        500,
+        ERROR_CODES.tabulacoes.TABULACAO_CREATE_FAILED,
+        "Erro ao criar tabulação"
+      );
+    }
+  });
+
+  fastify.put<{
+    Params: { tabulacaoId: string };
+    Body: { key?: string; label?: string; description?: string | null; active?: boolean };
+  }>("/tabulacoes/:tabulacaoId", {
+    schema: {
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: ["tabulacaoId"],
+        properties: { tabulacaoId: { type: "string", minLength: 1 } },
+      },
+      body: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          key: { type: "string", minLength: 1, maxLength: 64 },
+          label: { type: "string", minLength: 1, maxLength: 120 },
+          description: { anyOf: [{ type: "string", maxLength: 255 }, { type: "null" }] },
+          active: { type: "boolean" },
+        },
+      },
+      response: {
+        200: successEnvelopeSchema(tabulacaoSchema),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        404: errorEnvelopeSchema([ERROR_CODES.tabulacoes.TABULACAO_NOT_FOUND]),
+        409: errorEnvelopeSchema([ERROR_CODES.tabulacoes.TABULACAO_KEY_DUPLICATE]),
+        500: errorEnvelopeSchema([ERROR_CODES.tabulacoes.TABULACAO_UPDATE_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    const tenantId = request.tenant.id;
+    try {
+      const updated = await updateTabulacao({
+        tenantId,
+        tabulacaoId: request.params.tabulacaoId,
+        ...request.body,
+      });
+      if (!updated) {
+        throw new ApiError(
+          404,
+          ERROR_CODES.tabulacoes.TABULACAO_NOT_FOUND,
+          "Tabulação não encontrada"
+        );
+      }
+      return sendSuccess(request, reply, updated);
+    } catch (err: any) {
+      request.log.error(err);
+      if (err instanceof ApiError) throw err;
+      if (String(err?.message ?? "").includes("duplicate key value")) {
+        throw new ApiError(
+          409,
+          ERROR_CODES.tabulacoes.TABULACAO_KEY_DUPLICATE,
+          "Já existe uma tabulação com essa chave"
+        );
+      }
+      throw new ApiError(
+        500,
+        ERROR_CODES.tabulacoes.TABULACAO_UPDATE_FAILED,
+        "Erro ao atualizar tabulação"
+      );
+    }
+  });
+
+  fastify.delete<{
+    Params: { tabulacaoId: string };
+  }>("/tabulacoes/:tabulacaoId", {
+    schema: {
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: ["tabulacaoId"],
+        properties: { tabulacaoId: { type: "string", minLength: 1 } },
+      },
+      response: {
+        200: successEnvelopeSchema({
+          type: "object",
+          additionalProperties: false,
+          required: ["success"],
+          properties: { success: { type: "boolean" } },
+        }),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        404: errorEnvelopeSchema([ERROR_CODES.tabulacoes.TABULACAO_NOT_FOUND]),
+        500: errorEnvelopeSchema([ERROR_CODES.tabulacoes.TABULACAO_DELETE_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    const tenantId = request.tenant.id;
+    try {
+      const ok = await deleteTabulacao(tenantId, request.params.tabulacaoId);
+      if (!ok) {
+        throw new ApiError(
+          404,
+          ERROR_CODES.tabulacoes.TABULACAO_NOT_FOUND,
+          "Tabulação não encontrada"
+        );
+      }
+      return sendSuccess(request, reply, { success: true });
+    } catch (err) {
+      request.log.error(err);
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(
+        500,
+        ERROR_CODES.tabulacoes.TABULACAO_DELETE_FAILED,
+        "Erro ao remover tabulação"
+      );
+    }
+  });
 
   fastify.post<{
     Params: { flowId: string };

@@ -22,6 +22,7 @@ import { recordFlowResponseEvent } from "./flow-response-events";
 import { ApiError, ERROR_CODES } from "./http";
 import { generateAiText } from "./ai";
 import { listNodesByFlow } from "./nodes";
+import { executeTabulacaoNode, parseTabulacaoNodeConfig } from "./tabulacao-node";
 import {
   applyResponseTimeoutVariables,
   isWaitTimeoutElapsed,
@@ -926,6 +927,33 @@ export async function executeFlow(
         trace,
         ...(lastResponseEventId ? { lastResponseEventId } : {}),
       };
+    } else if (currentNode.type === "tabulacao") {
+      const tabResult = executeTabulacaoNode({ config, variables });
+      const parsedTab = parseTabulacaoNodeConfig(config);
+      nextNodeId = tabResult.nextNodeId;
+      details = tabResult.details;
+      if (input.persistResponses !== false) {
+        const event = await recordFlowResponseEvent({
+          tenantId,
+          flowId,
+          nodeId: currentNode.id,
+          conversationId: input.conversationId,
+          phone: input.phone,
+          sessionId: input.sessionId,
+          questionKey: parsedTab.questionKey,
+          promptText: "Tabulação de atendimento",
+          answerType: "single_choice",
+          variableName: parsedTab.variableName,
+          selectedOptions: [tabResult.selectedOption],
+          rawValue: tabResult.selectedOption.id,
+          metadata: {
+            nodeName: currentNode.name,
+            nodeType: currentNode.type,
+            tabulacaoId: parsedTab.tabulacaoId,
+          },
+        });
+        lastResponseEventId = event.id;
+      }
     } else {
       nextNodeId = typeof config.next_node_id === "string" ? config.next_node_id : null;
     }

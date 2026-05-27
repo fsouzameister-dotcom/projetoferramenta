@@ -13,6 +13,7 @@
 - Multi-tenant master: vários `platform_admin`, vê tudo, impersonação total, email único global (a implementar)
 - Meta **0–30 dias:** ~80% WhatsApp pesquisa + IA texto + insights (agregados + LLM) + cadastro mestre + ads
 - Meta **31–60 dias:** telefonia piloto (1 fluxo, 1 número)
+- ✅ Validação inicial concluída em produção: node `mensagem` com interativos (`buttons` e `list`) e novo fluxo relacionado.
 
 ## O que foi implementado
 

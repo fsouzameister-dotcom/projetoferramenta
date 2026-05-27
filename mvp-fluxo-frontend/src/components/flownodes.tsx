@@ -380,6 +380,23 @@ export const EncerramentoNode = ({ data }: { data: any }) => (
   </div>
 );
 
+export const TabulacaoNode = ({ data }: { data: any }) => (
+  <div
+    className="px-4 py-3 shadow-lg rounded-lg bg-gray-900 border-2 border-fuchsia-500 min-w-[170px] cursor-pointer hover:shadow-xl transition-shadow"
+    onClick={() => data.onSelect?.(data.id)}
+  >
+    <div className="text-xs font-bold text-fuchsia-300 mb-1">🏷️ Tabulação</div>
+    <div className="text-sm font-semibold text-white">{data.label}</div>
+    {data.config?.tabulacao_label ? (
+      <div className="text-xs text-fuchsia-200 mt-1 truncate max-w-[150px]">
+        {data.config.tabulacao_label}
+      </div>
+    ) : null}
+    <Handle type="target" position={Position.Top} />
+    <Handle type="source" position={Position.Bottom} />
+  </div>
+);
+
 export const InicioNode = ({ data }: { data: any }) => (
   <div
     className="px-4 py-3 shadow-lg rounded-lg bg-gray-900 border-2 border-green-600 min-w-[160px]"
@@ -408,5 +425,6 @@ export const nodeTypes = {
   contador: ContadorNode,
   decisao: DecisaoNode,
   encerramento: EncerramentoNode,
+  tabulacao: TabulacaoNode,
   inicio: InicioNode,
 };

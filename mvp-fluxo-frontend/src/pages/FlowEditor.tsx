@@ -41,6 +41,14 @@ interface TestResult {
   error?: string;
 }
 
+type TabulacaoOption = {
+  id: string;
+  key: string;
+  label: string;
+  description?: string | null;
+  active: boolean;
+};
+
 type DecisionRule = {
   variable: string;
   operator: string;
@@ -57,6 +65,7 @@ type PaletteItem = { id: string; name: string; icon: string };
 const productionPaletteItems: PaletteItem[] = [
   { id: "inicio", name: "Início", icon: "▶️" },
   { id: "mensagem", name: "Mensagem", icon: "📨" },
+  { id: "tabulacao", name: "Tabulação", icon: "🏷️" },
   { id: "receber_mensagem", name: "Receber Mensagem", icon: "📩" },
   { id: "capturar_entrada", name: "Capturar Entrada", icon: "📥" },
   { id: "contador", name: "Contador", icon: "🔢" },
@@ -109,6 +118,9 @@ export default function FlowEditor() {
   const [decisionAssistantGoal, setDecisionAssistantGoal] = useState("");
   const [decisionAssistantLoading, setDecisionAssistantLoading] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [tabulacoes, setTabulacoes] = useState<TabulacaoOption[]>([]);
+  const [newTabulacaoLabel, setNewTabulacaoLabel] = useState("");
+  const [newTabulacaoKey, setNewTabulacaoKey] = useState("");
 
   const goToFlowsList = () => navigate("/flows");
 
@@ -294,8 +306,9 @@ export default function FlowEditor() {
     Promise.all([
       api.get(`/flows`), // Rota para listar flows do tenant logado
       api.get(`/flows/${flowId}/nodes`),
+      api.get("/tabulacoes"),
     ])
-      .then(([flowsRes, nodesRes]) => {
+      .then(([flowsRes, nodesRes, tabulacoesRes]) => {
         const flows = unwrapApiData<FlowData[]>(flowsRes.data);
         const flow = Array.isArray(flows)
           ? flows.find((f: FlowData) => f.id === flowId)
@@ -308,6 +321,8 @@ export default function FlowEditor() {
         }
 
         setFlowData(flow);
+        const tabRows = unwrapApiData<TabulacaoOption[]>(tabulacoesRes.data);
+        setTabulacoes(Array.isArray(tabRows) ? tabRows : []);
         const initialNodes = unwrapApiData<NodeDataType[]>(nodesRes.data).map(
           (node: NodeDataType) => ({
             id: node.id,
@@ -459,6 +474,15 @@ export default function FlowEditor() {
   };
 
   const defaultConfigForNodeType = (nodeType: string): Record<string, unknown> => {
+    if (nodeType === "tabulacao") {
+      return {
+        tabulacao_id: "",
+        tabulacao_key: "flow_completed",
+        tabulacao_label: "Fluxo concluído",
+        variable_name: "tabulacao",
+        question_key: "tabulacao",
+      };
+    }
     if (nodeType === "receber_mensagem") {
       return {
         wait_hint: "Aguardando sua mensagem…",
@@ -503,6 +527,27 @@ export default function FlowEditor() {
       };
     }
     return {};
+  };
+
+  const handleCreateTabulacao = async () => {
+    const label = newTabulacaoLabel.trim();
+    if (!label) {
+      alert("Informe o nome da tabulação.");
+      return;
+    }
+    try {
+      const response = await api.post("/tabulacoes", {
+        label,
+        key: newTabulacaoKey.trim() || undefined,
+      });
+      const created = unwrapApiData<TabulacaoOption>(response.data);
+      setTabulacoes((prev) => [...prev, created].sort((a, b) => a.label.localeCompare(b.label)));
+      setNewTabulacaoLabel("");
+      setNewTabulacaoKey("");
+      alert("Tabulação criada.");
+    } catch (err) {
+      alert(getApiErrorMessage(err, "Erro ao criar tabulação."));
+    }
   };
 
   const handleAddNode = async (nodeType: string) => {
@@ -2043,6 +2088,102 @@ export default function FlowEditor() {
                 </div>
                 <p className="text-xs text-gray-500">
                   Encerra o fluxo. Não possui saída — conecte apenas entradas.
+                </p>
+              </>
+            )}
+
+            {selectedNodeType === "tabulacao" && (
+              <>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Tabulação
+                  </label>
+                  <select
+                    value={editNodeConfig.tabulacao_id || ""}
+                    onChange={(e) => {
+                      const selected = tabulacoes.find((t) => t.id === e.target.value);
+                      setEditNodeConfig({
+                        ...editNodeConfig,
+                        tabulacao_id: selected?.id || "",
+                        tabulacao_key: selected?.key || "",
+                        tabulacao_label: selected?.label || "",
+                      });
+                    }}
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg text-sm"
+                  >
+                    <option value="">Selecione...</option>
+                    {tabulacoes
+                      .filter((t) => t.active)
+                      .map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.label} ({t.key})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+                <div className="mb-4 p-3 rounded-lg border border-gray-200 bg-gray-50">
+                  <p className="text-xs font-semibold text-gray-700 mb-2">
+                    Criar nova tabulação (cadastro rápido)
+                  </p>
+                  <div className="grid grid-cols-1 gap-2">
+                    <input
+                      type="text"
+                      value={newTabulacaoLabel}
+                      onChange={(e) => setNewTabulacaoLabel(e.target.value)}
+                      placeholder="Ex.: Abandono na etapa de dados"
+                      className="w-full px-3 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg text-sm"
+                    />
+                    <input
+                      type="text"
+                      value={newTabulacaoKey}
+                      onChange={(e) => setNewTabulacaoKey(e.target.value)}
+                      placeholder="Chave (opcional) ex.: abandono_dados"
+                      className="w-full px-3 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleCreateTabulacao}
+                      className="px-3 py-2 bg-fuchsia-600 hover:bg-fuchsia-700 text-white rounded-lg text-sm"
+                    >
+                      + Criar tabulação
+                    </button>
+                  </div>
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Variável do fluxo
+                  </label>
+                  <input
+                    type="text"
+                    value={editNodeConfig.variable_name || editNodeConfig.variableName || "tabulacao"}
+                    onChange={(e) =>
+                      setEditNodeConfig({
+                        ...editNodeConfig,
+                        variable_name: e.target.value,
+                      })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg"
+                  />
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Chave analítica (relatórios)
+                  </label>
+                  <input
+                    type="text"
+                    value={editNodeConfig.question_key || editNodeConfig.questionKey || "tabulacao"}
+                    onChange={(e) =>
+                      setEditNodeConfig({
+                        ...editNodeConfig,
+                        question_key: e.target.value,
+                      })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg"
+                  />
+                </div>
+                <p className="text-xs text-gray-500">
+                  Este node registra a tabulação como evento analítico para uso em relatórios e
+                  disponibiliza os valores nas variáveis do fluxo.
                 </p>
               </>
             )}
