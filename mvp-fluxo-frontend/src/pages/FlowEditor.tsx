@@ -1543,6 +1543,237 @@ export default function FlowEditor() {
                 {selectedNodeType === "mensagem" && (
                   <div className="mb-4">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Tipo interativo (opcional)
+                    </label>
+                    <select
+                      value={
+                        editNodeConfig.interactive_type ||
+                        (Array.isArray(editNodeConfig.buttons) && editNodeConfig.buttons.length > 0
+                          ? "buttons"
+                          : "none")
+                      }
+                      onChange={(e) =>
+                        setEditNodeConfig({
+                          ...editNodeConfig,
+                          interactive_type: e.target.value,
+                        })
+                      }
+                      className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg mb-3"
+                    >
+                      <option value="none">Sem interativo (apenas texto)</option>
+                      <option value="buttons">Botões (até 3)</option>
+                      <option value="list">Lista interativa (até 10)</option>
+                    </select>
+                    <p className="text-xs text-gray-500 mb-2">
+                      Use o mesmo <strong>id</strong> em <strong>Capturar Entrada</strong> (modo uma opção) ou em{" "}
+                      <strong>Decisão</strong> para ramificar.
+                    </p>
+                    {(editNodeConfig.interactive_type ||
+                      (Array.isArray(editNodeConfig.buttons) && editNodeConfig.buttons.length > 0
+                        ? "buttons"
+                        : "none")) === "buttons" && (
+                      <>
+                        <div className="space-y-2">
+                          {(Array.isArray(editNodeConfig.buttons)
+                            ? editNodeConfig.buttons
+                            : []
+                          ).map((btn: { id?: string; label?: string }, index: number) => (
+                            <div key={index} className="flex gap-2 items-start">
+                              <input
+                                type="text"
+                                value={btn.label || ""}
+                                onChange={(e) => {
+                                  const next = [
+                                    ...(Array.isArray(editNodeConfig.buttons)
+                                      ? editNodeConfig.buttons
+                                      : []),
+                                  ];
+                                  const label = e.target.value.slice(0, 20);
+                                  next[index] = {
+                                    ...next[index],
+                                    label,
+                                    id:
+                                      next[index]?.id ||
+                                      label
+                                        .toLowerCase()
+                                        .replace(/[^a-z0-9]+/g, "_")
+                                        .slice(0, 32) ||
+                                      `btn_${index + 1}`,
+                                  };
+                                  setEditNodeConfig({ ...editNodeConfig, buttons: next });
+                                }}
+                                placeholder="Texto do botão"
+                                className="flex-1 px-3 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg text-sm"
+                              />
+                              <input
+                                type="text"
+                                value={btn.id || ""}
+                                onChange={(e) => {
+                                  const next = [
+                                    ...(Array.isArray(editNodeConfig.buttons)
+                                      ? editNodeConfig.buttons
+                                      : []),
+                                  ];
+                                  next[index] = { ...next[index], id: e.target.value };
+                                  setEditNodeConfig({ ...editNodeConfig, buttons: next });
+                                }}
+                                placeholder="id"
+                                className="w-24 px-2 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg text-xs font-mono"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const next = (
+                                    Array.isArray(editNodeConfig.buttons)
+                                      ? editNodeConfig.buttons
+                                      : []
+                                  ).filter((_: unknown, i: number) => i !== index);
+                                  setEditNodeConfig({ ...editNodeConfig, buttons: next });
+                                }}
+                                className="px-2 py-2 text-red-600 hover:bg-red-50 rounded"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                        {(Array.isArray(editNodeConfig.buttons) ? editNodeConfig.buttons : []).length < 3 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const current = Array.isArray(editNodeConfig.buttons)
+                                ? editNodeConfig.buttons
+                                : [];
+                              setEditNodeConfig({
+                                ...editNodeConfig,
+                                buttons: [...current, { id: `btn_${current.length + 1}`, label: "" }],
+                              });
+                            }}
+                            className="mt-2 text-sm text-teal-700 hover:underline"
+                          >
+                            + Adicionar botão
+                          </button>
+                        )}
+                      </>
+                    )}
+                    {(editNodeConfig.interactive_type || "none") === "list" && (
+                      <>
+                        <div className="grid grid-cols-1 gap-2 mb-2">
+                          <input
+                            type="text"
+                            value={editNodeConfig.list_button_text || "Ver opções"}
+                            onChange={(e) =>
+                              setEditNodeConfig({ ...editNodeConfig, list_button_text: e.target.value.slice(0, 20) })
+                            }
+                            placeholder="Texto do botão da lista"
+                            className="w-full px-3 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg text-sm"
+                          />
+                          <input
+                            type="text"
+                            value={editNodeConfig.list_section_title || "Opções"}
+                            onChange={(e) =>
+                              setEditNodeConfig({
+                                ...editNodeConfig,
+                                list_section_title: e.target.value.slice(0, 24),
+                              })
+                            }
+                            placeholder="Título da seção"
+                            className="w-full px-3 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg text-sm"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          {(Array.isArray(editNodeConfig.list_items) ? editNodeConfig.list_items : []).map(
+                            (item: { id?: string; label?: string; description?: string }, index: number) => (
+                              <div key={index} className="grid grid-cols-1 gap-2 border border-gray-200 rounded-lg p-2">
+                                <input
+                                  type="text"
+                                  value={item.label || ""}
+                                  onChange={(e) => {
+                                    const next = [
+                                      ...(Array.isArray(editNodeConfig.list_items) ? editNodeConfig.list_items : []),
+                                    ];
+                                    const label = e.target.value.slice(0, 24);
+                                    next[index] = {
+                                      ...next[index],
+                                      label,
+                                      id:
+                                        next[index]?.id ||
+                                        label.toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 32) ||
+                                        `opt_${index + 1}`,
+                                    };
+                                    setEditNodeConfig({ ...editNodeConfig, list_items: next });
+                                  }}
+                                  placeholder="Título da opção"
+                                  className="w-full px-3 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg text-sm"
+                                />
+                                <input
+                                  type="text"
+                                  value={item.description || ""}
+                                  onChange={(e) => {
+                                    const next = [
+                                      ...(Array.isArray(editNodeConfig.list_items) ? editNodeConfig.list_items : []),
+                                    ];
+                                    next[index] = { ...next[index], description: e.target.value.slice(0, 72) };
+                                    setEditNodeConfig({ ...editNodeConfig, list_items: next });
+                                  }}
+                                  placeholder="Descrição (opcional)"
+                                  className="w-full px-3 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg text-sm"
+                                />
+                                <div className="flex gap-2">
+                                  <input
+                                    type="text"
+                                    value={item.id || ""}
+                                    onChange={(e) => {
+                                      const next = [
+                                        ...(Array.isArray(editNodeConfig.list_items) ? editNodeConfig.list_items : []),
+                                      ];
+                                      next[index] = { ...next[index], id: e.target.value };
+                                      setEditNodeConfig({ ...editNodeConfig, list_items: next });
+                                    }}
+                                    placeholder="id"
+                                    className="flex-1 px-2 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg text-xs font-mono"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const next = (
+                                        Array.isArray(editNodeConfig.list_items) ? editNodeConfig.list_items : []
+                                      ).filter((_: unknown, i: number) => i !== index);
+                                      setEditNodeConfig({ ...editNodeConfig, list_items: next });
+                                    }}
+                                    className="px-2 py-2 text-red-600 hover:bg-red-50 rounded"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              </div>
+                            )
+                          )}
+                        </div>
+                        {(Array.isArray(editNodeConfig.list_items) ? editNodeConfig.list_items : []).length < 10 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const current = Array.isArray(editNodeConfig.list_items)
+                                ? editNodeConfig.list_items
+                                : [];
+                              setEditNodeConfig({
+                                ...editNodeConfig,
+                                list_items: [...current, { id: `opt_${current.length + 1}`, label: "" }],
+                              });
+                            }}
+                            className="mt-2 text-sm text-teal-700 hover:underline"
+                          >
+                            + Adicionar opção
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+                {selectedNodeType === "mensagem" && (
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
                       Enviar após (segundos)
                     </label>
                     <input

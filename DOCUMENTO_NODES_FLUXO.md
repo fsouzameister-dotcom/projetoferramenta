@@ -26,10 +26,19 @@ Este documento consolida o que cada node faz hoje no projeto, considerando:
 ### `mensagem`
 
 - Status: `Implementado`
-- Frontend: permite editar conteúdo e **enviar após** (`send_delay_seconds`, máx. 300s).
+- Frontend:
+  - conteúdo da mensagem e **aguardar antes de enviar** (`send_delay_seconds`, máx. 300s);
+  - interativo opcional com `config.interactive_type`:
+    - `buttons`: **botões de resposta** (máx. 3) em `config.buttons[]` com `{ id, label }`;
+    - `list`: **lista interativa** (máx. 10) em `config.list_items[]` com `{ id, label, description? }`.
 - Backend:
-  - ao entrar no node, aguarda `send_delay_seconds` (ex.: tempo após o node anterior, como receber resposta);
-  - renderiza template com variáveis (`{{variavel}}`) e adiciona em `messages`;
+  - ao entrar no node, aguarda `send_delay_seconds`;
+  - renderiza template com variáveis (`{{variavel}}`);
+  - sem botões: `outboundMessages[]` com `{ kind: "text", body }` e espelho em `messages`;
+  - com botões: `{ kind: "interactive_buttons", body, buttons }` (WhatsApp Cloud API — reply buttons);
+  - com lista: `{ kind: "interactive_list", body, listItems, listButtonText, listSectionTitle }`;
+  - webhook inbound trata clique em botão/lista como texto (`button_reply.id` / `list_reply.id`);
+  - canais sem interativo nativo (ex.: Twilio sessão): fallback em texto numerado;
   - segue para `config.next_node_id`.
 
 ### `receber_mensagem`

@@ -1712,6 +1712,40 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
               visitedNodeIds: { type: "array", items: { type: "string" } },
               currentNodeId: { anyOf: [{ type: "string" }, { type: "null" }] },
               messages: { type: "array", items: { type: "string" } },
+              outboundMessages: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: true,
+                  properties: {
+                    kind: { type: "string", enum: ["text", "interactive_buttons", "interactive_list"] },
+                    body: { type: "string" },
+                    buttons: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          id: { type: "string" },
+                          label: { type: "string" },
+                        },
+                      },
+                    },
+                    listItems: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          id: { type: "string" },
+                          label: { type: "string" },
+                          description: { type: "string" },
+                        },
+                      },
+                    },
+                    listButtonText: { type: "string" },
+                    listSectionTitle: { type: "string" },
+                  },
+                },
+              },
               variables: { type: "object", additionalProperties: true },
               awaitingInput: { type: "object", additionalProperties: true },
               lastResponseEventId: { type: "string" },

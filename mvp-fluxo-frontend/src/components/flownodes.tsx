@@ -119,6 +119,14 @@ export const MensagemNode = ({ data }: { data: any }) => {
     data.config?.delay_after_seconds ??
     data.config?.delayAfterSeconds ??
     0;
+  const buttons = Array.isArray(data.config?.buttons) ? data.config.buttons : [];
+  const listItems = Array.isArray(data.config?.list_items)
+    ? data.config.list_items
+    : Array.isArray(data.config?.listItems)
+      ? data.config.listItems
+      : [];
+  const interactiveType =
+    data.config?.interactive_type ?? data.config?.interactiveType ?? (buttons.length ? "buttons" : "none");
   return (
     <div
       className="px-4 py-3 shadow-lg rounded-lg bg-gray-900 border-2 border-teal-500 min-w-[160px] cursor-pointer hover:shadow-xl transition-shadow"
@@ -126,6 +134,12 @@ export const MensagemNode = ({ data }: { data: any }) => {
     >
       <div className="text-xs font-bold text-teal-400 mb-1">📨 Mensagem</div>
       <div className="text-sm font-semibold text-white">{data.label}</div>
+      {interactiveType === "buttons" && buttons.length > 0 ? (
+        <div className="text-xs text-teal-200 mt-1">{buttons.length} botão(ões)</div>
+      ) : null}
+      {interactiveType === "list" && listItems.length > 0 ? (
+        <div className="text-xs text-teal-200 mt-1">Lista ({listItems.length} itens)</div>
+      ) : null}
       {delay > 0 ? (
         <div className="text-[10px] text-teal-200/90 mt-1">⏳ +{delay}s</div>
       ) : null}

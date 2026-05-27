@@ -61,6 +61,167 @@ export async function sendWhatsAppTextMessage(input: {
   return { ok: true, messageId };
 }
 
+export type WhatsAppReplyButton = {
+  id: string;
+  title: string;
+};
+
+export type WhatsAppListRow = {
+  id: string;
+  title: string;
+  description?: string;
+};
+
+/**
+ * Botões de resposta rápida (máx. 3). Corpo da mensagem até 1024 caracteres.
+ * @see https://developers.facebook.com/docs/whatsapp/cloud-api/messages/interactive-reply-buttons-messages
+ */
+export async function sendWhatsAppInteractiveReplyButtons(input: {
+  phoneNumberId: string;
+  accessToken: string;
+  toDigits: string;
+  bodyText: string;
+  buttons: WhatsAppReplyButton[];
+}): Promise<WhatsAppSendTextResult> {
+  const buttons = input.buttons.slice(0, 3).map((b) => ({
+    type: "reply" as const,
+    reply: {
+      id: b.id.slice(0, 256),
+      title: b.title.slice(0, 20),
+    },
+  }));
+  if (buttons.length === 0) {
+    return sendWhatsAppTextMessage({
+      phoneNumberId: input.phoneNumberId,
+      accessToken: input.accessToken,
+      toDigits: input.toDigits,
+      textBody: input.bodyText,
+    });
+  }
+
+  const url = `${GRAPH_BASE}/${encodeURIComponent(input.phoneNumberId)}/messages`;
+  const body = {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: input.toDigits.replace(/\D/g, ""),
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: input.bodyText.slice(0, 1024) },
+      action: { buttons },
+    },
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${input.accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const json = (await res.json()) as Record<string, unknown>;
+  if (!res.ok) {
+    const err = json?.error as
+      | { message?: string; code?: number; error_subcode?: number }
+      | undefined;
+    const numeric = err ? graphWhatsAppNumericCode(err) : undefined;
+    return {
+      ok: false,
+      message: err?.message ?? res.statusText ?? "Erro Graph API",
+      code: numeric,
+      details: JSON.stringify(json),
+    };
+  }
+
+  const messages = json?.messages as Array<{ id?: string }> | undefined;
+  const messageId = messages?.[0]?.id;
+  if (!messageId) {
+    return { ok: false, message: "Resposta sem messages[0].id", details: JSON.stringify(json) };
+  }
+  return { ok: true, messageId };
+}
+
+/**
+ * Lista interativa (máx. 10 linhas por seção). Corpo da mensagem até 1024 caracteres.
+ * @see https://developers.facebook.com/docs/whatsapp/cloud-api/messages/interactive-list-messages
+ */
+export async function sendWhatsAppInteractiveListMessage(input: {
+  phoneNumberId: string;
+  accessToken: string;
+  toDigits: string;
+  bodyText: string;
+  buttonText: string;
+  sectionTitle?: string;
+  rows: WhatsAppListRow[];
+}): Promise<WhatsAppSendTextResult> {
+  const rows = input.rows.slice(0, 10).map((row) => ({
+    id: row.id.slice(0, 200),
+    title: row.title.slice(0, 24),
+    description: row.description?.slice(0, 72),
+  }));
+  if (rows.length === 0) {
+    return sendWhatsAppTextMessage({
+      phoneNumberId: input.phoneNumberId,
+      accessToken: input.accessToken,
+      toDigits: input.toDigits,
+      textBody: input.bodyText,
+    });
+  }
+
+  const url = `${GRAPH_BASE}/${encodeURIComponent(input.phoneNumberId)}/messages`;
+  const body = {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: input.toDigits.replace(/\D/g, ""),
+    type: "interactive",
+    interactive: {
+      type: "list",
+      body: { text: input.bodyText.slice(0, 1024) },
+      action: {
+        button: input.buttonText.slice(0, 20),
+        sections: [
+          {
+            title: input.sectionTitle?.slice(0, 24),
+            rows,
+          },
+        ],
+      },
+    },
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${input.accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const json = (await res.json()) as Record<string, unknown>;
+  if (!res.ok) {
+    const err = json?.error as
+      | { message?: string; code?: number; error_subcode?: number }
+      | undefined;
+    const numeric = err ? graphWhatsAppNumericCode(err) : undefined;
+    return {
+      ok: false,
+      message: err?.message ?? res.statusText ?? "Erro Graph API",
+      code: numeric,
+      details: JSON.stringify(json),
+    };
+  }
+
+  const messages = json?.messages as Array<{ id?: string }> | undefined;
+  const messageId = messages?.[0]?.id;
+  if (!messageId) {
+    return { ok: false, message: "Resposta sem messages[0].id", details: JSON.stringify(json) };
+  }
+  return { ok: true, messageId };
+}
+
 export type ParsedWebhookEvent =
   | {
       kind: "inbound_text";
@@ -154,6 +315,11 @@ export function parseWhatsAppWebhookPayload(body: unknown): ParsedWebhookEvent[]
             timestamp?: string;
             type?: string;
             text?: { body?: string };
+            interactive?: {
+              type?: string;
+              button_reply?: { id?: string };
+              list_reply?: { id?: string };
+            };
           }>
         | undefined;
 
@@ -163,10 +329,22 @@ export function parseWhatsAppWebhookPayload(body: unknown): ParsedWebhookEvent[]
 
       if (Array.isArray(messages)) {
         for (const msg of messages) {
-          if (msg.type !== "text" || !msg.text?.body) continue;
           const fromWaId = msg.from ?? "";
           const mid = msg.id ?? "";
           if (!fromWaId || !mid) continue;
+
+          let textBody: string | undefined;
+          if (msg.type === "text" && msg.text?.body) {
+            textBody = msg.text.body;
+          } else if (msg.type === "interactive") {
+            const interactive = msg.interactive;
+            if (interactive?.type === "button_reply" && interactive.button_reply?.id) {
+              textBody = interactive.button_reply.id;
+            } else if (interactive?.type === "list_reply" && interactive.list_reply?.id) {
+              textBody = interactive.list_reply.id;
+            }
+          }
+          if (!textBody) continue;
 
           let contactName: string | undefined;
           const c = contacts?.find((x) => (x as { wa_id?: string }).wa_id === fromWaId);
@@ -179,7 +357,7 @@ export function parseWhatsAppWebhookPayload(body: unknown): ParsedWebhookEvent[]
             messageId: mid,
             fromWaId,
             timestampSec: Number(msg.timestamp ?? 0) || 0,
-            textBody: msg.text.body,
+            textBody,
             contactName,
           });
         }

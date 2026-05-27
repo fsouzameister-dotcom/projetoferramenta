@@ -6,6 +6,11 @@ import {
   type CapturarEntradaAwaiting,
 } from "./capturar-entrada";
 import { applyFlowAgentHandoff } from "./agent-conversations";
+import {
+  executeMensagemNode,
+  parseMensagemNodeConfig,
+  type FlowOutboundMessage,
+} from "./mensagem-outbound";
 import { executeContadorPassagensNode } from "./contador-passagens";
 import { executeEncerramentoNode } from "./encerramento";
 import {
@@ -20,7 +25,6 @@ import { listNodesByFlow } from "./nodes";
 import {
   applyResponseTimeoutVariables,
   isWaitTimeoutElapsed,
-  parseFlowMessageSendDelayConfig,
   parseFlowWaitTimeoutConfig,
   sleepMs,
 } from "./flow-wait-timeout";
@@ -72,6 +76,8 @@ export type ExecuteFlowResult = {
   visitedNodeIds: string[];
   currentNodeId: string | null;
   messages: string[];
+  /** Mensagens estruturadas (texto ou botões) para envio em canais como WhatsApp */
+  outboundMessages?: FlowOutboundMessage[];
   variables: Record<string, unknown>;
   trace: ExecutionTraceEntry[];
   awaitingInput?: CapturarEntradaAwaiting;
@@ -657,6 +663,7 @@ export async function executeFlow(
   const nodesById = new Map(nodes.map((node) => [node.id, node]));
   const variables: Record<string, unknown> = { ...(input.variables ?? {}) };
   const messages: string[] = [];
+  const outboundMessages: FlowOutboundMessage[] = [];
   const trace: ExecutionTraceEntry[] = [];
   const visitedNodeIds: string[] = [];
   const maxSteps =
@@ -682,18 +689,21 @@ export async function executeFlow(
     if (currentNode.type === "inicio") {
       nextNodeId = typeof config.next_node_id === "string" ? config.next_node_id : null;
     } else if (currentNode.type === "mensagem") {
-      const sendDelay = parseFlowMessageSendDelayConfig(config);
-      if (sendDelay.sendDelaySeconds > 0) {
-        await sleepMs(sendDelay.sendDelaySeconds * 1000);
+      const parsedMsg = parseMensagemNodeConfig(config);
+      if (parsedMsg.sendDelaySeconds > 0) {
+        await sleepMs(parsedMsg.sendDelaySeconds * 1000);
       }
-      const content = typeof config.content === "string" ? config.content : "";
-      const rendered = resolveTemplate(content, variables);
-      messages.push(rendered);
-      nextNodeId = typeof config.next_node_id === "string" ? config.next_node_id : null;
-      details = {
-        renderedContent: rendered,
-        sendDelaySeconds: sendDelay.sendDelaySeconds,
-      };
+      const msgResult = executeMensagemNode({
+        config,
+        variables,
+        resolveTemplate: (text) => resolveTemplate(text, variables),
+      });
+      for (const m of msgResult.messages) {
+        messages.push(m);
+      }
+      outboundMessages.push(...msgResult.outboundMessages);
+      nextNodeId = msgResult.nextNodeId;
+      details = msgResult.details;
     } else if (currentNode.type === "chamada_api") {
       const apiResult = await executeApiCallNode(config, variables);
       nextNodeId = apiResult.nextNodeId;
@@ -763,6 +773,7 @@ export async function executeFlow(
           visitedNodeIds,
           currentNodeId: currentNode.id,
           messages,
+          outboundMessages,
           variables,
           trace,
           awaitingInput: captureResult.awaitingInput,
@@ -827,6 +838,7 @@ export async function executeFlow(
           visitedNodeIds,
           currentNodeId: currentNode.id,
           messages,
+          outboundMessages,
           variables,
           trace,
           awaitingInput: captureResult.awaitingInput,
@@ -884,6 +896,7 @@ export async function executeFlow(
           visitedNodeIds,
           currentNodeId: currentNode.id,
           messages,
+          outboundMessages,
           variables,
           trace,
           ...(lastResponseEventId ? { lastResponseEventId } : {}),
@@ -908,6 +921,7 @@ export async function executeFlow(
         visitedNodeIds,
         currentNodeId: currentNode.id,
         messages,
+        outboundMessages,
         variables,
         trace,
         ...(lastResponseEventId ? { lastResponseEventId } : {}),
@@ -931,6 +945,7 @@ export async function executeFlow(
         visitedNodeIds,
         currentNodeId: currentNode.id,
         messages,
+        outboundMessages,
         variables,
         trace,
         ...(lastResponseEventId ? { lastResponseEventId } : {}),
@@ -946,6 +961,7 @@ export async function executeFlow(
         visitedNodeIds,
         currentNodeId: null,
         messages,
+        outboundMessages,
         variables,
         trace,
         ...(lastResponseEventId ? { lastResponseEventId } : {}),
@@ -960,6 +976,7 @@ export async function executeFlow(
     visitedNodeIds,
     currentNodeId: currentNode?.id ?? null,
     messages,
+    outboundMessages,
     variables,
     trace,
     ...(lastResponseEventId ? { lastResponseEventId } : {}),
