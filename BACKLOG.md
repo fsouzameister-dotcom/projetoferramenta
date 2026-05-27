@@ -3,7 +3,7 @@
 > Fonte viva de itens **fora do escopo 0–30 / 31–60** ou **polish pós go-live**.  
 > Escopo ativo e prioridades de release: **[DEVLOG.md → Escopo vigente — maio/2026](DEVLOG.md#escopo-vigente--maio2026)**.
 
-**Última atualização:** 2026-05-25
+**Última atualização:** 2026-05-27
 
 ---
 
@@ -31,6 +31,7 @@
 | P2 | [Tutoriais interativos in-app (product tours)](#épico-tutoriais-interativos-in-app) | 61–90d | 📋 | Driver.js / Joyride; tours por role |
 | P2 | [Checklist configuração mínima do tenant](#épico-checklist-configuração-mínima-do-tenant) | 61–90d | 📋 | Onboarding self-service (% WhatsApp, fluxo, agente) |
 | P2 | [NPS / CSAT pós-interação](#épico-nps--csat-pós-interação) | 61–90d | 📋 | Node ou pesquisa pós-fluxo; correlacionar relatórios |
+| P2 | [Cadastro mestre API consolidada](#épico-cadastro-mestre-api-consolidada) | 61–90d | 📋 | Endpoint único cliente + telefones e visão unificada para UI |
 | P2 | Telefonia embarcada (protótipo) | 31–60d+ | 💬 | [DEVLOG — Discussão telefonia](DEVLOG.md#discussão-telefonia--a-retomar-2026-05-22) |
 | P3 | Centro de ajuda in-app (links + vídeos) | 90d+ | 📋 | Complemento aos product tours |
 | P3 | Tours contextuais por node / feature | 90d+ | 📋 | Após tours MVP |
@@ -101,6 +102,22 @@
 **Solução:** node ou mensagem final de pesquisa NPS; evento em `flow_response_events` ou tabela dedicada; agregado em `/reports` ou insights.
 
 **Dependência:** cadastro mestre + fluxo ponta a ponta estável.
+
+---
+
+## Épico: Cadastro mestre API consolidada
+
+**Problema:** frontend precisa de múltiplas chamadas para montar perfil completo do cliente (dados básicos + telefones), aumentando acoplamento e latência.
+
+**Solução:** criar endpoint consolidado `GET /api/clients/:id` retornando cliente + telefones em payload único, mantendo CRUD atual para escrita.
+
+**Escopo inicial sugerido:**
+
+- `GET /api/clients/:id` (cliente + `phones[]`)
+- contrato estável para telas de atendimento e CRM
+- preparo para incluir canais adicionais (email, social ids) no mesmo envelope
+
+**Dependência:** CRUD mínimo de `clients` e `client_phones` (já entregue).
 
 ---
 

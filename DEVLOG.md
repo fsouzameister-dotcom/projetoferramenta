@@ -14,6 +14,22 @@
 - Meta **0–30 dias:** ~80% WhatsApp pesquisa + IA texto + insights (agregados + LLM) + cadastro mestre + ads
 - Meta **31–60 dias:** telefonia piloto (1 fluxo, 1 número)
 - ✅ Validação inicial concluída em produção: node `mensagem` com interativos (`buttons` e `list`) e novo fluxo relacionado.
+- ✅ Sessão 2026-05-27 concluída: tabulações + migrations + cadastro mestre API inicial em produção.
+
+### Atualização rápida (2026-05-27)
+
+- Fluxos:
+  - node `tabulacao` implementado no executor e no editor;
+  - node `mensagem` com botões e lista interativa estabilizado em produção.
+- Relatórios:
+  - consulta de tabulações pronta na página `/reports` (sem criar nova aba dedicada).
+- Banco / plataforma:
+  - migrations versionadas adicionadas (`schema_migrations` + cadastro mestre);
+  - tabelas criadas e validadas em produção: `clients`, `client_phones`, `mailings`, `mailing_recipients`.
+- Cadastro mestre (API):
+  - `clients`: `GET`, `POST`, `PUT`, `DELETE`;
+  - `client_phones`: `GET`, `POST`, `PUT`, `DELETE`;
+  - regra de segurança: bloqueio de delete de cliente vinculado a conversa (`CLIENT_DELETE_BLOCKED`).
 
 ## O que foi implementado
 
