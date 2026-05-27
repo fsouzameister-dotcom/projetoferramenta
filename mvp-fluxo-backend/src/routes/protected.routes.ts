@@ -31,6 +31,7 @@ import {
   listTabulacoesByTenant,
   updateTabulacao,
 } from "../tabulacoes";
+import { createMasterClient, listMasterClientsByTenant } from "../clients-master";
 import {
   hasAdminAccess,
   isAllowedRoleForTenant,
@@ -131,6 +132,23 @@ const tabulacaoSchema = {
     label: { type: "string" },
     description: { anyOf: [{ type: "string" }, { type: "null" }] },
     active: { type: "boolean" },
+    createdAt: { type: "string" },
+    updatedAt: { type: "string" },
+  },
+} as const;
+
+const masterClientSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "tenantId", "name", "metadata", "createdAt", "updatedAt"],
+  properties: {
+    id: { type: "string" },
+    tenantId: { type: "string" },
+    externalId: { anyOf: [{ type: "string" }, { type: "null" }] },
+    name: { type: "string" },
+    email: { anyOf: [{ type: "string" }, { type: "null" }] },
+    document: { anyOf: [{ type: "string" }, { type: "null" }] },
+    metadata: { type: "object", additionalProperties: true },
     createdAt: { type: "string" },
     updatedAt: { type: "string" },
   },
@@ -1855,6 +1873,100 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
         500,
         ERROR_CODES.tabulacoes.TABULACAO_DELETE_FAILED,
         "Erro ao remover tabulação"
+      );
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────
+  // CLIENTS (cadastro mestre)
+  // ──────────────────────────────────────────────────────────────────
+  fastify.get<{
+    Querystring: { search?: string; limit?: number };
+  }>("/clients", {
+    schema: {
+      querystring: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          search: { type: "string" },
+          limit: { type: "number", minimum: 1, maximum: 200 },
+        },
+      },
+      response: {
+        200: successEnvelopeSchema({ type: "array", items: masterClientSchema }),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        500: errorEnvelopeSchema([ERROR_CODES.clients.CLIENTS_LIST_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    const tenantId = request.tenant.id;
+    const q = request.query ?? {};
+    try {
+      const rows = await listMasterClientsByTenant({
+        tenantId,
+        search: q.search,
+        limit: q.limit,
+      });
+      return sendSuccess(request, reply, rows);
+    } catch (err) {
+      request.log.error(err);
+      throw new ApiError(
+        500,
+        ERROR_CODES.clients.CLIENTS_LIST_FAILED,
+        "Erro ao listar clientes"
+      );
+    }
+  });
+
+  fastify.post<{
+    Body: {
+      name: string;
+      email?: string;
+      document?: string;
+      externalId?: string;
+      metadata?: Record<string, unknown>;
+    };
+  }>("/clients", {
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: false,
+        required: ["name"],
+        properties: {
+          name: { type: "string", minLength: 1, maxLength: 140 },
+          email: { type: "string", maxLength: 140 },
+          document: { type: "string", maxLength: 40 },
+          externalId: { type: "string", maxLength: 120 },
+          metadata: { type: "object", additionalProperties: true },
+        },
+      },
+      response: {
+        201: successEnvelopeSchema(masterClientSchema),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        500: errorEnvelopeSchema([ERROR_CODES.clients.CLIENT_CREATE_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    const tenantId = request.tenant.id;
+    const body = request.body;
+    try {
+      const created = await createMasterClient({
+        tenantId,
+        name: body.name,
+        email: body.email,
+        document: body.document,
+        externalId: body.externalId,
+        metadata: body.metadata,
+      });
+      return sendSuccess(request, reply, created, 201);
+    } catch (err) {
+      request.log.error(err);
+      throw new ApiError(
+        500,
+        ERROR_CODES.clients.CLIENT_CREATE_FAILED,
+        "Erro ao criar cliente"
       );
     }
   });
