@@ -31,7 +31,9 @@ function getUserRole(): string {
 
 function SessionActionButton() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [loggedIn, setLoggedIn] = React.useState(isSessionValid());
+  const hideOnFlowBuilder = /^\/flows\/[^/]+$/.test(location.pathname);
 
   React.useEffect(() => {
     const sync = () => setLoggedIn(isSessionValid());
@@ -46,7 +48,7 @@ function SessionActionButton() {
       window.removeEventListener("storage", sync);
       window.removeEventListener("focus", sync);
     };
-  }, []);
+  }, [location.pathname]);
 
   const handleClick = () => {
     if (loggedIn) {
@@ -56,45 +58,40 @@ function SessionActionButton() {
     navigate("/login");
   };
 
-  if (!loggedIn) {
+  if (hideOnFlowBuilder) {
     return null;
   }
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      className="px-4 py-2 rounded-xl text-sm font-semibold shadow-xl border transition-all bg-red-500/90 hover:bg-red-600 text-white border-red-300/40"
-    >
-      Logout
-    </button>
-  );
-}
-
-function RootLayout() {
-  const location = useLocation();
-  const loggedIn = isSessionValid();
-  const hideOnFlowBuilder = /^\/flows\/[^/]+$/.test(location.pathname);
-  const showTopBar = loggedIn && !hideOnFlowBuilder;
-
-  return (
-    <div className="min-h-screen flex flex-col">
-      {showTopBar ? (
-        <header className="h-14 shrink-0 border-b border-[#2f3d63] bg-gradient-to-r from-[#10264d] via-[#132a55] to-[#10264d] px-5 flex items-center justify-end">
-          <SessionActionButton />
-        </header>
-      ) : null}
-      <div className="flex-1 min-h-0">
-        <Outlet />
-      </div>
+    <div className="fixed top-6 right-6 z-[120]">
+      <button
+        type="button"
+        onClick={handleClick}
+        className={`px-4 py-2 rounded-xl text-sm font-semibold shadow-xl border transition-all ${
+          loggedIn
+            ? "bg-red-500/90 hover:bg-red-600 text-white border-red-300/40"
+            : "bg-accent/90 hover:bg-accent-dark text-white border-cyan-200/40"
+        }`}
+      >
+        {loggedIn ? "Logout" : "Login"}
+      </button>
     </div>
   );
 }
 
+function RootLayout() {
+  return (
+    <>
+      <SessionActionButton />
+      <Outlet />
+    </>
+  );
+}
+
 const LayoutWithSidebar = () => (
-  <div className="flex h-full">
+  <div className="flex h-screen">
     <Sidebar />
-    <main className="flex-1 p-5 overflow-auto bg-gradient-to-br from-primary-dark via-[#132a55] to-[#0f1e3d] text-gray-100">
+    <main className="flex-1 pl-5 pr-24 pb-5 pt-20 overflow-auto bg-gradient-to-br from-primary-dark via-[#132a55] to-[#0f1e3d] text-gray-100">
       <TenantActingBanner />
       <Outlet />
     </main>
