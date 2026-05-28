@@ -91,6 +91,12 @@ import {
   listAiProviderSettings,
   updateAiPersona,
 } from "../ai";
+import {
+  createInboundRoute,
+  deleteInboundRoute,
+  listInboundRoutes,
+  updateInboundRoute,
+} from "../inbound-routes";
 
 const flowSchema = {
   type: "object",
@@ -2089,6 +2095,254 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
         500,
         ERROR_CODES.tabulacoes.TABULACAO_DELETE_FAILED,
         "Erro ao remover tabulação"
+      );
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────
+  // INBOUND ROUTES (origem -> fluxo)
+  // ──────────────────────────────────────────────────────────────────
+  const inboundRouteSchema = {
+    type: "object",
+    additionalProperties: true,
+    required: ["id", "label", "source_type", "source_key", "flow_id", "active"],
+    properties: {
+      id: { type: "string" },
+      tenant_id: { type: "string" },
+      label: { type: "string" },
+      source_type: { type: "string" },
+      source_key: { type: "string" },
+      flow_id: { type: "string" },
+      active: { type: "boolean" },
+      metadata: { type: "object", additionalProperties: true },
+      created_at: { type: "string" },
+      updated_at: { type: "string" },
+    },
+  };
+
+  fastify.get("/inbound/routes", {
+    schema: {
+      response: {
+        200: successEnvelopeSchema({
+          type: "array",
+          items: inboundRouteSchema,
+        }),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        500: errorEnvelopeSchema([ERROR_CODES.inbound.INBOUND_ROUTES_LIST_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    try {
+      const routes = await listInboundRoutes(request.tenant.id);
+      return sendSuccess(request, reply, routes);
+    } catch (error) {
+      request.log.error(error);
+      throw new ApiError(
+        500,
+        ERROR_CODES.inbound.INBOUND_ROUTES_LIST_FAILED,
+        "Erro ao listar rotas de entrada"
+      );
+    }
+  });
+
+  fastify.post<{
+    Body: {
+      label: string;
+      sourceType: string;
+      sourceKey: string;
+      flowId: string;
+      active?: boolean;
+      metadata?: Record<string, unknown>;
+    };
+  }>("/inbound/routes", {
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: false,
+        required: ["label", "sourceType", "sourceKey", "flowId"],
+        properties: {
+          label: { type: "string", minLength: 1 },
+          sourceType: { type: "string", minLength: 1 },
+          sourceKey: { type: "string", minLength: 1 },
+          flowId: { type: "string", minLength: 1 },
+          active: { type: "boolean" },
+          metadata: { type: "object", additionalProperties: true },
+        },
+      },
+      response: {
+        201: successEnvelopeSchema(inboundRouteSchema),
+        400: errorEnvelopeSchema([
+          ERROR_CODES.common.VALIDATION_ERROR,
+          ERROR_CODES.inbound.INBOUND_ROUTE_INVALID_SOURCE,
+        ]),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        409: errorEnvelopeSchema([ERROR_CODES.inbound.INBOUND_ROUTE_DUPLICATE]),
+        500: errorEnvelopeSchema([ERROR_CODES.inbound.INBOUND_ROUTE_CREATE_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    try {
+      const created = await createInboundRoute({
+        tenantId: request.tenant.id,
+        label: request.body.label,
+        sourceType: request.body.sourceType,
+        sourceKey: request.body.sourceKey,
+        flowId: request.body.flowId,
+        active: request.body.active,
+        metadata: request.body.metadata,
+      });
+      return sendSuccess(request, reply, created, 201);
+    } catch (err: unknown) {
+      request.log.error(err);
+      const msg = err instanceof Error ? err.message : "";
+      if (msg === "ROUTE_DUPLICATE") {
+        throw new ApiError(
+          409,
+          ERROR_CODES.inbound.INBOUND_ROUTE_DUPLICATE,
+          "Já existe rota para esta origem"
+        );
+      }
+      if (msg === "INVALID_SOURCE_TYPE") {
+        throw new ApiError(
+          400,
+          ERROR_CODES.inbound.INBOUND_ROUTE_INVALID_SOURCE,
+          "Tipo de origem inválido"
+        );
+      }
+      if (msg === "VALIDATION") {
+        throw new ApiError(400, ERROR_CODES.common.VALIDATION_ERROR, "Dados inválidos");
+      }
+      throw new ApiError(
+        500,
+        ERROR_CODES.inbound.INBOUND_ROUTE_CREATE_FAILED,
+        "Erro ao criar rota de entrada"
+      );
+    }
+  });
+
+  fastify.put<{
+    Params: { routeId: string };
+    Body: {
+      label?: string;
+      sourceType?: string;
+      sourceKey?: string;
+      flowId?: string;
+      active?: boolean;
+      metadata?: Record<string, unknown>;
+    };
+  }>("/inbound/routes/:routeId", {
+    schema: {
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: ["routeId"],
+        properties: { routeId: { type: "string", minLength: 1 } },
+      },
+      body: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          label: { type: "string", minLength: 1 },
+          sourceType: { type: "string", minLength: 1 },
+          sourceKey: { type: "string", minLength: 1 },
+          flowId: { type: "string", minLength: 1 },
+          active: { type: "boolean" },
+          metadata: { type: "object", additionalProperties: true },
+        },
+      },
+      response: {
+        200: successEnvelopeSchema(inboundRouteSchema),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        404: errorEnvelopeSchema([ERROR_CODES.inbound.INBOUND_ROUTE_NOT_FOUND]),
+        409: errorEnvelopeSchema([ERROR_CODES.inbound.INBOUND_ROUTE_DUPLICATE]),
+        500: errorEnvelopeSchema([ERROR_CODES.inbound.INBOUND_ROUTE_UPDATE_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    try {
+      const updated = await updateInboundRoute(request.tenant.id, request.params.routeId, {
+        label: request.body.label,
+        sourceType: request.body.sourceType,
+        sourceKey: request.body.sourceKey,
+        flowId: request.body.flowId,
+        active: request.body.active,
+        metadata: request.body.metadata,
+      });
+      if (!updated) {
+        throw new ApiError(
+          404,
+          ERROR_CODES.inbound.INBOUND_ROUTE_NOT_FOUND,
+          "Rota de entrada não encontrada"
+        );
+      }
+      return sendSuccess(request, reply, updated);
+    } catch (err: unknown) {
+      request.log.error(err);
+      const msg = err instanceof Error ? err.message : "";
+      if (msg === "ROUTE_DUPLICATE") {
+        throw new ApiError(
+          409,
+          ERROR_CODES.inbound.INBOUND_ROUTE_DUPLICATE,
+          "Já existe rota para esta origem"
+        );
+      }
+      if (msg === "INVALID_SOURCE_TYPE") {
+        throw new ApiError(
+          400,
+          ERROR_CODES.inbound.INBOUND_ROUTE_INVALID_SOURCE,
+          "Tipo de origem inválido"
+        );
+      }
+      throw new ApiError(
+        500,
+        ERROR_CODES.inbound.INBOUND_ROUTE_UPDATE_FAILED,
+        "Erro ao atualizar rota de entrada"
+      );
+    }
+  });
+
+  fastify.delete<{ Params: { routeId: string } }>("/inbound/routes/:routeId", {
+    schema: {
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: ["routeId"],
+        properties: { routeId: { type: "string", minLength: 1 } },
+      },
+      response: {
+        200: successEnvelopeSchema({
+          type: "object",
+          additionalProperties: false,
+          required: ["success"],
+          properties: { success: { type: "boolean" } },
+        }),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        404: errorEnvelopeSchema([ERROR_CODES.inbound.INBOUND_ROUTE_NOT_FOUND]),
+        500: errorEnvelopeSchema([ERROR_CODES.inbound.INBOUND_ROUTE_DELETE_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    try {
+      const ok = await deleteInboundRoute(request.tenant.id, request.params.routeId);
+      if (!ok) {
+        throw new ApiError(
+          404,
+          ERROR_CODES.inbound.INBOUND_ROUTE_NOT_FOUND,
+          "Rota de entrada não encontrada"
+        );
+      }
+      return sendSuccess(request, reply, { success: true });
+    } catch (err) {
+      request.log.error(err);
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(
+        500,
+        ERROR_CODES.inbound.INBOUND_ROUTE_DELETE_FAILED,
+        "Erro ao remover rota de entrada"
       );
     }
   });

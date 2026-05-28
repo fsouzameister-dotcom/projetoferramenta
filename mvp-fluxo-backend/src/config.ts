@@ -83,3 +83,16 @@ export function shouldSkipWhatsAppSignatureVerify(): boolean {
 export function shouldSkipTwilioSignatureVerify(): boolean {
   return process.env.TWILIO_SKIP_SIGNATURE_VERIFY === "true";
 }
+
+/** Segredo para POST /webhooks/inbound (landing page, formulários, leads). */
+export function getInboundWebhookSecret(): string | undefined {
+  return process.env.INBOUND_WEBHOOK_SECRET?.trim();
+}
+
+/** Em dev, permite webhook sem segredo se INBOUND_WEBHOOK_SKIP_SECRET=true. */
+export function shouldSkipInboundWebhookSecret(): boolean {
+  return (
+    process.env.NODE_ENV !== "production" &&
+    process.env.INBOUND_WEBHOOK_SKIP_SECRET === "true"
+  );
+}

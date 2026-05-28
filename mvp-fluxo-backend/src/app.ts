@@ -14,10 +14,16 @@ import {
   sendSuccess,
   successEnvelopeSchema,
 } from "./http";
+import { updateAgentMessageStatusByProvider } from "./agent-conversations";
+import { processInboundMessage } from "./inbound-orchestrator";
 import {
-  recordInboundWhatsAppMessage,
-  updateAgentMessageStatusByProvider,
-} from "./agent-conversations";
+  whatsAppMetaSourceKey,
+  whatsAppTwilioSourceKey,
+} from "./inbound-routes";
+import {
+  getInboundWebhookSecret,
+  shouldSkipInboundWebhookSecret,
+} from "./config";
 import protectedRoutes from "./routes/protected.routes";
 import { resolveTenantByTwilioWebhook, resolveTenantByWhatsAppPhoneNumberId } from "./whatsapp-channels";
 import {
@@ -430,16 +436,15 @@ export async function buildApp(options: BuildAppOptions = {}) {
       if (!resolved) continue;
 
       if (ev.kind === "inbound_text") {
-        const ts = ev.timestampSec
-          ? new Date(ev.timestampSec * 1000).toISOString()
-          : new Date().toISOString();
-        await recordInboundWhatsAppMessage({
+        await processInboundMessage({
           tenantId: resolved.tenantId,
-          providerMessageId: ev.messageId,
-          fromWaId: ev.fromWaId,
-          textBody: ev.textBody,
+          sourceType: "whatsapp_meta",
+          sourceKey: whatsAppMetaSourceKey(ev.phoneNumberId),
+          messageText: ev.textBody,
+          phone: ev.fromWaId,
           contactName: ev.contactName,
-          timestampIso: ts,
+          providerMessageId: ev.messageId,
+          mirrorToAgentInbox: true,
         });
       } else if (ev.kind === "status") {
         const failed = ev.status === "failed";
@@ -508,13 +513,14 @@ export async function buildApp(options: BuildAppOptions = {}) {
         return twilioInboundAck(reply);
       }
 
-      await recordInboundWhatsAppMessage({
+      await processInboundMessage({
         tenantId: resolved.tenantId,
+        sourceType: "twilio_whatsapp",
+        sourceKey: whatsAppTwilioSourceKey(accountSid, to),
+        messageText: body,
+        phone: from.replace(/^whatsapp:/i, ""),
         providerMessageId: messageSid,
-        fromWaId: from.replace(/^whatsapp:/i, ""),
-        textBody: body,
-        contactName: undefined,
-        timestampIso: new Date().toISOString(),
+        mirrorToAgentInbox: true,
       });
 
       return twilioInboundAck(reply);
@@ -583,6 +589,100 @@ export async function buildApp(options: BuildAppOptions = {}) {
       return twilioStatusAck(reply);
     }
   });
+
+  app.post(
+    "/webhooks/inbound",
+    {
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["sourceType", "sourceKey", "message"],
+          properties: {
+            sourceType: { type: "string", minLength: 1 },
+            sourceKey: { type: "string", minLength: 1 },
+            message: { type: "string", minLength: 1 },
+            phone: { type: "string" },
+            email: { type: "string" },
+            name: { type: "string" },
+            sessionId: { type: "string" },
+            metadata: { type: "object", additionalProperties: true },
+          },
+        },
+        response: {
+          200: successEnvelopeSchema({
+            type: "object",
+            additionalProperties: true,
+            properties: {
+              routed: { type: "boolean" },
+              flowId: { type: "string" },
+              status: { type: "string" },
+              resumed: { type: "boolean" },
+            },
+          }),
+          401: errorEnvelopeSchema([ERROR_CODES.auth.INVALID_CREDENTIALS]),
+          400: errorEnvelopeSchema([ERROR_CODES.tenant.TENANT_REQUIRED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      const secret = getInboundWebhookSecret();
+      if (!shouldSkipInboundWebhookSecret()) {
+        const headerSecret = request.headers["x-inbound-secret"];
+        const provided =
+          typeof headerSecret === "string" ? headerSecret.trim() : "";
+        if (!secret || provided !== secret) {
+          return sendError(
+            request,
+            reply,
+            401,
+            ERROR_CODES.auth.INVALID_CREDENTIALS,
+            "Segredo de webhook inválido"
+          );
+        }
+      }
+
+      const tenantHeader = request.headers["x-tenant-id"];
+      const tenantId =
+        typeof tenantHeader === "string" ? tenantHeader.trim() : "";
+      if (!tenantId) {
+        return sendError(
+          request,
+          reply,
+          400,
+          ERROR_CODES.tenant.TENANT_REQUIRED,
+          "Header x-tenant-id é obrigatório"
+        );
+      }
+
+      const body = request.body as {
+        sourceType: string;
+        sourceKey: string;
+        message: string;
+        phone?: string;
+        email?: string;
+        name?: string;
+        sessionId?: string;
+        metadata?: Record<string, unknown>;
+      };
+
+      const result = await processInboundMessage({
+        tenantId,
+        sourceType: body.sourceType,
+        sourceKey: body.sourceKey,
+        messageText: body.message,
+        phone: body.phone,
+        email: body.email,
+        contactName: body.name,
+        metadata: {
+          ...(body.metadata ?? {}),
+          ...(body.sessionId ? { sessionId: body.sessionId } : {}),
+        },
+      });
+
+      return sendSuccess(request, reply, result);
+    }
+  );
 
   await app.register(protectedRoutes, { prefix: "/api" });
   await app.ready();

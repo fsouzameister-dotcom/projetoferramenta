@@ -9,6 +9,7 @@ const baseNavItems = [
   { label: "Usuários", path: "/admin/users", icon: "👤" },
   { label: "IA", path: "/admin/ai", icon: "🤖" },
   { label: "WhatsApp", path: "/admin/whatsapp", icon: "💬" },
+  { label: "Entrada", path: "/admin/inbound", icon: "📥" },
   { label: "Relatórios", path: "/reports", icon: "📊" },
   { label: "FAQ", path: "/faq", icon: "❓" },
 ];
