@@ -9,8 +9,24 @@ interface Flow {
   created_at: string;
 }
 
+interface UserRow {
+  id: string;
+  role_name: string;
+}
+
+interface WhatsAppChannel {
+  id: string;
+}
+
+interface TwilioTemplate {
+  contentSid: string;
+}
+
 export default function Dashboard() {
   const [flows, setFlows] = useState<Flow[]>([]);
+  const [users, setUsers] = useState<UserRow[]>([]);
+  const [channels, setChannels] = useState<WhatsAppChannel[]>([]);
+  const [templates, setTemplates] = useState<TwilioTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [apiOnline, setApiOnline] = useState<boolean | null>(null);
@@ -33,31 +49,54 @@ export default function Dashboard() {
     setLoading(true);
     setError(null);
 
-    // A chamada de API agora não precisa do tenantId na URL.
-    // O interceptor do axios em `api/client.ts` adicionará o `x-tenant-id` e o prefixo `/api`.
-    api
-      .get("/flows") // Endpoint agora é apenas "/flows"
-      .then((res) => {
-        const list = unwrapApiData<Flow[]>(res.data);
-        setFlows(list);
-        setError(null);
-      })
-      .catch((err) => {
-        console.error("Erro ao carregar flows:", err);
-        const status = err?.response?.status;
-        if (status === 401 || status === 403) {
-          setError("Sessao invalida ou expirada. Faca login novamente.");
-        } else if (status === 400) {
-          setError("Tenant ausente na sessao. Faca login novamente.");
+    void Promise.allSettled([
+      api.get("/flows"),
+      api.get("/users"),
+      api.get("/whatsapp/channels"),
+      api.get("/agent/twilio/content-templates"),
+    ])
+      .then((results) => {
+        const [flowsResult, usersResult, channelsResult, templatesResult] = results;
+
+        if (flowsResult.status === "fulfilled") {
+          setFlows(unwrapApiData<Flow[]>(flowsResult.value.data));
+          setError(null);
         } else {
-          setError(
-            getApiErrorMessage(
-              err,
-              "Nao foi possivel carregar os fluxos. Verifique backend e conectividade."
-            )
-          );
+          const err = flowsResult.reason;
+          const status = err?.response?.status;
+          if (status === 401 || status === 403) {
+            setError("Sessao invalida ou expirada. Faca login novamente.");
+          } else if (status === 400) {
+            setError("Tenant ausente na sessao. Faca login novamente.");
+          } else {
+            setError(
+              getApiErrorMessage(
+                err,
+                "Nao foi possivel carregar os fluxos. Verifique backend e conectividade."
+              )
+            );
+          }
+          setFlows([]);
         }
-        setFlows([]);
+
+        if (usersResult.status === "fulfilled") {
+          setUsers(unwrapApiData<UserRow[]>(usersResult.value.data));
+        } else {
+          setUsers([]);
+        }
+
+        if (channelsResult.status === "fulfilled") {
+          setChannels(unwrapApiData<WhatsAppChannel[]>(channelsResult.value.data));
+        } else {
+          setChannels([]);
+        }
+
+        if (templatesResult.status === "fulfilled") {
+          const payload = unwrapApiData<TwilioTemplate[]>(templatesResult.value.data);
+          setTemplates(Array.isArray(payload) ? payload : []);
+        } else {
+          setTemplates([]);
+        }
       })
       .finally(() => setLoading(false));
   }, []); // O array de dependências está vazio, pois o tenantId não é mais uma dependência direta aqui.
@@ -87,6 +126,35 @@ export default function Dashboard() {
   const totalFlows = filteredFlows.length;
   const activeFlows = filteredFlows.filter((f) => f.is_active).length;
   const inactiveFlows = totalFlows - activeFlows;
+  const hasActiveFlow = flows.some((flow) => flow.is_active);
+  const hasWhatsAppChannel = channels.length > 0;
+  const hasAgentUser = users.some((user) => user.role_name === "agente");
+  const hasTwilioTemplate = templates.length > 0;
+
+  const checklist = [
+    {
+      id: "whatsapp",
+      label: "Canal WhatsApp configurado",
+      ok: hasWhatsAppChannel,
+    },
+    {
+      id: "flow",
+      label: "Pelo menos 1 fluxo ativo",
+      ok: hasActiveFlow,
+    },
+    {
+      id: "agent",
+      label: "Pelo menos 1 usuário agente",
+      ok: hasAgentUser,
+    },
+    {
+      id: "template",
+      label: "Pelo menos 1 template aprovado",
+      ok: hasTwilioTemplate,
+    },
+  ];
+  const checklistDone = checklist.filter((item) => item.ok).length;
+  const checklistPercent = Math.round((checklistDone / checklist.length) * 100);
 
   const channelGroups = filteredFlows.reduce<Record<string, number>>((acc, flow) => {
     const key = normalizeChannel(flow.channel);
@@ -102,6 +170,38 @@ export default function Dashboard() {
         <p className="text-sm text-gray-300 mt-1">
           Visao geral dos seus fluxos de atendimento
         </p>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-4">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <h2 className="text-lg font-semibold text-primary">
+            Checklist de configuracao minima do tenant
+          </h2>
+          <span className="text-sm font-semibold text-teal-700">
+            {loading ? "..." : `${checklistPercent}% pronto`}
+          </span>
+        </div>
+        <div className="h-2 bg-gray-100 rounded-full overflow-hidden mb-3">
+          <div
+            className="h-2 bg-teal-500 rounded-full transition-all"
+            style={{ width: `${loading ? 0 : checklistPercent}%` }}
+          />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          {checklist.map((item) => (
+            <div
+              key={item.id}
+              className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 ${
+                item.ok
+                  ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                  : "bg-amber-50 border-amber-200 text-amber-800"
+              }`}
+            >
+              <span>{item.ok ? "✅" : "⚠️"}</span>
+              <span>{item.label}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
