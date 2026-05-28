@@ -259,9 +259,9 @@ export default function UsersAdmin() {
           onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
           required
         />
-        <div className="flex gap-2">
+        <div className="flex gap-2 min-w-0">
           <select
-            className="border rounded-lg px-3 py-2 text-gray-900 flex-1"
+            className="border rounded-lg px-3 py-2 text-gray-900 flex-1 min-w-0"
             value={form.role_name}
             onChange={(e) => setForm((p) => ({ ...p, role_name: e.target.value }))}
           >
@@ -274,7 +274,7 @@ export default function UsersAdmin() {
           <button
             type="submit"
             disabled={saving}
-            className="bg-accent text-white px-4 rounded-lg hover:bg-accent-dark disabled:opacity-50"
+            className="bg-accent text-white px-3 py-2 rounded-lg hover:bg-accent-dark disabled:opacity-50 shrink-0"
             title="Cria o usuário com o papel selecionado."
           >
             {saving ? "Salvando..." : "Criar"}
