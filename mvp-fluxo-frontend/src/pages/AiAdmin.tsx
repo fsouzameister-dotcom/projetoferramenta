@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import api, { getApiErrorMessage, unwrapApiData } from "../api/client";
+import InfoTooltip from "~components/InfoTooltip";
 
 type Provider = {
   id: string;
@@ -245,7 +246,10 @@ export default function AiAdmin() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-white">Configurações de IA</h1>
-          <p className="text-sm text-gray-300">Gerencie provedores, personas e roteiros por tenant.</p>
+          <p className="text-sm text-gray-300 flex items-center gap-2">
+            Gerencie provedores, personas e roteiros por tenant.
+            <InfoTooltip text="As configurações salvas aqui definem como a IA responde e qual modelo será usado no tenant." />
+          </p>
         </div>
         <button
           type="button"
@@ -266,7 +270,10 @@ export default function AiAdmin() {
 
       <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <form onSubmit={submitProvider} className="rounded-xl border border-[#324569] bg-[#1b2540] p-4 space-y-3">
-          <h2 className="font-semibold text-white">Provedor</h2>
+          <h2 className="font-semibold text-white flex items-center gap-2">
+            Provedor
+            <InfoTooltip text="Configure o modelo e API key do provedor de IA para habilitar geração de respostas." />
+          </h2>
           <div className="grid grid-cols-2 gap-2">
             <select
               value={providerForm.provider}
@@ -322,7 +329,10 @@ export default function AiAdmin() {
       </section>
 
       <section className="rounded-xl border border-[#324569] bg-[#1b2540] p-4 space-y-4">
-        <h2 className="font-semibold text-white">Criar Persona (modo guiado)</h2>
+        <h2 className="font-semibold text-white flex items-center gap-2">
+          Criar Persona (modo guiado)
+          <InfoTooltip text="Persona define tom de voz, estilo e objetivos usados nos prompts de atendimento." />
+        </h2>
         <form onSubmit={submitPersona} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <input
@@ -437,7 +447,10 @@ export default function AiAdmin() {
       </section>
 
       <section className="rounded-xl border border-[#324569] bg-[#1b2540] p-4 space-y-4">
-        <h2 className="font-semibold text-white">Criar Roteiro (sem código)</h2>
+        <h2 className="font-semibold text-white flex items-center gap-2">
+          Criar Roteiro (sem código)
+          <InfoTooltip text="Roteiros orientam o fluxo de conversa em etapas para padronizar abertura, objeções e fechamento." />
+        </h2>
         <form onSubmit={submitScript} className="space-y-3">
           <select
             value={scriptForm.personaId}

@@ -20,6 +20,7 @@ import AiAdmin from "./pages/AiAdmin";
 import WhatsAppAdmin from "./pages/WhatsAppAdmin";
 import Reports from "./pages/Reports";
 import PlatformTenants from "./pages/PlatformTenants";
+import Faq from "./pages/Faq";
 import Sidebar from "./components/Sidebar";
 import TenantActingBanner from "./components/TenantActingBanner";
 import { clearSession, isSessionValid } from "./lib/session";
@@ -140,6 +141,7 @@ const router = createBrowserRouter([
                 children: [
                   { path: "dashboard", element: <Dashboard /> },
                   { path: "reports", element: <Reports /> },
+                  { path: "faq", element: <Faq /> },
                   { path: "flows", element: <Flows /> },
                   { path: "flows/new", element: <FlowForm /> },
                   { path: "flows/edit/:id", element: <FlowForm /> },

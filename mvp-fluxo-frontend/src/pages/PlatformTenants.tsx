@@ -6,6 +6,7 @@ import {
   isPlatformAdmin,
   setActingTenant,
 } from "~lib/session";
+import InfoTooltip from "~components/InfoTooltip";
 
 type CustomerTenant = {
   id: string;
@@ -146,9 +147,10 @@ export default function PlatformTenants() {
         <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold text-white">Clientes (tenants)</h1>
-            <p className="text-sm text-gray-300 mt-1">
+            <p className="text-sm text-gray-300 mt-1 flex items-center gap-2">
               Gerencie ambientes de clientes e abra o tenant para configurar fluxos, WhatsApp e
               agentes com acesso master.
+              <InfoTooltip text="Cada tenant isola dados, fluxos e usuários. Use esta tela para criar e entrar no ambiente correto do cliente." />
             </p>
           </div>
           <button
@@ -170,7 +172,10 @@ export default function PlatformTenants() {
       )}
 
       <section className="rounded-xl border border-zinc-600/60 bg-zinc-800/40 p-6">
-        <h2 className="text-lg font-semibold text-white mb-1">Novo cliente</h2>
+        <h2 className="text-lg font-semibold text-white mb-1 flex items-center gap-2">
+          Novo cliente
+          <InfoTooltip text="Cria o tenant e o admin inicial em uma única etapa para acelerar o onboarding." />
+        </h2>
         <p className="text-sm text-gray-400 mb-6">
           Cria o tenant e o primeiro administrador do ambiente do cliente.
         </p>
@@ -296,6 +301,7 @@ export default function PlatformTenants() {
                   type="button"
                   onClick={() => openTenant(t)}
                   className="rounded-lg bg-cyan-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-600"
+                  title="Entra no tenant selecionado para configurar operação."
                 >
                   Abrir ambiente
                 </button>

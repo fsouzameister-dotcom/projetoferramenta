@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import api, { getApiErrorMessage, getApiOrigin, unwrapApiData } from "../api/client";
+import InfoTooltip from "~components/InfoTooltip";
 
 type PhoneNumber = {
   id: string;
@@ -336,10 +337,11 @@ export default function WhatsAppAdmin() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-white">Canais WhatsApp</h1>
-          <p className="text-sm text-gray-300 mt-1">
+          <p className="text-sm text-gray-300 mt-1 flex items-center gap-2">
             Cada número é cadastrado em <strong className="text-gray-200">um único provedor por vez</strong> (sem
             misturar Meta e Twilio no mesmo vínculo). Você pode ter várias conexões no tenant — por exemplo uma linha
             na Meta e outra na Twilio.
+            <InfoTooltip text="Evite duplicar o mesmo número em provedores diferentes para não causar conflito de roteamento." />
           </p>
           <p className="text-xs text-gray-400 mt-1">
             Envio automático: se existir Meta e Twilio no mesmo tenant, a Meta tem prioridade na fila atual do backend.
@@ -371,7 +373,10 @@ export default function WhatsAppAdmin() {
       )}
 
       <section className="mt-6 bg-white rounded-xl border border-slate-300 p-6 text-sm text-gray-800">
-        <h2 className="text-lg font-semibold text-gray-900">Configuração global (Meta webhooks)</h2>
+        <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+          Configuração global (Meta webhooks)
+          <InfoTooltip text="Essas configurações são globais no servidor e afetam a validação dos webhooks da Meta/Twilio." />
+        </h2>
         <p className="text-xs text-gray-600 mt-1 max-w-3xl">
           Estes valores ficam no <strong>banco de dados</strong> (cifrados) e substituem{" "}
           <span className="font-mono">WHATSAPP_WEBHOOK_VERIFY_TOKEN</span> e{" "}
@@ -548,7 +553,10 @@ export default function WhatsAppAdmin() {
         className="mt-6 bg-white rounded-xl border border-slate-300 p-6 space-y-4"
       >
         <div className="border-b border-gray-200 pb-3">
-          <h2 className="text-lg font-semibold text-gray-900">Nova conexão</h2>
+          <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+            Nova conexão
+            <InfoTooltip text="Cadastre um canal por vez com as credenciais corretas do provedor selecionado." />
+          </h2>
           <p className="text-xs text-gray-500 mt-0.5">
             Escolha o canal (BSP / API) e preencha as credenciais desse provedor apenas.
           </p>

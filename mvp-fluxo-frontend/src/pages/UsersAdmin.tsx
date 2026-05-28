@@ -5,6 +5,7 @@ import {
   getHomeTenantId,
   isPlatformAdmin,
 } from "~lib/session";
+import InfoTooltip from "~components/InfoTooltip";
 
 type UserRow = {
   id: string;
@@ -191,8 +192,9 @@ export default function UsersAdmin() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-white">Usuários e Permissões</h1>
-          <p className="text-sm text-gray-300 mt-1">
+          <p className="text-sm text-gray-300 mt-1 flex items-center gap-2">
             Crie perfis de admin local, supervisor e agente.
+            <InfoTooltip text="Controle aqui quem pode administrar canais, fluxos e atendimento dentro do tenant." />
           </p>
           <p className="text-xs text-gray-400 mt-1">
             O campo de nome define como o atendente aparece nas mensagens para o cliente.
@@ -209,7 +211,10 @@ export default function UsersAdmin() {
         </button>
       </div>
       <div className="mt-4 bg-white rounded-xl p-4 border border-gray-100">
-        <p className="text-sm font-semibold text-gray-900">Ambiente de testes</p>
+        <p className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+          Ambiente de testes
+          <InfoTooltip text="Essa opção só afeta a interface local deste tenant e facilita validações sem envio real." />
+        </p>
         <p className="text-xs text-gray-600 mt-1">
           Habilita o botão oculto "Simular cliente" na tela de atendimento para validar layout sem envio real.
         </p>
@@ -270,6 +275,7 @@ export default function UsersAdmin() {
             type="submit"
             disabled={saving}
             className="bg-accent text-white px-4 rounded-lg hover:bg-accent-dark disabled:opacity-50"
+            title="Cria o usuário com o papel selecionado."
           >
             {saving ? "Salvando..." : "Criar"}
           </button>
@@ -372,6 +378,7 @@ export default function UsersAdmin() {
                             type="button"
                             className="text-blue-600 hover:underline"
                             onClick={() => startEdit(user)}
+                            title="Editar nome, email, perfil e senha opcional."
                           >
                             Editar
                           </button>
