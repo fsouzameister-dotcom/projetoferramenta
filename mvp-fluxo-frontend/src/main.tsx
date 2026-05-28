@@ -35,6 +35,14 @@ function SessionActionButton() {
   const [loggedIn, setLoggedIn] = React.useState(isSessionValid());
   const hideOnFlowBuilder = /^\/flows\/[^/]+$/.test(location.pathname);
   const hideOnAgent = location.pathname === "/agent";
+  const hideOnSidebarLayout =
+    /^\/dashboard$/.test(location.pathname) ||
+    /^\/reports$/.test(location.pathname) ||
+    /^\/faq$/.test(location.pathname) ||
+    /^\/admin\//.test(location.pathname) ||
+    /^\/flows$/.test(location.pathname) ||
+    /^\/flows\/new$/.test(location.pathname) ||
+    /^\/flows\/edit\/[^/]+$/.test(location.pathname);
 
   React.useEffect(() => {
     const sync = () => setLoggedIn(isSessionValid());
@@ -59,7 +67,7 @@ function SessionActionButton() {
     navigate("/login");
   };
 
-  if (hideOnFlowBuilder || hideOnAgent) {
+  if (hideOnFlowBuilder || hideOnAgent || hideOnSidebarLayout) {
     return null;
   }
 
@@ -89,15 +97,33 @@ function RootLayout() {
   );
 }
 
-const LayoutWithSidebar = () => (
-  <div className="flex h-screen">
-    <Sidebar />
-    <main className="flex-1 pl-5 pr-24 pb-5 pt-20 overflow-auto bg-gradient-to-br from-primary-dark via-[#132a55] to-[#0f1e3d] text-gray-100">
-      <TenantActingBanner />
-      <Outlet />
-    </main>
-  </div>
-);
+const LayoutWithSidebar = () => {
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    clearSession();
+    navigate("/login");
+  };
+
+  return (
+    <div className="flex h-screen">
+      <Sidebar />
+      <main className="flex-1 p-5 overflow-auto bg-gradient-to-br from-primary-dark via-[#132a55] to-[#0f1e3d] text-gray-100">
+        <div className="flex justify-end mb-3">
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="px-4 py-2 rounded-xl text-sm font-semibold shadow-xl border transition-all bg-red-500/90 hover:bg-red-600 text-white border-red-300/40"
+          >
+            Logout
+          </button>
+        </div>
+        <TenantActingBanner />
+        <Outlet />
+      </main>
+    </div>
+  );
+};
 
 const RequireAuth = () => {
   if (!isSessionValid()) {
