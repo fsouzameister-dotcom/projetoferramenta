@@ -948,7 +948,7 @@ export default function AgentHome() {
   };
 
   return (
-    <div className="h-screen overflow-hidden bg-gradient-to-br from-primary-dark via-[#132a55] to-[#0f1e3d] text-gray-100 p-4 md:p-6">
+    <div className="h-screen overflow-hidden bg-gradient-to-br from-primary-dark via-[#132a55] to-[#0f1e3d] text-gray-100 px-4 pb-4 pt-20 md:px-6 md:pb-6 md:pt-20">
       <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-4 h-[calc(100vh-2rem)]">
         <aside className="bg-[#1b2540] rounded-xl border border-[#2f3d63] p-4 flex flex-col shadow-xl">
           <Link

@@ -63,7 +63,7 @@ function SessionActionButton() {
   }
 
   return (
-    <div className="fixed top-4 right-4 z-50">
+    <div className="fixed top-3 right-4 z-[120]">
       <button
         type="button"
         onClick={handleClick}
@@ -91,7 +91,7 @@ function RootLayout() {
 const LayoutWithSidebar = () => (
   <div className="flex h-screen">
     <Sidebar />
-    <main className="flex-1 p-5 overflow-auto bg-gradient-to-br from-primary-dark via-[#132a55] to-[#0f1e3d] text-gray-100">
+    <main className="flex-1 pl-5 pr-24 pb-5 pt-20 overflow-auto bg-gradient-to-br from-primary-dark via-[#132a55] to-[#0f1e3d] text-gray-100">
       <TenantActingBanner />
       <Outlet />
     </main>
