@@ -63,7 +63,7 @@ function SessionActionButton() {
   }
 
   return (
-    <div className="fixed top-3 right-4 z-[120]">
+    <div className="fixed top-6 right-6 z-[120]">
       <button
         type="button"
         onClick={handleClick}
