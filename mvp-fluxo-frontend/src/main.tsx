@@ -34,6 +34,7 @@ function SessionActionButton() {
   const location = useLocation();
   const [loggedIn, setLoggedIn] = React.useState(isSessionValid());
   const hideOnFlowBuilder = /^\/flows\/[^/]+$/.test(location.pathname);
+  const hideOnAgent = location.pathname === "/agent";
 
   React.useEffect(() => {
     const sync = () => setLoggedIn(isSessionValid());
@@ -58,7 +59,7 @@ function SessionActionButton() {
     navigate("/login");
   };
 
-  if (hideOnFlowBuilder) {
+  if (hideOnFlowBuilder || hideOnAgent) {
     return null;
   }
 

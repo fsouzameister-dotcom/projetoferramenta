@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import api, { getApiErrorMessage, unwrapApiData } from "../api/client";
 import logoClienton from "../../logo-clienton.png";
+import { clearSession } from "../lib/session";
 
 type ConversationStatus = "em_espera" | "em_andamento" | "historico";
 type MessageType = "text" | "contact" | "location" | "attachment" | "audio" | "image";
@@ -237,6 +238,7 @@ function deliveryClass(delivery?: MessageDelivery) {
 }
 
 export default function AgentHome() {
+  const navigate = useNavigate();
   const userName = localStorage.getItem("user_name") || "Agente";
   const simulationEnabled = localStorage.getItem(getSimulationFeatureKey()) === "true";
   const envMode = resolveAgentDataMode();
@@ -947,6 +949,11 @@ export default function AgentHome() {
     setShowTour(true);
   };
 
+  const handleLogout = () => {
+    clearSession();
+    navigate("/login");
+  };
+
   return (
     <div className="h-screen overflow-hidden bg-gradient-to-br from-primary-dark via-[#132a55] to-[#0f1e3d] text-gray-100 p-4 md:p-6">
       <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-4 h-[calc(100vh-2rem)]">
@@ -1073,6 +1080,13 @@ export default function AgentHome() {
                 placeholder="Busca por texto na conversa"
                 className="w-56 bg-[#0f1a33] border border-[#314263] rounded-lg px-3 py-1.5 text-xs text-gray-100 outline-none"
               />
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-500/90 hover:bg-red-600 text-white border border-red-300/40"
+              >
+                Logout
+              </button>
             </div>
           </div>
 
