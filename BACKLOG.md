@@ -3,7 +3,7 @@
 > Fonte viva de itens **fora do escopo 0–30 / 31–60** ou **polish pós go-live**.  
 > Escopo ativo e prioridades de release: **[DEVLOG.md → Escopo vigente — maio/2026](DEVLOG.md#escopo-vigente--maio2026)**.
 
-**Última atualização:** 2026-05-27
+**Última atualização:** 2026-05-29
 
 ---
 
@@ -32,6 +32,7 @@
 | P2 | [Checklist configuração mínima do tenant](#épico-checklist-configuração-mínima-do-tenant) | 61–90d | 📋 | Onboarding self-service (% WhatsApp, fluxo, agente) |
 | P2 | [NPS / CSAT pós-interação](#épico-nps--csat-pós-interação) | 61–90d | 📋 | Node ou pesquisa pós-fluxo; correlacionar relatórios |
 | P2 | [Cadastro mestre API consolidada](#épico-cadastro-mestre-api-consolidada) | 61–90d | 📋 | Endpoint único cliente + telefones e visão unificada para UI |
+| P2 | [Glossário de erros de envio WhatsApp](#épico-glossário-de-erros-de-envio-whatsapp) | 61–90d | 📋 | Código Meta/Twilio → significado + ação sugerida na Central do Agente e FAQ |
 | P2 | Telefonia embarcada (protótipo) | 31–60d+ | 💬 | [DEVLOG — Discussão telefonia](DEVLOG.md#discussão-telefonia--a-retomar-2026-05-22) |
 | P3 | Centro de ajuda in-app (links + vídeos) | 90d+ | 📋 | Complemento aos product tours |
 | P3 | Tours contextuais por node / feature | 90d+ | 📋 | Após tours MVP |
@@ -118,6 +119,25 @@
 - preparo para incluir canais adicionais (email, social ids) no mesmo envelope
 
 **Dependência:** CRUD mínimo de `clients` e `client_phones` (já entregue).
+
+---
+
+## Épico: Glossário de erros de envio WhatsApp
+
+**Problema:** quando uma mensagem falha, o agente vê código técnico (ex.: `63051`) e descrição da API, mas não um guia operacional claro.
+
+**Solução:** glossário central por `error_code` (Meta Cloud API + Twilio), exibido na bolha de falha da Central do Agente e seção pesquisável no FAQ.
+
+**Escopo MVP sugerido:**
+
+- Mapa código → título amigável, explicação, ação sugerida (~15–20 códigos frequentes)
+- Fallback para códigos desconhecidos (manter `error_description` técnica)
+- `GET /api/agent/delivery-errors/glossary` (opcional) ou resolução no backend ao listar mensagens
+- Entrada no FAQ: “Erros de envio WhatsApp”
+
+**Contexto:** envio de texto do agente já persiste `failed` + código; templates passaram a usar API real (commit `bf9c435`). Glossário complementa ambos os fluxos.
+
+**Não bloqueia:** operação atual; melhoria de UX/suporte.
 
 ---
 
