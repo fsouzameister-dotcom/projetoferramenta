@@ -6,6 +6,11 @@ import {
 } from "./whatsapp-channels";
 import { sendWhatsAppTextMessage } from "./whatsapp-cloud-api";
 import { sendTwilioWhatsAppTextMessage } from "./whatsapp-twilio-api";
+import {
+  buildTemplateMessageText,
+  formatTemplateErrorDescription,
+  sendOutboundTemplateMessage,
+} from "./agent-template-outbound";
 
 export type AgentConversationStatus = "em_espera" | "em_andamento" | "historico";
 export type AgentMessageType = "text" | "contact" | "location";
@@ -311,6 +316,65 @@ export async function listAgentConversations(tenantId: string): Promise<AgentCon
   }
 }
 
+async function recordTemplateOutboundMessage(input: {
+  conversationId: string;
+  tenantId: string;
+  phone: string;
+  templateName: string;
+  templateContentSid?: string;
+  templateParams?: Record<string, string>;
+  botName?: string;
+  metadataExtra?: Record<string, unknown>;
+}): Promise<void> {
+  const normalizedBotName = input.botName?.trim() || "BOT";
+  const sendResult = await sendOutboundTemplateMessage({
+    tenantId: input.tenantId,
+    phone: input.phone,
+    templateName: input.templateName,
+    templateContentSid: input.templateContentSid,
+    templateParams: input.templateParams,
+  });
+
+  const textContent = buildTemplateMessageText({
+    botName: normalizedBotName,
+    templateName: input.templateName,
+    templateContentSid: input.templateContentSid,
+    sendOk: sendResult.ok,
+  });
+
+  const errorDescription = sendResult.ok
+    ? null
+    : formatTemplateErrorDescription({
+        code: sendResult.code,
+        message: sendResult.message,
+        details: sendResult.details,
+      });
+
+  await pool.query(
+    `INSERT INTO agent_messages
+     (conversation_id, tenant_id, provider_message_id, type, direction, sender_name,
+      delivery_status, text_content, error_code, error_description, metadata)
+     VALUES ($1, $2, $3, 'text', 'out', $4, $5, $6, $7, $8, $9::jsonb)`,
+    [
+      input.conversationId,
+      input.tenantId,
+      sendResult.ok ? sendResult.messageId : null,
+      normalizedBotName,
+      sendResult.ok ? "sent" : "failed",
+      textContent,
+      sendResult.ok ? null : sendResult.code ?? "TEMPLATE_SEND",
+      errorDescription,
+      JSON.stringify({
+        ...(input.metadataExtra ?? {}),
+        templateName: input.templateName,
+        templateContentSid: input.templateContentSid?.trim() || null,
+        templateParams: input.templateParams ?? {},
+        templateProvider: sendResult.ok ? sendResult.provider : null,
+      }),
+    ]
+  );
+}
+
 export async function createAgentConversation(input: {
   tenantId: string;
   contactName: string;
@@ -344,31 +408,21 @@ export async function createAgentConversation(input: {
     );
     createdId = created.rows[0].id;
 
-    if (input.templateName) {
-      const normalizedBotName = input.botName?.trim() || "BOT";
-      await client.query(
-        `INSERT INTO agent_messages
-         (conversation_id, tenant_id, provider_message_id, type, direction, sender_name, delivery_status, text_content, metadata)
-         VALUES ($1, $2, $3, 'text', 'out', $4, 'sent', $5, $6::jsonb)`,
-        [
-          createdId,
-          input.tenantId,
-          `template-${Date.now()}`,
-          normalizedBotName,
-          `${normalizedBotName}:\nTemplate "${input.templateName}" enviado${
-            input.templateContentSid?.trim() ? ` (${input.templateContentSid.trim()})` : ""
-          }`,
-          JSON.stringify({
-            queue: input.queue ?? null,
-            templateName: input.templateName,
-            templateContentSid: input.templateContentSid?.trim() || null,
-            templateParams: input.templateParams ?? {},
-          }),
-        ]
-      );
-    }
   } finally {
     client.release();
+  }
+
+  if (input.templateName) {
+    await recordTemplateOutboundMessage({
+      conversationId: createdId,
+      tenantId: input.tenantId,
+      phone: input.phone,
+      templateName: input.templateName,
+      templateContentSid: input.templateContentSid,
+      templateParams: input.templateParams,
+      botName: input.botName,
+      metadataExtra: { queue: input.queue ?? null },
+    });
   }
 
   const all = await listAgentConversations(input.tenantId);
@@ -718,9 +772,10 @@ export async function reopenAgentConversation(input: {
   try {
     const convResult = await client.query<{
       id: string;
+      phone: string;
       window_expires_at: string | null;
     }>(
-      `SELECT id, window_expires_at
+      `SELECT id, phone, window_expires_at
        FROM agent_conversations
        WHERE id = $1 AND tenant_id = $2`,
       [input.conversationId, input.tenantId]
@@ -746,29 +801,33 @@ export async function reopenAgentConversation(input: {
        WHERE id = $1 AND tenant_id = $2`,
       [input.conversationId, input.tenantId]
     );
-    if (input.templateName?.trim()) {
-      const normalizedBotName = input.botName?.trim() || "BOT";
-      await client.query(
-        `INSERT INTO agent_messages
-         (conversation_id, tenant_id, provider_message_id, type, direction, sender_name, delivery_status, text_content, metadata)
-         VALUES ($1, $2, $3, 'text', 'out', $4, 'sent', $5, $6::jsonb)`,
-        [
-          input.conversationId,
-          input.tenantId,
-          `template-reopen-${Date.now()}`,
-          normalizedBotName,
-          `${normalizedBotName}:\nTemplate "${input.templateName}" enviado para retomada`,
-          JSON.stringify({
-            templateName: input.templateName,
-            templateParams: input.templateParams ?? {},
-            reopenedBy: input.reopenedBy ?? "agent",
-          }),
-        ]
-      );
-    }
   } finally {
     client.release();
   }
+
+  const templateName = input.templateName?.trim();
+  if (templateName) {
+    const convRow = await pool.query<{ phone: string }>(
+      `SELECT phone FROM agent_conversations WHERE id = $1 AND tenant_id = $2`,
+      [input.conversationId, input.tenantId]
+    );
+    const phone = convRow.rows[0]?.phone;
+    if (phone) {
+      await recordTemplateOutboundMessage({
+        conversationId: input.conversationId,
+        tenantId: input.tenantId,
+        phone,
+        templateName,
+        templateParams: input.templateParams,
+        botName: input.botName,
+        metadataExtra: {
+          reopenedBy: input.reopenedBy ?? "agent",
+          reopen: true,
+        },
+      });
+    }
+  }
+
   const refreshed = await listAgentConversations(input.tenantId);
   return refreshed.find((c) => c.id === input.conversationId) ?? null;
 }

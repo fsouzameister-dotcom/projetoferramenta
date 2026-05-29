@@ -61,6 +61,75 @@ export async function sendWhatsAppTextMessage(input: {
   return { ok: true, messageId };
 }
 
+/** Envia template aprovado na Meta (fora da janela de 24h). */
+export async function sendWhatsAppTemplateMessage(input: {
+  phoneNumberId: string;
+  accessToken: string;
+  toDigits: string;
+  templateName: string;
+  languageCode?: string;
+  templateParams?: Record<string, string>;
+}): Promise<WhatsAppSendTextResult> {
+  const url = `${GRAPH_BASE}/${encodeURIComponent(input.phoneNumberId)}/messages`;
+  const params = input.templateParams ?? {};
+  const sortedKeys = Object.keys(params).sort((a, b) => {
+    const na = Number(a);
+    const nb = Number(b);
+    if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+    return a.localeCompare(b);
+  });
+  const bodyParameters = sortedKeys.map((key) => ({
+    type: "text" as const,
+    text: String(params[key] ?? ""),
+  }));
+
+  const template: Record<string, unknown> = {
+    name: input.templateName.trim(),
+    language: { code: input.languageCode?.trim() || "pt_BR" },
+  };
+  if (bodyParameters.length > 0) {
+    template.components = [{ type: "body", parameters: bodyParameters }];
+  }
+
+  const body = {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: input.toDigits.replace(/\D/g, ""),
+    type: "template",
+    template,
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${input.accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const json = (await res.json()) as Record<string, unknown>;
+  if (!res.ok) {
+    const err = json?.error as
+      | { message?: string; code?: number; error_subcode?: number }
+      | undefined;
+    const numeric = err ? graphWhatsAppNumericCode(err) : undefined;
+    return {
+      ok: false,
+      message: err?.message ?? res.statusText ?? "Erro Graph API",
+      code: numeric,
+      details: JSON.stringify(json),
+    };
+  }
+
+  const messages = json?.messages as Array<{ id?: string }> | undefined;
+  const messageId = messages?.[0]?.id;
+  if (!messageId) {
+    return { ok: false, message: "Resposta sem messages[0].id", details: JSON.stringify(json) };
+  }
+  return { ok: true, messageId };
+}
+
 export type WhatsAppReplyButton = {
   id: string;
   title: string;
