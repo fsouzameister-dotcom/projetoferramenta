@@ -10,6 +10,10 @@ function resolveImageUrl(url: string): string {
   const origin = getApiOrigin().replace(/\/$/, "");
   return url.startsWith("/") ? `${origin}${url}` : `${origin}/${url}`;
 }
+
+function googleMapsUrl(lat: number, lng: number): string {
+  return `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lng}`)}`;
+}
 import logoClienton from "../../logo-clienton.png";
 import { clearSession } from "../lib/session";
 
@@ -1354,7 +1358,15 @@ export default function AgentHome() {
                         <div>
                           <p className="font-semibold">Localização</p>
                           <p>{msg.location.label}</p>
-                          <p className="text-xs text-gray-300">
+                          <a
+                            href={googleMapsUrl(msg.location.lat, msg.location.lng)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-block mt-1 text-sm text-cyan-300 hover:text-cyan-200 hover:underline"
+                          >
+                            Abrir no Google Maps
+                          </a>
+                          <p className="text-xs text-gray-400 mt-1">
                             {msg.location.lat}, {msg.location.lng}
                           </p>
                         </div>
