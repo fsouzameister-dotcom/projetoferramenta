@@ -1656,6 +1656,13 @@ export async function recordInboundWhatsAppLocation(input: {
   return { duplicate: false, conversationId: convId };
 }
 
+/** Twilio envia Latitude/Longitude no POST (Body costuma vir vazio). */
+export async function recordInboundTwilioLocation(
+  input: Parameters<typeof recordInboundWhatsAppLocation>[0]
+): Promise<{ duplicate: boolean; conversationId?: string }> {
+  return recordInboundWhatsAppLocation(input);
+}
+
 export async function recordInboundWhatsAppContacts(input: {
   tenantId: string;
   providerMessageId: string;

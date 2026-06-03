@@ -19,6 +19,7 @@ import {
   recordInboundTwilioAudio,
   recordInboundTwilioContact,
   recordInboundTwilioImage,
+  recordInboundTwilioLocation,
   recordInboundWhatsAppAudio,
   recordInboundWhatsAppContacts,
   recordInboundWhatsAppDocument,
@@ -595,6 +596,27 @@ export async function buildApp(options: BuildAppOptions = {}) {
         request.log.warn({ msg: "twilio_messages_missing_from_or_sid" });
         return twilioInboundAck(reply);
       }
+      const latitudeRaw = params.Latitude?.trim();
+      const longitudeRaw = params.Longitude?.trim();
+      if (latitudeRaw && longitudeRaw) {
+        const lat = Number(latitudeRaw.replace(",", "."));
+        const lng = Number(longitudeRaw.replace(",", "."));
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          await recordInboundTwilioLocation({
+            tenantId: resolved.tenantId,
+            providerMessageId: messageSid,
+            fromWaId: from.replace(/^whatsapp:/i, ""),
+            latitude: lat,
+            longitude: lng,
+            label: params.Label?.trim(),
+            address: params.Address?.trim(),
+            contactName: params.ProfileName?.trim(),
+            timestampIso: new Date().toISOString(),
+          });
+          return twilioInboundAck(reply);
+        }
+      }
+
       const numMedia = Number(params.NumMedia ?? "0");
       const mediaUrl0 = params.MediaUrl0?.trim();
       const mediaType0 = params.MediaContentType0?.trim();
@@ -631,15 +653,35 @@ export async function buildApp(options: BuildAppOptions = {}) {
         return twilioInboundAck(reply);
       }
 
-      if (!body.trim()) {
+      const bodyTrimmed = body.trim();
+      if (!bodyTrimmed) {
         return twilioInboundAck(reply);
+      }
+
+      const mapsMatch = bodyTrimmed.match(/[?&]q=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/i);
+      if (mapsMatch) {
+        const lat = Number(mapsMatch[1]);
+        const lng = Number(mapsMatch[2]);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          await recordInboundTwilioLocation({
+            tenantId: resolved.tenantId,
+            providerMessageId: messageSid,
+            fromWaId: from.replace(/^whatsapp:/i, ""),
+            latitude: lat,
+            longitude: lng,
+            label: "Localização compartilhada",
+            contactName: params.ProfileName?.trim(),
+            timestampIso: new Date().toISOString(),
+          });
+          return twilioInboundAck(reply);
+        }
       }
 
       await processInboundMessage({
         tenantId: resolved.tenantId,
         sourceType: "twilio_whatsapp",
         sourceKey: whatsAppTwilioSourceKey(accountSid, to),
-        messageText: body,
+        messageText: bodyTrimmed,
         phone: from.replace(/^whatsapp:/i, ""),
         providerMessageId: messageSid,
         mirrorToAgentInbox: true,

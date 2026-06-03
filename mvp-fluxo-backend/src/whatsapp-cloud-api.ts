@@ -797,8 +797,8 @@ export function parseWhatsAppWebhookPayload(body: unknown): ParsedWebhookEvent[]
               caption?: string;
             };
             location?: {
-              latitude?: number;
-              longitude?: number;
+              latitude?: number | string;
+              longitude?: number | string;
               name?: string;
               address?: string;
             };
@@ -887,8 +887,14 @@ export function parseWhatsAppWebhookPayload(body: unknown): ParsedWebhookEvent[]
             });
             continue;
           } else if (msg.type === "location" && msg.location) {
-            const lat = Number(msg.location.latitude);
-            const lng = Number(msg.location.longitude);
+            const latRaw = msg.location.latitude;
+            const lngRaw = msg.location.longitude;
+            const lat = Number(
+              typeof latRaw === "string" ? latRaw.replace(",", ".") : latRaw
+            );
+            const lng = Number(
+              typeof lngRaw === "string" ? lngRaw.replace(",", ".") : lngRaw
+            );
             if (Number.isFinite(lat) && Number.isFinite(lng)) {
               let contactName: string | undefined;
               const c = contacts?.find((x) => (x as { wa_id?: string }).wa_id === fromWaId);
