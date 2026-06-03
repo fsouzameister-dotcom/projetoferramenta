@@ -1775,7 +1775,7 @@ export default function AgentHome() {
                   closeTabulacoes.length === 0
                 }
                 onClick={() => void confirmCloseConversation()}
-                className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-500 disabled:opacity-50"
+                className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-500 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {closingConversation ? "Encerrando…" : "Confirmar encerramento"}
               </button>

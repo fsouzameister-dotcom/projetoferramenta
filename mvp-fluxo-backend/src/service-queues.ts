@@ -188,6 +188,29 @@ export async function getQueueByKey(
   return mapRow(result.rows[0] as Record<string, unknown>, userMap.get(id) ?? []);
 }
 
+/** Normaliza fila da conversa (chave, rótulo ou legado) para a key em service_queues. */
+export async function resolveConversationQueueKey(
+  tenantId: string,
+  raw?: string | null
+): Promise<string> {
+  await ensureDefaultQueue(tenantId);
+  const trimmed = raw?.trim();
+  if (!trimmed) return "geral";
+
+  const byKey = await getQueueByKey(tenantId, trimmed);
+  if (byKey?.active) return byKey.key;
+
+  const byLabel = await pool.query<{ key: string }>(
+    `SELECT key FROM service_queues
+     WHERE tenant_id = $1::uuid AND lower(trim(label)) = lower(trim($2)) AND active = true
+     LIMIT 1`,
+    [tenantId, trimmed]
+  );
+  if (byLabel.rows[0]?.key) return byLabel.rows[0].key;
+
+  return "geral";
+}
+
 async function replaceQueueUsers(queueId: string, userIds: string[]): Promise<void> {
   await pool.query(`DELETE FROM queue_user_permissions WHERE queue_id = $1::uuid`, [queueId]);
   const unique = [...new Set(userIds.map((id) => id.trim()).filter(Boolean))];

@@ -35,7 +35,7 @@ import {
   getTenantServiceSettings,
   renderClosureMessageTemplate,
 } from "./tenant-service-settings";
-import { ensureDefaultQueue } from "./service-queues";
+import { ensureDefaultQueue, resolveConversationQueueKey } from "./service-queues";
 import {
   buildTemplateMessageText,
   formatTemplateErrorDescription,
@@ -466,6 +466,10 @@ export async function createAgentConversation(input: {
   botName?: string;
 }): Promise<AgentConversation> {
   await ensureTenantSeed(input.tenantId);
+  const queueStored =
+    input.queue?.trim()
+      ? await resolveConversationQueueKey(input.tenantId, input.queue.trim())
+      : null;
   const client = await pool.connect();
   let createdId = "";
   try {
@@ -478,7 +482,7 @@ export async function createAgentConversation(input: {
         input.contactName,
         input.phone,
         JSON.stringify({
-          queue: input.queue ?? null,
+          queue: queueStored,
           templateName: input.templateName ?? null,
           templateContentSid: input.templateContentSid?.trim() || null,
           templateParams: input.templateParams ?? {},
@@ -500,7 +504,7 @@ export async function createAgentConversation(input: {
       templateContentSid: input.templateContentSid,
       templateParams: input.templateParams,
       botName: input.botName,
-      metadataExtra: { queue: input.queue ?? null },
+      metadataExtra: { queue: queueStored },
     });
   }
 
@@ -2250,7 +2254,10 @@ export async function closeAgentConversation(input: {
   );
   if (!convRow.rows[0]) return null;
 
-  const queueKey = conversationQueueKey(convRow.rows[0].metadata);
+  const queueKey = await resolveConversationQueueKey(
+    input.tenantId,
+    conversationQueueKey(convRow.rows[0].metadata)
+  );
   let tabulacao;
   try {
     tabulacao = await assertTabulacaoAllowedForQueue({
@@ -2432,8 +2439,9 @@ export async function applyFlowAgentHandoff(input: {
   nodeId?: string;
 }): Promise<boolean> {
   await ensureSchema();
+  const queueKey = await resolveConversationQueueKey(input.tenantId, input.queue);
   const meta = {
-    queue: input.queue,
+    queue: queueKey,
     flowHandoff: true,
     flowId: input.flowId ?? null,
     handoffNodeId: input.nodeId ?? null,

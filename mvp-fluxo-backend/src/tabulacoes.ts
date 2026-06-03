@@ -1,5 +1,8 @@
 import { pool } from "./db";
-import { ensureSchema as ensureServiceQueuesSchema } from "./service-queues";
+import {
+  ensureSchema as ensureServiceQueuesSchema,
+  resolveConversationQueueKey,
+} from "./service-queues";
 
 export type TabulacaoRecord = {
   id: string;
@@ -125,43 +128,44 @@ export async function listTabulacoesByTenant(tenantId: string): Promise<Tabulaca
   });
 }
 
-/** Tabulações ao encerrar: globais (sem fila) ou vinculadas à fila da conversa. */
+async function queryTabulacoesForQueue(tenantId: string, queueKey: string) {
+  return pool.query(
+    `SELECT DISTINCT t.* FROM tabulacoes t
+     WHERE t.tenant_id = $1::uuid AND t.active = true
+       AND (
+         NOT EXISTS (SELECT 1 FROM tabulacao_queues tq WHERE tq.tabulacao_id = t.id)
+         OR EXISTS (
+           SELECT 1 FROM tabulacao_queues tq
+           INNER JOIN service_queues q ON q.id = tq.queue_id
+           WHERE tq.tabulacao_id = t.id
+             AND q.tenant_id = $1::uuid
+             AND q.key = $2
+             AND q.active = true
+         )
+       )
+     ORDER BY t.label ASC`,
+    [tenantId, queueKey]
+  );
+}
+
+/** Tabulações ao encerrar: globais (sem fila) + vinculadas à fila resolvida da conversa. */
 export async function listTabulacoesForConversationClose(input: {
   tenantId: string;
   queueKey?: string | null;
 }): Promise<TabulacaoRecord[]> {
   await ensureSchema();
-  const queueKey = input.queueKey?.trim() || null;
-  let result;
-  if (!queueKey) {
+  const resolvedKey = await resolveConversationQueueKey(input.tenantId, input.queueKey);
+  let result = await queryTabulacoesForQueue(input.tenantId, resolvedKey);
+
+  if (result.rows.length === 0) {
     result = await pool.query(
       `SELECT t.* FROM tabulacoes t
        WHERE t.tenant_id = $1::uuid AND t.active = true
-         AND NOT EXISTS (
-           SELECT 1 FROM tabulacao_queues tq WHERE tq.tabulacao_id = t.id
-         )
        ORDER BY t.label ASC`,
       [input.tenantId]
     );
-  } else {
-    result = await pool.query(
-      `SELECT DISTINCT t.* FROM tabulacoes t
-       WHERE t.tenant_id = $1::uuid AND t.active = true
-         AND (
-           NOT EXISTS (SELECT 1 FROM tabulacao_queues tq WHERE tq.tabulacao_id = t.id)
-           OR EXISTS (
-             SELECT 1 FROM tabulacao_queues tq
-             INNER JOIN service_queues q ON q.id = tq.queue_id
-             WHERE tq.tabulacao_id = t.id
-               AND q.tenant_id = $1::uuid
-               AND q.key = $2
-               AND q.active = true
-           )
-         )
-       ORDER BY t.label ASC`,
-      [input.tenantId, queueKey]
-    );
   }
+
   const ids = result.rows.map((r) => String((r as Record<string, unknown>).id));
   const queueMap = await loadQueueIdsByTabulacao(ids);
   return result.rows.map((row) => {
@@ -190,9 +194,10 @@ export async function assertTabulacaoAllowedForQueue(input: {
   tabulacaoId: string;
   queueKey?: string | null;
 }): Promise<TabulacaoRecord> {
+  const resolvedKey = await resolveConversationQueueKey(input.tenantId, input.queueKey);
   const allowed = await listTabulacoesForConversationClose({
     tenantId: input.tenantId,
-    queueKey: input.queueKey,
+    queueKey: resolvedKey,
   });
   const found = allowed.find((t) => t.id === input.tabulacaoId);
   if (!found) {

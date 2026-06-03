@@ -3969,11 +3969,11 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           "Conversa não encontrada"
         );
       }
-      const queueKey =
+      const rawQueue =
         typeof conv.rows[0].metadata?.queue === "string"
-          ? conv.rows[0].metadata.queue.trim()
+          ? conv.rows[0].metadata.queue
           : null;
-      const rows = await listTabulacoesForConversationClose({ tenantId, queueKey });
+      const rows = await listTabulacoesForConversationClose({ tenantId, queueKey: rawQueue });
       return sendSuccess(request, reply, rows);
     }
   );
