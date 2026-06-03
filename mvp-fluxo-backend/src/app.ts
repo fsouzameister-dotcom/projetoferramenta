@@ -16,10 +16,14 @@ import {
 } from "./http";
 import {
   recordInboundTwilioImage,
+  recordInboundWhatsAppAudio,
+  recordInboundWhatsAppDocument,
   recordInboundWhatsAppImage,
+  recordInboundTwilioAttachment,
+  recordInboundTwilioAudio,
   updateAgentMessageStatusByProvider,
 } from "./agent-conversations";
-import { readAgentMediaPublicFile } from "./agent-media";
+import { mimeFromExtension, readAgentMediaPublicFile } from "./agent-media";
 import { processInboundMessage } from "./inbound-orchestrator";
 import {
   whatsAppMetaSourceKey,
@@ -466,6 +470,37 @@ export async function buildApp(options: BuildAppOptions = {}) {
           timestampIso: ts,
           phoneNumberId: ev.phoneNumberId,
         });
+      } else if (ev.kind === "inbound_audio") {
+        const ts = ev.timestampSec
+          ? new Date(ev.timestampSec * 1000).toISOString()
+          : new Date().toISOString();
+        await recordInboundWhatsAppAudio({
+          tenantId: resolved.tenantId,
+          providerMessageId: ev.messageId,
+          fromWaId: ev.fromWaId,
+          mediaId: ev.mediaId,
+          mimeType: ev.mimeType,
+          voice: ev.voice,
+          contactName: ev.contactName,
+          timestampIso: ts,
+          phoneNumberId: ev.phoneNumberId,
+        });
+      } else if (ev.kind === "inbound_document") {
+        const ts = ev.timestampSec
+          ? new Date(ev.timestampSec * 1000).toISOString()
+          : new Date().toISOString();
+        await recordInboundWhatsAppDocument({
+          tenantId: resolved.tenantId,
+          providerMessageId: ev.messageId,
+          fromWaId: ev.fromWaId,
+          mediaId: ev.mediaId,
+          mimeType: ev.mimeType,
+          fileName: ev.fileName,
+          caption: ev.caption,
+          contactName: ev.contactName,
+          timestampIso: ts,
+          phoneNumberId: ev.phoneNumberId,
+        });
       } else if (ev.kind === "status") {
         const failed = ev.status === "failed";
         const e0 = failed ? ev.errors?.[0] : undefined;
@@ -534,18 +569,32 @@ export async function buildApp(options: BuildAppOptions = {}) {
       const mediaType0 = params.MediaContentType0?.trim();
 
       if (numMedia > 0 && mediaUrl0) {
-        await recordInboundTwilioImage({
+        const mt = (mediaType0 ?? "").toLowerCase();
+        const inboundBase = {
           tenantId: resolved.tenantId,
           providerMessageId: messageSid,
           fromWaId: from.replace(/^whatsapp:/i, ""),
           mediaUrl: mediaUrl0,
           mimeType: mediaType0,
-          caption: body.trim() || undefined,
-          contactName: undefined,
+          contactName: undefined as string | undefined,
           timestampIso: new Date().toISOString(),
           accountSid,
           authToken: resolved.authToken,
-        });
+        };
+        if (mt.startsWith("audio/")) {
+          await recordInboundTwilioAudio(inboundBase);
+        } else if (mt.startsWith("image/")) {
+          await recordInboundTwilioImage({
+            ...inboundBase,
+            caption: body.trim() || undefined,
+          });
+        } else {
+          await recordInboundTwilioAttachment({
+            ...inboundBase,
+            caption: body.trim() || undefined,
+            fileName: params.MediaFileName0?.trim(),
+          });
+        }
         return twilioInboundAck(reply);
       }
 
@@ -731,15 +780,8 @@ export async function buildApp(options: BuildAppOptions = {}) {
     if (!file) {
       return reply.code(404).send("Not found");
     }
-    const ext = request.params.mediaKey.split(".").pop()?.toLowerCase() ?? "jpg";
-    const mime =
-      ext === "png"
-        ? "image/png"
-        : ext === "gif"
-          ? "image/gif"
-          : ext === "webp"
-            ? "image/webp"
-            : "image/jpeg";
+    const ext = request.params.mediaKey.split(".").pop()?.toLowerCase() ?? "bin";
+    const mime = mimeFromExtension(ext);
     return reply
       .header("Cache-Control", "public, max-age=86400")
       .type(mime)

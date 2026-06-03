@@ -75,6 +75,8 @@ import {
 } from "../server-whatsapp-settings";
 import {
   AgentConversationRuleError,
+  appendAgentAttachmentMessage,
+  appendAgentAudioMessage,
   appendAgentImageMessage,
   appendAgentMessage,
   closeAgentConversation,
@@ -3482,6 +3484,167 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           500,
           ERROR_CODES.agent.AGENT_MESSAGE_SEND_FAILED,
           "Erro ao enviar imagem"
+        );
+      }
+    }
+  );
+
+  fastify.post<{
+    Params: { conversationId: string };
+    Body: {
+      audioBase64: string;
+      mimeType?: string;
+      durationSec?: number;
+      sender_name?: string;
+    };
+  }>(
+    "/agent/conversations/:conversationId/messages/audio",
+    {
+      schema: {
+        params: conversationIdParamSchema,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["audioBase64"],
+          properties: {
+            audioBase64: { type: "string", minLength: 1 },
+            mimeType: { type: "string" },
+            durationSec: { type: "number" },
+            sender_name: { type: "string" },
+          },
+        },
+        response: {
+          200: successEnvelopeSchema({ type: "object", additionalProperties: true }),
+          409: errorEnvelopeSchema([ERROR_CODES.agent.AGENT_MESSAGE_SEND_FAILED]),
+          404: errorEnvelopeSchema([ERROR_CODES.agent.AGENT_CONVERSATION_NOT_FOUND]),
+          500: errorEnvelopeSchema([ERROR_CODES.agent.AGENT_MESSAGE_SEND_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      const host = request.headers.host ?? "api.clienton.com.br";
+      const proto =
+        typeof request.headers["x-forwarded-proto"] === "string"
+          ? request.headers["x-forwarded-proto"].split(",")[0].trim()
+          : "https";
+      const publicApiBaseUrl =
+        process.env.PUBLIC_API_BASE_URL?.trim() || `${proto}://${host}`;
+
+      try {
+        const updated = await appendAgentAudioMessage(
+          request.tenant.id,
+          request.params.conversationId,
+          {
+            audioBase64: request.body.audioBase64,
+            mimeType: request.body.mimeType,
+            durationSec: request.body.durationSec,
+            senderName:
+              request.body.sender_name || request.user?.name || request.user?.email,
+            publicApiBaseUrl,
+          }
+        );
+        if (!updated) {
+          throw new ApiError(
+            404,
+            ERROR_CODES.agent.AGENT_CONVERSATION_NOT_FOUND,
+            "Conversa não encontrada"
+          );
+        }
+        return sendSuccess(request, reply, updated);
+      } catch (error) {
+        request.log.error(error);
+        if (error instanceof AgentConversationRuleError) {
+          throw new ApiError(409, ERROR_CODES.agent.AGENT_MESSAGE_SEND_FAILED, error.message, {
+            rule: error.code,
+          });
+        }
+        if (error instanceof ApiError) throw error;
+        throw new ApiError(
+          500,
+          ERROR_CODES.agent.AGENT_MESSAGE_SEND_FAILED,
+          "Erro ao enviar áudio"
+        );
+      }
+    }
+  );
+
+  fastify.post<{
+    Params: { conversationId: string };
+    Body: {
+      fileBase64: string;
+      mimeType: string;
+      fileName: string;
+      caption?: string;
+      sender_name?: string;
+    };
+  }>(
+    "/agent/conversations/:conversationId/messages/attachment",
+    {
+      schema: {
+        params: conversationIdParamSchema,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["fileBase64", "mimeType", "fileName"],
+          properties: {
+            fileBase64: { type: "string", minLength: 1 },
+            mimeType: { type: "string", minLength: 1 },
+            fileName: { type: "string", minLength: 1 },
+            caption: { type: "string" },
+            sender_name: { type: "string" },
+          },
+        },
+        response: {
+          200: successEnvelopeSchema({ type: "object", additionalProperties: true }),
+          409: errorEnvelopeSchema([ERROR_CODES.agent.AGENT_MESSAGE_SEND_FAILED]),
+          404: errorEnvelopeSchema([ERROR_CODES.agent.AGENT_CONVERSATION_NOT_FOUND]),
+          500: errorEnvelopeSchema([ERROR_CODES.agent.AGENT_MESSAGE_SEND_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      const host = request.headers.host ?? "api.clienton.com.br";
+      const proto =
+        typeof request.headers["x-forwarded-proto"] === "string"
+          ? request.headers["x-forwarded-proto"].split(",")[0].trim()
+          : "https";
+      const publicApiBaseUrl =
+        process.env.PUBLIC_API_BASE_URL?.trim() || `${proto}://${host}`;
+
+      try {
+        const updated = await appendAgentAttachmentMessage(
+          request.tenant.id,
+          request.params.conversationId,
+          {
+            fileBase64: request.body.fileBase64,
+            mimeType: request.body.mimeType,
+            fileName: request.body.fileName,
+            caption: request.body.caption,
+            senderName:
+              request.body.sender_name || request.user?.name || request.user?.email,
+            publicApiBaseUrl,
+          }
+        );
+        if (!updated) {
+          throw new ApiError(
+            404,
+            ERROR_CODES.agent.AGENT_CONVERSATION_NOT_FOUND,
+            "Conversa não encontrada"
+          );
+        }
+        return sendSuccess(request, reply, updated);
+      } catch (error) {
+        request.log.error(error);
+        if (error instanceof AgentConversationRuleError) {
+          throw new ApiError(409, ERROR_CODES.agent.AGENT_MESSAGE_SEND_FAILED, error.message, {
+            rule: error.code,
+          });
+        }
+        if (error instanceof ApiError) throw error;
+        throw new ApiError(
+          500,
+          ERROR_CODES.agent.AGENT_MESSAGE_SEND_FAILED,
+          "Erro ao enviar anexo"
         );
       }
     }

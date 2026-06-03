@@ -4,14 +4,19 @@ import {
   WHATSAPP_PROVIDER_CLOUD,
   WHATSAPP_PROVIDER_TWILIO,
 } from "./whatsapp-channels";
+import { prepareOutboundAgentAudio } from "./agent-audio-convert";
 import {
   mimeToExtension,
   saveAgentMediaFile,
+  type AgentAttachmentPayload,
+  type AgentAudioPayload,
   type AgentImagePayload,
 } from "./agent-media";
 import {
   downloadWhatsAppMediaBuffer,
   getWhatsAppMediaUrl,
+  sendWhatsAppAudioMessage,
+  sendWhatsAppDocumentMessage,
   sendWhatsAppImageMessage,
   sendWhatsAppTextMessage,
   uploadWhatsAppMedia,
@@ -28,7 +33,7 @@ import {
 } from "./agent-template-outbound";
 
 export type AgentConversationStatus = "em_espera" | "em_andamento" | "historico";
-export type AgentMessageType = "text" | "contact" | "location" | "image";
+export type AgentMessageType = "text" | "contact" | "location" | "image" | "audio" | "attachment";
 export type AgentMessageDirection = "in" | "out";
 export type AgentMessageDelivery = "sending" | "sent" | "delivered" | "read" | "failed";
 export type AgentConversationLifecycleStatus = "open" | "closed_manual" | "closed_window";
@@ -45,6 +50,8 @@ export type AgentMessage = {
   contact?: { name: string; phone: string };
   location?: { label: string; lat: number; lng: number };
   image?: AgentImagePayload;
+  audio?: AgentAudioPayload;
+  attachment?: AgentAttachmentPayload;
   error_code?: string;
   error_description?: string;
 };
@@ -154,6 +161,14 @@ async function ensureSchema() {
     await client.query(`
       ALTER TABLE agent_messages
       ADD COLUMN IF NOT EXISTS image_payload jsonb
+    `);
+    await client.query(`
+      ALTER TABLE agent_messages
+      ADD COLUMN IF NOT EXISTS audio_payload jsonb
+    `);
+    await client.query(`
+      ALTER TABLE agent_messages
+      ADD COLUMN IF NOT EXISTS attachment_payload jsonb
     `);
     schemaReady = true;
   } finally {
@@ -277,12 +292,15 @@ export async function listAgentConversations(tenantId: string): Promise<AgentCon
       contact_payload: { name: string; phone: string } | null;
       location_payload: { label: string; lat: number; lng: number } | null;
       image_payload: AgentImagePayload | null;
+      audio_payload: AgentAudioPayload | null;
+      attachment_payload: AgentAttachmentPayload | null;
       error_code: string | null;
       error_description: string | null;
       created_at: string;
     }>(
       `SELECT id, provider_message_id, conversation_id, type, direction, sender_name, delivery_status, text_content, contact_payload,
-              location_payload, image_payload, error_code, error_description, created_at
+              location_payload, image_payload, audio_payload, attachment_payload,
+              error_code, error_description, created_at
        FROM agent_messages
        WHERE tenant_id = $1
        ORDER BY created_at ASC`,
@@ -304,6 +322,8 @@ export async function listAgentConversations(tenantId: string): Promise<AgentCon
         contact: msg.contact_payload ?? undefined,
         location: msg.location_payload ?? undefined,
         image: msg.image_payload ?? undefined,
+        audio: msg.audio_payload ?? undefined,
+        attachment: msg.attachment_payload ?? undefined,
         error_code: msg.error_code ?? undefined,
         error_description: msg.error_description ?? undefined,
       });
@@ -573,6 +593,38 @@ async function findOrCreateConversationForInbound(input: {
     [input.tenantId, input.contactName?.trim() || displayPhone, displayPhone]
   );
   return created.rows[0].id;
+}
+
+function buildAgentPublicMediaUrl(publicPath: string): string {
+  const base = process.env.PUBLIC_API_BASE_URL?.trim();
+  return base ? `${base.replace(/\/$/, "")}${publicPath}` : publicPath;
+}
+
+async function storeAgentMediaBuffer(input: {
+  tenantId: string;
+  buffer: Buffer;
+  mimeType: string;
+  fileName: string;
+}): Promise<{ url: string; fileName: string; mimeType: string; fileSizeKb: number }> {
+  const ext = mimeToExtension(input.mimeType, input.fileName);
+  const saved = await saveAgentMediaFile({
+    tenantId: input.tenantId,
+    buffer: input.buffer,
+    mimeType: input.mimeType,
+    extension: ext,
+  });
+  return {
+    url: buildAgentPublicMediaUrl(saved.publicPath),
+    fileName: input.fileName,
+    mimeType: input.mimeType,
+    fileSizeKb: Math.max(1, Math.round(input.buffer.length / 1024)),
+  };
+}
+
+function twilioMediaPublicUrl(publicUrl: string): string {
+  return publicUrl.startsWith("http")
+    ? publicUrl
+    : `https://api.clienton.com.br${publicUrl}`;
 }
 
 async function touchConversationAfterInbound(
@@ -934,6 +986,615 @@ export async function appendAgentImageMessage(
       sendResult.ok
         ? null
         : [sendResult.message, sendResult.details].filter(Boolean).join(" — "),
+      outboundMessageId,
+      tenantId,
+    ]
+  );
+
+  const refreshed = await listAgentConversations(tenantId);
+  return refreshed.find((c) => c.id === conversationId) ?? null;
+}
+
+export async function recordInboundWhatsAppAudio(input: {
+  tenantId: string;
+  providerMessageId: string;
+  fromWaId: string;
+  mediaId: string;
+  mimeType?: string;
+  voice?: boolean;
+  contactName?: string;
+  timestampIso: string;
+  phoneNumberId?: string;
+}): Promise<{ duplicate: boolean; conversationId?: string }> {
+  await ensureSchema();
+  await syncWindowClosure(input.tenantId);
+  const waCtx = await getOutboundWhatsAppContext(input.tenantId);
+  if (!waCtx || waCtx.provider !== WHATSAPP_PROVIDER_CLOUD) {
+    return recordInboundWhatsAppMessage({
+      tenantId: input.tenantId,
+      providerMessageId: input.providerMessageId,
+      fromWaId: input.fromWaId,
+      textBody: "[Áudio recebido — canal indisponível para download]",
+      contactName: input.contactName,
+      timestampIso: input.timestampIso,
+    });
+  }
+
+  const convId = await findOrCreateConversationForInbound({
+    tenantId: input.tenantId,
+    fromWaId: input.fromWaId,
+    contactName: input.contactName,
+  });
+
+  let audioPayload: AgentAudioPayload = {
+    url: "",
+    fileName: "audio.ogg",
+    mimeType: input.mimeType ?? "audio/ogg",
+    voice: input.voice,
+    mediaId: input.mediaId,
+  };
+  let textContent = "Áudio recebido";
+
+  const mediaUrlResult = await getWhatsAppMediaUrl({
+    mediaId: input.mediaId,
+    accessToken: waCtx.accessToken,
+    phoneNumberId: input.phoneNumberId ?? waCtx.phoneNumberId,
+  });
+
+  if (mediaUrlResult.ok) {
+    try {
+      const buffer = await downloadWhatsAppMediaBuffer(mediaUrlResult.url, waCtx.accessToken);
+      const stored = await storeAgentMediaBuffer({
+        tenantId: input.tenantId,
+        buffer,
+        mimeType: mediaUrlResult.mimeType ?? input.mimeType ?? "audio/ogg",
+        fileName: `audio.${mimeToExtension(mediaUrlResult.mimeType ?? input.mimeType ?? "audio/ogg")}`,
+      });
+      audioPayload = { ...stored, voice: input.voice, mediaId: input.mediaId };
+    } catch {
+      audioPayload.url = mediaUrlResult.url;
+    }
+  } else {
+    textContent = `${textContent} (${mediaUrlResult.message})`.trim();
+  }
+
+  try {
+    await pool.query(
+      `INSERT INTO agent_messages
+       (conversation_id, tenant_id, provider_message_id, type, direction, delivery_status, text_content, audio_payload, created_at)
+       VALUES ($1, $2, $3, 'audio', 'in', 'read', $4, $5::jsonb, $6::timestamptz)`,
+      [
+        convId,
+        input.tenantId,
+        input.providerMessageId,
+        textContent,
+        JSON.stringify(audioPayload),
+        input.timestampIso,
+      ]
+    );
+  } catch (e: unknown) {
+    const err = e as { code?: string };
+    if (err.code === "23505") return { duplicate: true };
+    throw e;
+  }
+
+  await touchConversationAfterInbound(convId, input.tenantId, input.timestampIso, input.contactName);
+  return { duplicate: false, conversationId: convId };
+}
+
+export async function recordInboundWhatsAppDocument(input: {
+  tenantId: string;
+  providerMessageId: string;
+  fromWaId: string;
+  mediaId: string;
+  mimeType?: string;
+  fileName?: string;
+  caption?: string;
+  contactName?: string;
+  timestampIso: string;
+  phoneNumberId?: string;
+}): Promise<{ duplicate: boolean; conversationId?: string }> {
+  await ensureSchema();
+  await syncWindowClosure(input.tenantId);
+  const waCtx = await getOutboundWhatsAppContext(input.tenantId);
+  const fallbackName = input.fileName?.trim() || "arquivo";
+  if (!waCtx || waCtx.provider !== WHATSAPP_PROVIDER_CLOUD) {
+    return recordInboundWhatsAppMessage({
+      tenantId: input.tenantId,
+      providerMessageId: input.providerMessageId,
+      fromWaId: input.fromWaId,
+      textBody: input.caption?.trim() || `[Arquivo recebido: ${fallbackName}]`,
+      contactName: input.contactName,
+      timestampIso: input.timestampIso,
+    });
+  }
+
+  const convId = await findOrCreateConversationForInbound({
+    tenantId: input.tenantId,
+    fromWaId: input.fromWaId,
+    contactName: input.contactName,
+  });
+
+  let attachmentPayload: AgentAttachmentPayload = {
+    url: "",
+    fileName: fallbackName,
+    mimeType: input.mimeType,
+    caption: input.caption,
+    mediaId: input.mediaId,
+  };
+  let textContent = input.caption?.trim() || `Arquivo: ${fallbackName}`;
+
+  const mediaUrlResult = await getWhatsAppMediaUrl({
+    mediaId: input.mediaId,
+    accessToken: waCtx.accessToken,
+    phoneNumberId: input.phoneNumberId ?? waCtx.phoneNumberId,
+  });
+
+  if (mediaUrlResult.ok) {
+    try {
+      const buffer = await downloadWhatsAppMediaBuffer(mediaUrlResult.url, waCtx.accessToken);
+      const stored = await storeAgentMediaBuffer({
+        tenantId: input.tenantId,
+        buffer,
+        mimeType: mediaUrlResult.mimeType ?? input.mimeType ?? "application/octet-stream",
+        fileName: fallbackName,
+      });
+      attachmentPayload = { ...stored, caption: input.caption, mediaId: input.mediaId };
+    } catch {
+      attachmentPayload.url = mediaUrlResult.url;
+    }
+  } else {
+    textContent = `${textContent} (${mediaUrlResult.message})`.trim();
+  }
+
+  try {
+    await pool.query(
+      `INSERT INTO agent_messages
+       (conversation_id, tenant_id, provider_message_id, type, direction, delivery_status, text_content, attachment_payload, created_at)
+       VALUES ($1, $2, $3, 'attachment', 'in', 'read', $4, $5::jsonb, $6::timestamptz)`,
+      [
+        convId,
+        input.tenantId,
+        input.providerMessageId,
+        textContent,
+        JSON.stringify(attachmentPayload),
+        input.timestampIso,
+      ]
+    );
+  } catch (e: unknown) {
+    const err = e as { code?: string };
+    if (err.code === "23505") return { duplicate: true };
+    throw e;
+  }
+
+  await touchConversationAfterInbound(convId, input.tenantId, input.timestampIso, input.contactName);
+  return { duplicate: false, conversationId: convId };
+}
+
+export async function recordInboundTwilioAudio(input: {
+  tenantId: string;
+  providerMessageId: string;
+  fromWaId: string;
+  mediaUrl: string;
+  mimeType?: string;
+  contactName?: string;
+  timestampIso: string;
+  accountSid: string;
+  authToken: string;
+}): Promise<{ duplicate: boolean; conversationId?: string }> {
+  await ensureSchema();
+  await syncWindowClosure(input.tenantId);
+  const convId = await findOrCreateConversationForInbound({
+    tenantId: input.tenantId,
+    fromWaId: input.fromWaId,
+    contactName: input.contactName,
+  });
+
+  let audioPayload: AgentAudioPayload = {
+    url: input.mediaUrl,
+    fileName: "audio.ogg",
+    mimeType: input.mimeType ?? "audio/ogg",
+  };
+  const textContent = "Áudio recebido";
+
+  try {
+    const buffer = await downloadTwilioMediaBuffer({
+      accountSid: input.accountSid,
+      authToken: input.authToken,
+      mediaUrl: input.mediaUrl,
+    });
+    const stored = await storeAgentMediaBuffer({
+      tenantId: input.tenantId,
+      buffer,
+      mimeType: input.mimeType ?? "audio/ogg",
+      fileName: `audio.${mimeToExtension(input.mimeType ?? "audio/ogg")}`,
+    });
+    audioPayload = stored;
+  } catch {
+    /* mantém URL Twilio */
+  }
+
+  try {
+    await pool.query(
+      `INSERT INTO agent_messages
+       (conversation_id, tenant_id, provider_message_id, type, direction, delivery_status, text_content, audio_payload, created_at)
+       VALUES ($1, $2, $3, 'audio', 'in', 'read', $4, $5::jsonb, $6::timestamptz)`,
+      [convId, input.tenantId, input.providerMessageId, textContent, JSON.stringify(audioPayload), input.timestampIso]
+    );
+  } catch (e: unknown) {
+    const err = e as { code?: string };
+    if (err.code === "23505") return { duplicate: true };
+    throw e;
+  }
+
+  await touchConversationAfterInbound(convId, input.tenantId, input.timestampIso, input.contactName);
+  return { duplicate: false, conversationId: convId };
+}
+
+export async function recordInboundTwilioAttachment(input: {
+  tenantId: string;
+  providerMessageId: string;
+  fromWaId: string;
+  mediaUrl: string;
+  mimeType?: string;
+  fileName?: string;
+  caption?: string;
+  contactName?: string;
+  timestampIso: string;
+  accountSid: string;
+  authToken: string;
+}): Promise<{ duplicate: boolean; conversationId?: string }> {
+  await ensureSchema();
+  await syncWindowClosure(input.tenantId);
+  const convId = await findOrCreateConversationForInbound({
+    tenantId: input.tenantId,
+    fromWaId: input.fromWaId,
+    contactName: input.contactName,
+  });
+
+  const fallbackName = input.fileName?.trim() || "arquivo";
+  let attachmentPayload: AgentAttachmentPayload = {
+    url: input.mediaUrl,
+    fileName: fallbackName,
+    mimeType: input.mimeType,
+    caption: input.caption,
+  };
+  const textContent = input.caption?.trim() || `Arquivo: ${fallbackName}`;
+
+  try {
+    const buffer = await downloadTwilioMediaBuffer({
+      accountSid: input.accountSid,
+      authToken: input.authToken,
+      mediaUrl: input.mediaUrl,
+    });
+    const stored = await storeAgentMediaBuffer({
+      tenantId: input.tenantId,
+      buffer,
+      mimeType: input.mimeType ?? "application/octet-stream",
+      fileName: fallbackName,
+    });
+    attachmentPayload = { ...stored, caption: input.caption };
+  } catch {
+    /* mantém URL Twilio */
+  }
+
+  try {
+    await pool.query(
+      `INSERT INTO agent_messages
+       (conversation_id, tenant_id, provider_message_id, type, direction, delivery_status, text_content, attachment_payload, created_at)
+       VALUES ($1, $2, $3, 'attachment', 'in', 'read', $4, $5::jsonb, $6::timestamptz)`,
+      [convId, input.tenantId, input.providerMessageId, textContent, JSON.stringify(attachmentPayload), input.timestampIso]
+    );
+  } catch (e: unknown) {
+    const err = e as { code?: string };
+    if (err.code === "23505") return { duplicate: true };
+    throw e;
+  }
+
+  await touchConversationAfterInbound(convId, input.tenantId, input.timestampIso, input.contactName);
+  return { duplicate: false, conversationId: convId };
+}
+
+export async function appendAgentAudioMessage(
+  tenantId: string,
+  conversationId: string,
+  input: {
+    audioBase64: string;
+    mimeType?: string;
+    durationSec?: number;
+    senderName?: string;
+    publicApiBaseUrl?: string;
+  }
+): Promise<AgentConversation | null> {
+  await ensureTenantSeed(tenantId);
+  await syncWindowClosure(tenantId);
+  const waCtx = await getOutboundWhatsAppContext(tenantId);
+  const normalizedSender = input.senderName?.trim() || null;
+
+  const rawBuffer = Buffer.from(input.audioBase64, "base64");
+  if (rawBuffer.length === 0) throw new Error("AUDIO_INVALIDO");
+
+  const prepared = prepareOutboundAgentAudio(rawBuffer);
+  const sendBuffer = prepared.buffer;
+  const mimeType = prepared.mimeType;
+  const fileName = prepared.fileName;
+  const asDocument = mimeType === "audio/webm";
+
+  let customerPhone = "";
+  const client = await pool.connect();
+  let outboundMessageId: string | null = null;
+  try {
+    const exists = await client.query<{
+      id: string;
+      phone: string;
+      lifecycle_status: AgentConversationLifecycleStatus;
+      window_expires_at: string | null;
+    }>(
+      `SELECT id, phone, lifecycle_status, window_expires_at
+       FROM agent_conversations
+       WHERE id = $1 AND tenant_id = $2`,
+      [conversationId, tenantId]
+    );
+    if (exists.rows.length === 0) return null;
+    customerPhone = exists.rows[0].phone;
+    const conversation = exists.rows[0];
+    const outsideWindow = Boolean(
+      conversation.window_expires_at &&
+        new Date(conversation.window_expires_at).getTime() <= Date.now()
+    );
+    if (conversation.lifecycle_status !== "open") {
+      throw new AgentConversationRuleError(
+        "CONVERSATION_CLOSED",
+        "Conversa encerrada. Reabra o atendimento para enviar mensagens."
+      );
+    }
+    if (outsideWindow) {
+      throw new AgentConversationRuleError(
+        "WINDOW_CLOSED_TEMPLATE_REQUIRED",
+        "Janela da Meta encerrada. Envie template para retomar o atendimento."
+      );
+    }
+
+    const inserted = await client.query<{ id: string }>(
+      `INSERT INTO agent_messages
+       (conversation_id, tenant_id, provider_message_id, type, direction, sender_name, delivery_status, text_content)
+       VALUES ($1, $2, NULL, 'audio', 'out', $3, 'sending', $4)
+       RETURNING id`,
+      [conversationId, tenantId, normalizedSender, "Áudio enviado"]
+    );
+    outboundMessageId = inserted.rows[0].id;
+    await client.query(
+      `UPDATE agent_conversations SET status = 'em_andamento', updated_at = now() WHERE id = $1 AND tenant_id = $2`,
+      [conversationId, tenantId]
+    );
+  } finally {
+    client.release();
+  }
+
+  const stored = await storeAgentMediaBuffer({
+    tenantId,
+    buffer: sendBuffer,
+    mimeType,
+    fileName,
+  });
+  const audioPayload: AgentAudioPayload = {
+    ...stored,
+    durationSec: input.durationSec,
+    voice: prepared.voice && !asDocument,
+  };
+
+  if (!waCtx || !outboundMessageId) {
+    await pool.query(
+      `UPDATE agent_messages SET audio_payload = $1::jsonb, delivery_status = 'sent' WHERE id = $2 AND tenant_id = $3`,
+      [JSON.stringify(audioPayload), outboundMessageId, tenantId]
+    );
+    const refreshed = await listAgentConversations(tenantId);
+    return refreshed.find((c) => c.id === conversationId) ?? null;
+  }
+
+  let sendResult:
+    | { ok: true; messageId: string }
+    | { ok: false; message: string; code?: number | string; details?: string };
+
+  if (waCtx.provider === WHATSAPP_PROVIDER_CLOUD) {
+    const upload = await uploadWhatsAppMedia({
+      phoneNumberId: waCtx.phoneNumberId,
+      accessToken: waCtx.accessToken,
+      buffer: sendBuffer,
+      mimeType,
+      fileName,
+    });
+    if (!upload.ok) {
+      sendResult = upload;
+    } else if (asDocument) {
+      sendResult = await sendWhatsAppDocumentMessage({
+        phoneNumberId: waCtx.phoneNumberId,
+        accessToken: waCtx.accessToken,
+        toDigits: customerPhone,
+        mediaId: upload.messageId,
+        fileName,
+      });
+    } else {
+      sendResult = await sendWhatsAppAudioMessage({
+        phoneNumberId: waCtx.phoneNumberId,
+        accessToken: waCtx.accessToken,
+        toDigits: customerPhone,
+        mediaId: upload.messageId,
+        voice: prepared.voice,
+      });
+    }
+  } else if (waCtx.provider === WHATSAPP_PROVIDER_TWILIO) {
+    sendResult = await sendTwilioWhatsAppMediaMessage({
+      accountSid: waCtx.accountSid,
+      authToken: waCtx.authToken,
+      fromE164: waCtx.fromE164,
+      toDigits: customerPhone,
+      mediaUrl: twilioMediaPublicUrl(stored.url),
+    });
+  } else {
+    sendResult = { ok: false, message: "Provedor WhatsApp desconhecido" };
+  }
+
+  await pool.query(
+    `UPDATE agent_messages
+     SET audio_payload = $1::jsonb,
+         provider_message_id = $2,
+         delivery_status = $3,
+         error_code = $4,
+         error_description = $5
+     WHERE id = $6 AND tenant_id = $7`,
+    [
+      JSON.stringify(audioPayload),
+      sendResult.ok ? sendResult.messageId : null,
+      sendResult.ok ? "sent" : "failed",
+      sendResult.ok ? null : String(sendResult.code ?? "MEDIA_SEND"),
+      sendResult.ok ? null : [sendResult.message, sendResult.details].filter(Boolean).join(" — "),
+      outboundMessageId,
+      tenantId,
+    ]
+  );
+
+  const refreshed = await listAgentConversations(tenantId);
+  return refreshed.find((c) => c.id === conversationId) ?? null;
+}
+
+export async function appendAgentAttachmentMessage(
+  tenantId: string,
+  conversationId: string,
+  input: {
+    fileBase64: string;
+    mimeType: string;
+    fileName: string;
+    caption?: string;
+    senderName?: string;
+    publicApiBaseUrl?: string;
+  }
+): Promise<AgentConversation | null> {
+  await ensureTenantSeed(tenantId);
+  await syncWindowClosure(tenantId);
+  const waCtx = await getOutboundWhatsAppContext(tenantId);
+  const normalizedSender = input.senderName?.trim() || null;
+  const caption = input.caption?.trim();
+  const fileName = input.fileName?.trim() || "arquivo";
+  const mimeType = input.mimeType?.trim() || "application/octet-stream";
+
+  const buffer = Buffer.from(input.fileBase64, "base64");
+  if (buffer.length === 0) throw new Error("ARQUIVO_INVALIDO");
+
+  let customerPhone = "";
+  const client = await pool.connect();
+  let outboundMessageId: string | null = null;
+  try {
+    const exists = await client.query<{
+      id: string;
+      phone: string;
+      lifecycle_status: AgentConversationLifecycleStatus;
+      window_expires_at: string | null;
+    }>(
+      `SELECT id, phone, lifecycle_status, window_expires_at
+       FROM agent_conversations
+       WHERE id = $1 AND tenant_id = $2`,
+      [conversationId, tenantId]
+    );
+    if (exists.rows.length === 0) return null;
+    customerPhone = exists.rows[0].phone;
+    const conversation = exists.rows[0];
+    const outsideWindow = Boolean(
+      conversation.window_expires_at &&
+        new Date(conversation.window_expires_at).getTime() <= Date.now()
+    );
+    if (conversation.lifecycle_status !== "open") {
+      throw new AgentConversationRuleError(
+        "CONVERSATION_CLOSED",
+        "Conversa encerrada. Reabra o atendimento para enviar mensagens."
+      );
+    }
+    if (outsideWindow) {
+      throw new AgentConversationRuleError(
+        "WINDOW_CLOSED_TEMPLATE_REQUIRED",
+        "Janela da Meta encerrada. Envie template para retomar o atendimento."
+      );
+    }
+
+    const inserted = await client.query<{ id: string }>(
+      `INSERT INTO agent_messages
+       (conversation_id, tenant_id, provider_message_id, type, direction, sender_name, delivery_status, text_content)
+       VALUES ($1, $2, NULL, 'attachment', 'out', $3, 'sending', $4)
+       RETURNING id`,
+      [conversationId, tenantId, normalizedSender, caption ? `Anexo: ${fileName}` : `Anexo: ${fileName}`]
+    );
+    outboundMessageId = inserted.rows[0].id;
+    await client.query(
+      `UPDATE agent_conversations SET status = 'em_andamento', updated_at = now() WHERE id = $1 AND tenant_id = $2`,
+      [conversationId, tenantId]
+    );
+  } finally {
+    client.release();
+  }
+
+  const stored = await storeAgentMediaBuffer({ tenantId, buffer, mimeType, fileName });
+  const attachmentPayload: AgentAttachmentPayload = { ...stored, caption };
+
+  if (!waCtx || !outboundMessageId) {
+    await pool.query(
+      `UPDATE agent_messages SET attachment_payload = $1::jsonb, delivery_status = 'sent' WHERE id = $2 AND tenant_id = $3`,
+      [JSON.stringify(attachmentPayload), outboundMessageId, tenantId]
+    );
+    const refreshed = await listAgentConversations(tenantId);
+    return refreshed.find((c) => c.id === conversationId) ?? null;
+  }
+
+  let sendResult:
+    | { ok: true; messageId: string }
+    | { ok: false; message: string; code?: number | string; details?: string };
+
+  if (waCtx.provider === WHATSAPP_PROVIDER_CLOUD) {
+    const upload = await uploadWhatsAppMedia({
+      phoneNumberId: waCtx.phoneNumberId,
+      accessToken: waCtx.accessToken,
+      buffer,
+      mimeType,
+      fileName,
+    });
+    if (!upload.ok) {
+      sendResult = upload;
+    } else {
+      sendResult = await sendWhatsAppDocumentMessage({
+        phoneNumberId: waCtx.phoneNumberId,
+        accessToken: waCtx.accessToken,
+        toDigits: customerPhone,
+        mediaId: upload.messageId,
+        fileName,
+        caption,
+      });
+    }
+  } else if (waCtx.provider === WHATSAPP_PROVIDER_TWILIO) {
+    sendResult = await sendTwilioWhatsAppMediaMessage({
+      accountSid: waCtx.accountSid,
+      authToken: waCtx.authToken,
+      fromE164: waCtx.fromE164,
+      toDigits: customerPhone,
+      mediaUrl: twilioMediaPublicUrl(stored.url),
+      caption,
+    });
+  } else {
+    sendResult = { ok: false, message: "Provedor WhatsApp desconhecido" };
+  }
+
+  await pool.query(
+    `UPDATE agent_messages
+     SET attachment_payload = $1::jsonb,
+         provider_message_id = $2,
+         delivery_status = $3,
+         error_code = $4,
+         error_description = $5
+     WHERE id = $6 AND tenant_id = $7`,
+    [
+      JSON.stringify(attachmentPayload),
+      sendResult.ok ? sendResult.messageId : null,
+      sendResult.ok ? "sent" : "failed",
+      sendResult.ok ? null : String(sendResult.code ?? "MEDIA_SEND"),
+      sendResult.ok ? null : [sendResult.message, sendResult.details].filter(Boolean).join(" — "),
       outboundMessageId,
       tenantId,
     ]

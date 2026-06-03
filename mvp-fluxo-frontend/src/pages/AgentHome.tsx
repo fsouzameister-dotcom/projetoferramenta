@@ -29,7 +29,7 @@ type ChatMessage = {
   createdAt: string;
   contact?: { name: string; phone: string };
   location?: { label: string; lat: number; lng: number };
-  attachment?: { fileName: string; fileSizeKb: number };
+  attachment?: { fileName: string; fileSizeKb: number; url?: string };
   image?: { fileName: string; url: string; fileSizeKb: number };
   audio?: { url: string; durationSec?: number };
   error_code?: string;
@@ -453,7 +453,9 @@ export default function AgentHome() {
   };
 
   const pushLocalMessage = (conversationId: string, message: ChatMessage) => {
-    if (resolvedMode === "api" && ["attachment", "audio", "image"].includes(message.type)) {
+    if (resolvedMode === "api") {
+      /* mídia em modo API usa POST dedicado; não acumular pending */
+    } else if (["attachment", "audio", "image"].includes(message.type)) {
       setPendingMediaByConversation((prev) => ({
         ...prev,
         [conversationId]: [...(prev[conversationId] ?? []), message],
@@ -780,9 +782,46 @@ export default function AgentHome() {
     });
   };
 
+  const readFileAsBase64 = (f: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result;
+        if (typeof result !== "string") {
+          reject(new Error("Falha ao ler arquivo"));
+          return;
+        }
+        const base64 = result.includes(",") ? result.split(",")[1] : result;
+        resolve(base64);
+      };
+      reader.onerror = () => reject(new Error("Falha ao ler arquivo"));
+      reader.readAsDataURL(f);
+    });
+
   const handleAttachmentSelected = (file: File | null) => {
     if (!activeConversation || !file) return;
     if (!ensureConversationOpenForMessage()) return;
+
+    if (resolvedMode === "api") {
+      void readFileAsBase64(file)
+        .then((fileBase64) =>
+          api.post(`/agent/conversations/${activeConversation.id}/messages/attachment`, {
+            fileBase64,
+            mimeType: file.type || "application/octet-stream",
+            fileName: file.name,
+            sender_name: userName,
+          })
+        )
+        .then((res) => {
+          const updated = unwrapApiData<Conversation>(res.data);
+          setConversations((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+        })
+        .catch((err) => {
+          setModeNotice(getApiErrorMessage(err, "Erro ao enviar anexo"));
+        });
+      return;
+    }
+
     const msg: ChatMessage = {
       id: crypto.randomUUID(),
       type: "attachment",
@@ -806,24 +845,8 @@ export default function AgentHome() {
     if (!activeConversation || !file) return;
     if (!ensureConversationOpenForMessage()) return;
 
-    const readAsBase64 = (f: File) =>
-      new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const result = reader.result;
-          if (typeof result !== "string") {
-            reject(new Error("Falha ao ler imagem"));
-            return;
-          }
-          const base64 = result.includes(",") ? result.split(",")[1] : result;
-          resolve(base64);
-        };
-        reader.onerror = () => reject(new Error("Falha ao ler imagem"));
-        reader.readAsDataURL(f);
-      });
-
     if (resolvedMode === "api") {
-      void readAsBase64(file)
+      void readFileAsBase64(file)
         .then((imageBase64) =>
           api.post(`/agent/conversations/${activeConversation.id}/messages/image`, {
             imageBase64,
@@ -894,6 +917,36 @@ export default function AgentHome() {
     if (!ensureConversationOpenForMessage()) return;
     const durationSec =
       recordingStartedAt !== null ? Math.max(1, Math.round((Date.now() - recordingStartedAt) / 1000)) : undefined;
+
+    const finishLocal = () => {
+      setRecordedAudioBlob(null);
+      setRecordedAudioUrl(null);
+      setRecordingStartedAt(null);
+    };
+
+    if (resolvedMode === "api") {
+      void readFileAsBase64(
+        new File([recordedAudioBlob], "gravacao.webm", { type: recordedAudioBlob.type || "audio/webm" })
+      )
+        .then((audioBase64) =>
+          api.post(`/agent/conversations/${activeConversation.id}/messages/audio`, {
+            audioBase64,
+            mimeType: recordedAudioBlob.type || "audio/webm",
+            durationSec,
+            sender_name: userName,
+          })
+        )
+        .then((res) => {
+          const updated = unwrapApiData<Conversation>(res.data);
+          setConversations((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+          finishLocal();
+        })
+        .catch((err) => {
+          setModeNotice(getApiErrorMessage(err, "Erro ao enviar áudio"));
+        });
+      return;
+    }
+
     pushLocalMessage(activeConversation.id, {
       id: crypto.randomUUID(),
       type: "audio",
@@ -907,9 +960,7 @@ export default function AgentHome() {
       audio: { url: recordedAudioUrl, durationSec },
       text: "Áudio enviado",
     });
-    setRecordedAudioBlob(null);
-    setRecordedAudioUrl(null);
-    setRecordingStartedAt(null);
+    finishLocal();
   };
 
   const handleCreateNewContact = async () => {
@@ -1274,14 +1325,25 @@ export default function AgentHome() {
                       {msg.type === "attachment" && msg.attachment ? (
                         <div>
                           <p className="font-semibold">Anexo</p>
-                          <p>{msg.attachment.fileName}</p>
+                          {msg.attachment.url ? (
+                            <a
+                              href={resolveImageUrl(msg.attachment.url)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-cyan-300 hover:underline break-all"
+                            >
+                              {msg.attachment.fileName}
+                            </a>
+                          ) : (
+                            <p>{msg.attachment.fileName}</p>
+                          )}
                           <p className="text-xs text-gray-300">{msg.attachment.fileSizeKb} KB</p>
                         </div>
                       ) : null}
                       {msg.type === "audio" && msg.audio ? (
                         <div>
                           <p className="font-semibold">Áudio</p>
-                          <audio controls src={msg.audio.url} className="mt-1 max-w-full" />
+                          <audio controls src={resolveImageUrl(msg.audio.url)} className="mt-1 max-w-full" />
                           {msg.audio.durationSec ? (
                             <p className="text-xs text-gray-300 mt-1">Duração: {msg.audio.durationSec}s</p>
                           ) : null}

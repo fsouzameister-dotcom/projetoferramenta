@@ -190,6 +190,112 @@ export async function sendWhatsAppImageMessage(input: {
   return { ok: true, messageId };
 }
 
+export async function sendWhatsAppAudioMessage(input: {
+  phoneNumberId: string;
+  accessToken: string;
+  toDigits: string;
+  mediaId: string;
+  voice?: boolean;
+}): Promise<WhatsAppSendTextResult> {
+  const url = `${GRAPH_BASE}/${encodeURIComponent(input.phoneNumberId)}/messages`;
+  const audio: Record<string, string | boolean> = { id: input.mediaId };
+  if (input.voice) {
+    audio.voice = true;
+  }
+  const body = {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: input.toDigits.replace(/\D/g, ""),
+    type: "audio",
+    audio,
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${input.accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const json = (await res.json()) as Record<string, unknown>;
+  if (!res.ok) {
+    const err = json?.error as
+      | { message?: string; code?: number; error_subcode?: number }
+      | undefined;
+    const numeric = err ? graphWhatsAppNumericCode(err) : undefined;
+    return {
+      ok: false,
+      message: err?.message ?? res.statusText ?? "Erro Graph API",
+      code: numeric,
+      details: JSON.stringify(json),
+    };
+  }
+
+  const messages = json?.messages as Array<{ id?: string }> | undefined;
+  const messageId = messages?.[0]?.id;
+  if (!messageId) {
+    return { ok: false, message: "Resposta sem messages[0].id", details: JSON.stringify(json) };
+  }
+  return { ok: true, messageId };
+}
+
+export async function sendWhatsAppDocumentMessage(input: {
+  phoneNumberId: string;
+  accessToken: string;
+  toDigits: string;
+  mediaId: string;
+  fileName?: string;
+  caption?: string;
+}): Promise<WhatsAppSendTextResult> {
+  const url = `${GRAPH_BASE}/${encodeURIComponent(input.phoneNumberId)}/messages`;
+  const document: Record<string, string> = { id: input.mediaId };
+  if (input.fileName?.trim()) {
+    document.filename = input.fileName.trim().slice(0, 240);
+  }
+  if (input.caption?.trim()) {
+    document.caption = input.caption.trim().slice(0, 1024);
+  }
+  const body = {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: input.toDigits.replace(/\D/g, ""),
+    type: "document",
+    document,
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${input.accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const json = (await res.json()) as Record<string, unknown>;
+  if (!res.ok) {
+    const err = json?.error as
+      | { message?: string; code?: number; error_subcode?: number }
+      | undefined;
+    const numeric = err ? graphWhatsAppNumericCode(err) : undefined;
+    return {
+      ok: false,
+      message: err?.message ?? res.statusText ?? "Erro Graph API",
+      code: numeric,
+      details: JSON.stringify(json),
+    };
+  }
+
+  const messages = json?.messages as Array<{ id?: string }> | undefined;
+  const messageId = messages?.[0]?.id;
+  if (!messageId) {
+    return { ok: false, message: "Resposta sem messages[0].id", details: JSON.stringify(json) };
+  }
+  return { ok: true, messageId };
+}
+
 /** Envia template aprovado na Meta (fora da janela de 24h). */
 export async function sendWhatsAppTemplateMessage(input: {
   phoneNumberId: string;
@@ -444,6 +550,31 @@ export type ParsedWebhookEvent =
       contactName?: string;
     }
   | {
+      kind: "inbound_audio";
+      phoneNumberId: string;
+      wabaId: string;
+      messageId: string;
+      fromWaId: string;
+      timestampSec: number;
+      mediaId: string;
+      mimeType?: string;
+      voice?: boolean;
+      contactName?: string;
+    }
+  | {
+      kind: "inbound_document";
+      phoneNumberId: string;
+      wabaId: string;
+      messageId: string;
+      fromWaId: string;
+      timestampSec: number;
+      mediaId: string;
+      mimeType?: string;
+      fileName?: string;
+      caption?: string;
+      contactName?: string;
+    }
+  | {
       kind: "status";
       phoneNumberId: string;
       messageId: string;
@@ -526,6 +657,13 @@ export function parseWhatsAppWebhookPayload(body: unknown): ParsedWebhookEvent[]
             type?: string;
             text?: { body?: string };
             image?: { id?: string; mime_type?: string; caption?: string };
+            audio?: { id?: string; mime_type?: string; voice?: boolean };
+            document?: {
+              id?: string;
+              mime_type?: string;
+              filename?: string;
+              caption?: string;
+            };
             interactive?: {
               type?: string;
               button_reply?: { id?: string };
@@ -568,6 +706,41 @@ export function parseWhatsAppWebhookPayload(body: unknown): ParsedWebhookEvent[]
               mediaId: msg.image.id,
               mimeType: msg.image.mime_type,
               caption: msg.image.caption,
+              contactName,
+            });
+            continue;
+          } else if (msg.type === "audio" && msg.audio?.id) {
+            let contactName: string | undefined;
+            const c = contacts?.find((x) => (x as { wa_id?: string }).wa_id === fromWaId);
+            if (c?.profile?.name) contactName = c.profile.name;
+            out.push({
+              kind: "inbound_audio",
+              phoneNumberId,
+              wabaId,
+              messageId: mid,
+              fromWaId,
+              timestampSec: Number(msg.timestamp ?? 0) || 0,
+              mediaId: msg.audio.id,
+              mimeType: msg.audio.mime_type,
+              voice: msg.audio.voice === true,
+              contactName,
+            });
+            continue;
+          } else if (msg.type === "document" && msg.document?.id) {
+            let contactName: string | undefined;
+            const c = contacts?.find((x) => (x as { wa_id?: string }).wa_id === fromWaId);
+            if (c?.profile?.name) contactName = c.profile.name;
+            out.push({
+              kind: "inbound_document",
+              phoneNumberId,
+              wabaId,
+              messageId: mid,
+              fromWaId,
+              timestampSec: Number(msg.timestamp ?? 0) || 0,
+              mediaId: msg.document.id,
+              mimeType: msg.document.mime_type,
+              fileName: msg.document.filename,
+              caption: msg.document.caption,
               contactName,
             });
             continue;
