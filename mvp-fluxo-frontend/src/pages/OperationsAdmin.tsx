@@ -318,11 +318,16 @@ export default function OperationsAdmin() {
     });
   };
 
+  const inputClass =
+    "mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-gray-900 bg-white";
+  const cardClass =
+    "rounded-xl border border-gray-100 bg-white p-5 space-y-4 shadow-sm text-gray-900";
+
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6">
+    <div className="p-8 max-w-6xl space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-zinc-900">Operação</h1>
-        <p className="text-sm text-zinc-600 mt-1">
+        <h1 className="text-2xl font-bold text-white">Operação</h1>
+        <p className="text-sm text-gray-300 mt-1">
           Filas, tabulações de encerramento e mensagens automáticas ao cliente.
         </p>
       </div>
@@ -338,7 +343,7 @@ export default function OperationsAdmin() {
         </div>
       ) : null}
 
-      <div className="flex gap-2 border-b border-zinc-200">
+      <div className="flex gap-2 border-b border-gray-600/60">
         {(
           [
             ["queues", "Filas"],
@@ -352,8 +357,8 @@ export default function OperationsAdmin() {
             onClick={() => setActiveTab(key)}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
               activeTab === key
-                ? "border-cyan-600 text-cyan-700"
-                : "border-transparent text-zinc-500 hover:text-zinc-800"
+                ? "border-cyan-400 text-cyan-200"
+                : "border-transparent text-gray-400 hover:text-gray-200"
             }`}
           >
             {label}
@@ -361,41 +366,41 @@ export default function OperationsAdmin() {
         ))}
       </div>
 
-      {loading ? <p className="text-sm text-zinc-500">Carregando…</p> : null}
+      {loading ? <p className="text-sm text-gray-400">Carregando…</p> : null}
 
       {activeTab === "queues" ? (
         <div className="grid gap-6 lg:grid-cols-2">
-          <form onSubmit={onSaveQueue} className="rounded-xl border border-zinc-200 bg-white p-5 space-y-4 shadow-sm">
-            <h2 className="font-semibold text-zinc-900">
+          <form onSubmit={onSaveQueue} className={cardClass}>
+            <h2 className="font-semibold text-gray-900">
               {editingQueueId ? "Editar fila" : "Nova fila"}
             </h2>
-            <label className="block text-sm">
-              <span className="text-zinc-700">Nome</span>
+            <label className="block text-sm text-gray-800">
+              <span className="text-gray-700">Nome</span>
               <input
-                className="mt-1 w-full border rounded-lg px-3 py-2"
+                className={inputClass}
                 value={queueForm.label}
                 onChange={(e) => setQueueForm((p) => ({ ...p, label: e.target.value }))}
                 required
               />
             </label>
-            <label className="block text-sm">
-              <span className="text-zinc-700">Chave (opcional)</span>
+            <label className="block text-sm text-gray-800">
+              <span className="text-gray-700">Chave (opcional)</span>
               <input
-                className="mt-1 w-full border rounded-lg px-3 py-2"
+                className={inputClass}
                 value={queueForm.key}
                 onChange={(e) => setQueueForm((p) => ({ ...p, key: e.target.value }))}
                 placeholder="ex.: suporte"
               />
             </label>
-            <label className="block text-sm">
-              <span className="text-zinc-700">Descrição</span>
+            <label className="block text-sm text-gray-800">
+              <span className="text-gray-700">Descrição</span>
               <input
-                className="mt-1 w-full border rounded-lg px-3 py-2"
+                className={inputClass}
                 value={queueForm.description}
                 onChange={(e) => setQueueForm((p) => ({ ...p, description: e.target.value }))}
               />
             </label>
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex items-center gap-2 text-sm text-gray-800">
               <input
                 type="checkbox"
                 checked={queueForm.active}
@@ -403,7 +408,7 @@ export default function OperationsAdmin() {
               />
               Fila ativa
             </label>
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex items-center gap-2 text-sm text-gray-800">
               <input
                 type="checkbox"
                 checked={queueForm.hoursEnabled}
@@ -413,20 +418,20 @@ export default function OperationsAdmin() {
               <InfoTooltip text="Usado para relatórios e regras futuras de roteamento fora do expediente." />
             </label>
             {queueForm.hoursEnabled ? (
-              <div className="space-y-2 border rounded-lg p-3 bg-zinc-50">
+              <div className="space-y-2 border border-gray-200 rounded-lg p-3 bg-gray-50">
                 {WEEKDAYS.map((day) => (
-                  <div key={day.key} className="flex items-center gap-2 text-sm">
-                    <span className="w-16 text-zinc-600">{day.label}</span>
+                  <div key={day.key} className="flex items-center gap-2 text-sm text-gray-800">
+                    <span className="w-16 text-gray-600">{day.label}</span>
                     <input
                       type="time"
-                      className="border rounded px-2 py-1"
+                      className="border border-gray-300 rounded px-2 py-1 text-gray-900 bg-white"
                       value={queueForm.schedule?.schedule[day.key]?.[0]?.start ?? "09:00"}
                       onChange={(e) => updateDaySlot(day.key, "start", e.target.value)}
                     />
-                    <span>—</span>
+                    <span className="text-gray-600">—</span>
                     <input
                       type="time"
-                      className="border rounded px-2 py-1"
+                      className="border border-gray-300 rounded px-2 py-1 text-gray-900 bg-white"
                       value={queueForm.schedule?.schedule[day.key]?.[0]?.end ?? "18:00"}
                       onChange={(e) => updateDaySlot(day.key, "end", e.target.value)}
                     />
@@ -435,12 +440,12 @@ export default function OperationsAdmin() {
               </div>
             ) : null}
             <div>
-              <p className="text-sm font-medium text-zinc-700 mb-2">
+              <p className="text-sm font-medium text-gray-700 mb-2">
                 Agentes com acesso à fila
               </p>
-              <div className="max-h-40 overflow-y-auto border rounded-lg p-2 space-y-1">
+              <div className="max-h-40 overflow-y-auto border border-gray-200 rounded-lg p-2 space-y-1">
                 {users.map((u) => (
-                  <label key={u.id} className="flex items-center gap-2 text-sm">
+                  <label key={u.id} className="flex items-center gap-2 text-sm text-gray-800">
                     <input
                       type="checkbox"
                       checked={queueForm.userIds.includes(u.id)}
@@ -460,15 +465,15 @@ export default function OperationsAdmin() {
                 {saving ? "Salvando…" : "Salvar fila"}
               </button>
               {editingQueueId ? (
-                <button type="button" className="text-sm text-zinc-600" onClick={resetQueueForm}>
+                <button type="button" className="text-sm text-gray-600" onClick={resetQueueForm}>
                   Cancelar
                 </button>
               ) : null}
             </div>
           </form>
-          <div className="rounded-xl border border-zinc-200 bg-white shadow-sm overflow-hidden">
+          <div className="rounded-xl border border-gray-100 bg-white shadow-sm overflow-hidden text-gray-900">
             <table className="w-full text-sm">
-              <thead className="bg-zinc-50 text-zinc-600">
+              <thead className="bg-gray-50 text-gray-600">
                 <tr>
                   <th className="text-left px-4 py-2">Fila</th>
                   <th className="text-left px-4 py-2">Chave</th>
@@ -477,14 +482,14 @@ export default function OperationsAdmin() {
               </thead>
               <tbody>
                 {queues.map((q) => (
-                  <tr key={q.id} className="border-t border-zinc-100">
-                    <td className="px-4 py-2">
+                  <tr key={q.id} className="border-t border-gray-100">
+                    <td className="px-4 py-2 text-gray-900">
                       {q.label}
                       {!q.active ? (
                         <span className="ml-2 text-xs text-amber-600">inativa</span>
                       ) : null}
                     </td>
-                    <td className="px-4 py-2 text-zinc-500">{q.key}</td>
+                    <td className="px-4 py-2 text-gray-600">{q.key}</td>
                     <td className="px-4 py-2 text-right space-x-2">
                       <button type="button" className="text-cyan-700" onClick={() => onEditQueue(q)}>
                         Editar
@@ -507,43 +512,43 @@ export default function OperationsAdmin() {
 
       {activeTab === "tabulacoes" ? (
         <div className="grid gap-6 lg:grid-cols-2">
-          <form onSubmit={onSaveTab} className="rounded-xl border border-zinc-200 bg-white p-5 space-y-4 shadow-sm">
-            <h2 className="font-semibold text-zinc-900">
+          <form onSubmit={onSaveTab} className={cardClass}>
+            <h2 className="font-semibold text-gray-900">
               {editingTabId ? "Editar tabulação" : "Nova tabulação"}
             </h2>
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-gray-500">
               Sem filas vinculadas = disponível em todas. Com filas = só atendimentos dessas filas.
             </p>
-            <label className="block text-sm">
-              <span className="text-zinc-700">Rótulo</span>
+            <label className="block text-sm text-gray-800">
+              <span className="text-gray-700">Rótulo</span>
               <input
-                className="mt-1 w-full border rounded-lg px-3 py-2"
+                className={inputClass}
                 value={tabForm.label}
                 onChange={(e) => setTabForm((p) => ({ ...p, label: e.target.value }))}
                 required
               />
             </label>
-            <label className="block text-sm">
-              <span className="text-zinc-700">Chave (opcional)</span>
+            <label className="block text-sm text-gray-800">
+              <span className="text-gray-700">Chave (opcional)</span>
               <input
-                className="mt-1 w-full border rounded-lg px-3 py-2"
+                className={inputClass}
                 value={tabForm.key}
                 onChange={(e) => setTabForm((p) => ({ ...p, key: e.target.value }))}
               />
             </label>
-            <label className="block text-sm">
-              <span className="text-zinc-700">Descrição</span>
+            <label className="block text-sm text-gray-800">
+              <span className="text-gray-700">Descrição</span>
               <input
-                className="mt-1 w-full border rounded-lg px-3 py-2"
+                className={inputClass}
                 value={tabForm.description}
                 onChange={(e) => setTabForm((p) => ({ ...p, description: e.target.value }))}
               />
             </label>
             <div>
-              <p className="text-sm font-medium text-zinc-700 mb-2">Filas</p>
-              <div className="border rounded-lg p-2 space-y-1 max-h-36 overflow-y-auto">
+              <p className="text-sm font-medium text-gray-700 mb-2">Filas</p>
+              <div className="border border-gray-200 rounded-lg p-2 space-y-1 max-h-36 overflow-y-auto">
                 {queues.map((q) => (
-                  <label key={q.id} className="flex items-center gap-2 text-sm">
+                  <label key={q.id} className="flex items-center gap-2 text-sm text-gray-800">
                     <input
                       type="checkbox"
                       checked={tabForm.queueIds.includes(q.id)}
@@ -563,15 +568,15 @@ export default function OperationsAdmin() {
                 {saving ? "Salvando…" : "Salvar tabulação"}
               </button>
               {editingTabId ? (
-                <button type="button" className="text-sm text-zinc-600" onClick={resetTabForm}>
+                <button type="button" className="text-sm text-gray-600" onClick={resetTabForm}>
                   Cancelar
                 </button>
               ) : null}
             </div>
           </form>
-          <div className="rounded-xl border border-zinc-200 bg-white shadow-sm overflow-hidden">
+          <div className="rounded-xl border border-gray-100 bg-white shadow-sm overflow-hidden text-gray-900">
             <table className="w-full text-sm">
-              <thead className="bg-zinc-50 text-zinc-600">
+              <thead className="bg-gray-50 text-gray-600">
                 <tr>
                   <th className="text-left px-4 py-2">Tabulação</th>
                   <th className="text-left px-4 py-2">Filas</th>
@@ -580,9 +585,9 @@ export default function OperationsAdmin() {
               </thead>
               <tbody>
                 {tabulacoes.map((t) => (
-                  <tr key={t.id} className="border-t border-zinc-100">
-                    <td className="px-4 py-2">{t.label}</td>
-                    <td className="px-4 py-2 text-zinc-500 text-xs">
+                  <tr key={t.id} className="border-t border-gray-100">
+                    <td className="px-4 py-2 text-gray-900">{t.label}</td>
+                    <td className="px-4 py-2 text-gray-600 text-xs">
                       {!t.queueIds?.length
                         ? "Todas"
                         : t.queueIds.map((id) => queueLabelById.get(id) ?? id).join(", ")}
@@ -608,18 +613,15 @@ export default function OperationsAdmin() {
       ) : null}
 
       {activeTab === "settings" ? (
-        <form
-          onSubmit={onSaveSettings}
-          className="rounded-xl border border-zinc-200 bg-white p-5 space-y-4 shadow-sm max-w-2xl"
-        >
-          <h2 className="font-semibold text-zinc-900">Encerramento e retorno</h2>
-          <label className="block text-sm">
-            <span className="text-zinc-700 flex items-center gap-1">
+        <form onSubmit={onSaveSettings} className={`${cardClass} max-w-2xl`}>
+          <h2 className="font-semibold text-gray-900">Encerramento e retorno</h2>
+          <label className="block text-sm text-gray-800">
+            <span className="text-gray-700 flex items-center gap-1">
               Mensagem de encerramento
               <InfoTooltip text="Placeholders: {{protocolo}}, {{nome_cliente}}, {{resumo_tabulacao}}, {{data}}. Enviada na janela 24h; fora dela fica registrado nos relatórios." />
             </span>
             <textarea
-              className="mt-1 w-full border rounded-lg px-3 py-2 min-h-[120px]"
+              className={`${inputClass} min-h-[120px]`}
               value={settingsForm.closureMessageTemplate}
               onChange={(e) =>
                 setSettingsForm((p) => ({ ...p, closureMessageTemplate: e.target.value }))
@@ -627,13 +629,13 @@ export default function OperationsAdmin() {
               required
             />
           </label>
-          <label className="block text-sm">
-            <span className="text-zinc-700">Dias para oferecer “continuar atendimento”</span>
+          <label className="block text-sm text-gray-800">
+            <span className="text-gray-700">Dias para oferecer “continuar atendimento”</span>
             <input
               type="number"
               min={1}
               max={365}
-              className="mt-1 w-32 border rounded-lg px-3 py-2"
+              className="mt-1 w-32 border border-gray-300 rounded-lg px-3 py-2 text-gray-900 bg-white"
               value={settingsForm.returnLookupDays}
               onChange={(e) =>
                 setSettingsForm((p) => ({
@@ -644,7 +646,7 @@ export default function OperationsAdmin() {
             />
           </label>
           {settings ? (
-            <p className="text-xs text-zinc-500">Última atualização: {settings.closureMessageTemplate ? "ok" : "—"}</p>
+            <p className="text-xs text-gray-500">Última atualização: {settings.closureMessageTemplate ? "ok" : "—"}</p>
           ) : null}
           <button
             type="submit"
