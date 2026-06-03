@@ -2155,6 +2155,240 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
   });
 
   // ──────────────────────────────────────────────────────────────────
+  // FILAS DE ATENDIMENTO
+  // ──────────────────────────────────────────────────────────────────
+  fastify.get("/queues", {
+    schema: {
+      response: {
+        200: successEnvelopeSchema({ type: "array", items: queueSchema }),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        500: errorEnvelopeSchema([ERROR_CODES.queues.QUEUES_LIST_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    try {
+      const rows = await listQueuesByTenant(request.tenant.id);
+      return sendSuccess(request, reply, rows);
+    } catch (err) {
+      request.log.error(err);
+      throw new ApiError(500, ERROR_CODES.queues.QUEUES_LIST_FAILED, "Erro ao listar filas");
+    }
+  });
+
+  fastify.post<{
+    Body: {
+      key?: string;
+      label: string;
+      description?: string;
+      active?: boolean;
+      businessHours?: Record<string, unknown> | null;
+      userIds?: string[];
+    };
+  }>("/queues", {
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: false,
+        required: ["label"],
+        properties: {
+          key: { type: "string", minLength: 1, maxLength: 64 },
+          label: { type: "string", minLength: 1, maxLength: 120 },
+          description: { type: "string", maxLength: 255 },
+          active: { type: "boolean" },
+          businessHours: { type: ["object", "null"], additionalProperties: true },
+          userIds: { type: "array", items: { type: "string" } },
+        },
+      },
+      response: {
+        201: successEnvelopeSchema(queueSchema),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        409: errorEnvelopeSchema([ERROR_CODES.queues.QUEUE_KEY_DUPLICATE]),
+        500: errorEnvelopeSchema([ERROR_CODES.queues.QUEUE_CREATE_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    const body = request.body;
+    try {
+      const created = await createQueue({
+        tenantId: request.tenant.id,
+        key: body.key ?? body.label,
+        label: body.label,
+        description: body.description,
+        active: body.active,
+        businessHours: body.businessHours as import("../service-queues").QueueBusinessHours | null,
+        userIds: body.userIds,
+      });
+      return sendSuccess(request, reply, created, 201);
+    } catch (err: unknown) {
+      request.log.error(err);
+      if (String((err as Error)?.message ?? "").includes("duplicate key value")) {
+        throw new ApiError(
+          409,
+          ERROR_CODES.queues.QUEUE_KEY_DUPLICATE,
+          "Já existe uma fila com essa chave"
+        );
+      }
+      throw new ApiError(500, ERROR_CODES.queues.QUEUE_CREATE_FAILED, "Erro ao criar fila");
+    }
+  });
+
+  fastify.put<{
+    Params: { queueId: string };
+    Body: {
+      key?: string;
+      label?: string;
+      description?: string | null;
+      active?: boolean;
+      businessHours?: Record<string, unknown> | null;
+      userIds?: string[];
+    };
+  }>("/queues/:queueId", {
+    schema: {
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: ["queueId"],
+        properties: { queueId: { type: "string", minLength: 1 } },
+      },
+      body: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          key: { type: "string", minLength: 1, maxLength: 64 },
+          label: { type: "string", minLength: 1, maxLength: 120 },
+          description: { anyOf: [{ type: "string", maxLength: 255 }, { type: "null" }] },
+          active: { type: "boolean" },
+          businessHours: { type: ["object", "null"], additionalProperties: true },
+          userIds: { type: "array", items: { type: "string" } },
+        },
+      },
+      response: {
+        200: successEnvelopeSchema(queueSchema),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        404: errorEnvelopeSchema([ERROR_CODES.queues.QUEUE_NOT_FOUND]),
+        500: errorEnvelopeSchema([ERROR_CODES.queues.QUEUE_UPDATE_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    try {
+      const updated = await updateQueue({
+        tenantId: request.tenant.id,
+        queueId: request.params.queueId,
+        ...request.body,
+        businessHours: request.body.businessHours as
+          | import("../service-queues").QueueBusinessHours
+          | null
+          | undefined,
+      });
+      if (!updated) {
+        throw new ApiError(404, ERROR_CODES.queues.QUEUE_NOT_FOUND, "Fila não encontrada");
+      }
+      return sendSuccess(request, reply, updated);
+    } catch (err) {
+      request.log.error(err);
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(500, ERROR_CODES.queues.QUEUE_UPDATE_FAILED, "Erro ao atualizar fila");
+    }
+  });
+
+  fastify.delete<{ Params: { queueId: string } }>("/queues/:queueId", {
+    schema: {
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: ["queueId"],
+        properties: { queueId: { type: "string", minLength: 1 } },
+      },
+      response: {
+        200: successEnvelopeSchema({
+          type: "object",
+          additionalProperties: false,
+          required: ["success"],
+          properties: { success: { type: "boolean" } },
+        }),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        404: errorEnvelopeSchema([ERROR_CODES.queues.QUEUE_NOT_FOUND]),
+        500: errorEnvelopeSchema([ERROR_CODES.queues.QUEUE_DELETE_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    try {
+      const ok = await deleteQueue(request.tenant.id, request.params.queueId);
+      if (!ok) {
+        throw new ApiError(404, ERROR_CODES.queues.QUEUE_NOT_FOUND, "Fila não encontrada");
+      }
+      return sendSuccess(request, reply, { success: true });
+    } catch (err) {
+      request.log.error(err);
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(500, ERROR_CODES.queues.QUEUE_DELETE_FAILED, "Erro ao remover fila");
+    }
+  });
+
+  fastify.get("/service-settings", {
+    schema: {
+      response: {
+        200: successEnvelopeSchema(serviceSettingsSchema),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        500: errorEnvelopeSchema([ERROR_CODES.serviceSettings.SERVICE_SETTINGS_GET_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    try {
+      const settings = await getTenantServiceSettings(request.tenant.id);
+      return sendSuccess(request, reply, settings);
+    } catch (err) {
+      request.log.error(err);
+      throw new ApiError(
+        500,
+        ERROR_CODES.serviceSettings.SERVICE_SETTINGS_GET_FAILED,
+        "Erro ao carregar configurações"
+      );
+    }
+  });
+
+  fastify.put<{
+    Body: { closureMessageTemplate?: string; returnLookupDays?: number };
+  }>("/service-settings", {
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          closureMessageTemplate: { type: "string", minLength: 1, maxLength: 2000 },
+          returnLookupDays: { type: "integer", minimum: 1, maximum: 365 },
+        },
+      },
+      response: {
+        200: successEnvelopeSchema(serviceSettingsSchema),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        500: errorEnvelopeSchema([ERROR_CODES.serviceSettings.SERVICE_SETTINGS_UPDATE_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    try {
+      const updated = await upsertTenantServiceSettings({
+        tenantId: request.tenant.id,
+        ...request.body,
+      });
+      return sendSuccess(request, reply, updated);
+    } catch (err) {
+      request.log.error(err);
+      throw new ApiError(
+        500,
+        ERROR_CODES.serviceSettings.SERVICE_SETTINGS_UPDATE_FAILED,
+        "Erro ao salvar configurações"
+      );
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────
   // INBOUND ROUTES (origem -> fluxo)
   // ──────────────────────────────────────────────────────────────────
   const inboundRouteSchema = {

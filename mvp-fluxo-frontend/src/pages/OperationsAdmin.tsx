@@ -93,23 +93,47 @@ export default function OperationsAdmin() {
 
   const loadAll = useCallback(async () => {
     setLoading(true);
+    const failures: string[] = [];
     try {
-      const [queuesRes, tabRes, usersRes, settingsRes] = await Promise.all([
+      const [queuesSettled, tabSettled, usersSettled, settingsSettled] = await Promise.allSettled([
         api.get("/queues"),
         api.get("/tabulacoes"),
         api.get("/users"),
         api.get("/service-settings"),
       ]);
-      setQueues(unwrapApiData<QueueRow[]>(queuesRes.data));
-      setTabulacoes(unwrapApiData<TabulacaoRow[]>(tabRes.data));
-      setUsers(unwrapApiData<UserRow[]>(usersRes.data));
-      const s = unwrapApiData<ServiceSettings & { tenantId: string }>(settingsRes.data);
-      setSettings(s);
-      setSettingsForm({
-        closureMessageTemplate: s.closureMessageTemplate,
-        returnLookupDays: s.returnLookupDays,
-      });
-      setError(null);
+
+      if (queuesSettled.status === "fulfilled") {
+        setQueues(unwrapApiData<QueueRow[]>(queuesSettled.value.data));
+      } else {
+        failures.push(`Filas: ${getApiErrorMessage(queuesSettled.reason, "falha")}`);
+      }
+
+      if (tabSettled.status === "fulfilled") {
+        setTabulacoes(unwrapApiData<TabulacaoRow[]>(tabSettled.value.data));
+      } else {
+        failures.push(`Tabulações: ${getApiErrorMessage(tabSettled.reason, "falha")}`);
+      }
+
+      if (usersSettled.status === "fulfilled") {
+        setUsers(unwrapApiData<UserRow[]>(usersSettled.value.data));
+      } else {
+        failures.push(`Usuários: ${getApiErrorMessage(usersSettled.reason, "falha")}`);
+      }
+
+      if (settingsSettled.status === "fulfilled") {
+        const s = unwrapApiData<ServiceSettings & { tenantId: string }>(
+          settingsSettled.value.data
+        );
+        setSettings(s);
+        setSettingsForm({
+          closureMessageTemplate: s.closureMessageTemplate,
+          returnLookupDays: s.returnLookupDays,
+        });
+      } else {
+        failures.push(`Configurações: ${getApiErrorMessage(settingsSettled.reason, "falha")}`);
+      }
+
+      setError(failures.length > 0 ? failures.join(" · ") : null);
     } catch (err) {
       setError(getApiErrorMessage(err, "Erro ao carregar operação"));
     } finally {
@@ -339,7 +363,7 @@ export default function OperationsAdmin() {
 
       {loading ? <p className="text-sm text-zinc-500">Carregando…</p> : null}
 
-      {!loading && activeTab === "queues" ? (
+      {activeTab === "queues" ? (
         <div className="grid gap-6 lg:grid-cols-2">
           <form onSubmit={onSaveQueue} className="rounded-xl border border-zinc-200 bg-white p-5 space-y-4 shadow-sm">
             <h2 className="font-semibold text-zinc-900">
@@ -481,7 +505,7 @@ export default function OperationsAdmin() {
         </div>
       ) : null}
 
-      {!loading && activeTab === "tabulacoes" ? (
+      {activeTab === "tabulacoes" ? (
         <div className="grid gap-6 lg:grid-cols-2">
           <form onSubmit={onSaveTab} className="rounded-xl border border-zinc-200 bg-white p-5 space-y-4 shadow-sm">
             <h2 className="font-semibold text-zinc-900">
@@ -583,7 +607,7 @@ export default function OperationsAdmin() {
         </div>
       ) : null}
 
-      {!loading && activeTab === "settings" ? (
+      {activeTab === "settings" ? (
         <form
           onSubmit={onSaveSettings}
           className="rounded-xl border border-zinc-200 bg-white p-5 space-y-4 shadow-sm max-w-2xl"
