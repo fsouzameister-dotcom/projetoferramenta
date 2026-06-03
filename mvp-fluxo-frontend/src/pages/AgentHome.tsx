@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import api, { getApiErrorMessage, unwrapApiData } from "../api/client";
+import api, { getApiErrorMessage, getApiOrigin, unwrapApiData } from "../api/client";
+
+function resolveImageUrl(url: string): string {
+  if (!url) return url;
+  if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("blob:")) {
+    return url;
+  }
+  const origin = getApiOrigin().replace(/\/$/, "");
+  return url.startsWith("/") ? `${origin}${url}` : `${origin}/${url}`;
+}
 import logoClienton from "../../logo-clienton.png";
 import { clearSession } from "../lib/session";
 
@@ -420,7 +429,13 @@ export default function AgentHome() {
     if (!activeConversation) return [];
     if (!chatSearch) return activeConversation.messages;
     return activeConversation.messages.filter((msg) => {
-      const text = (msg.text || msg.contact?.name || msg.location?.label || "").toLowerCase();
+      const text = (
+        msg.text ||
+        msg.contact?.name ||
+        msg.location?.label ||
+        msg.image?.fileName ||
+        ""
+      ).toLowerCase();
       return text.includes(chatSearch.toLowerCase());
     });
   }, [activeConversation, chatSearch]);
@@ -790,8 +805,45 @@ export default function AgentHome() {
   const handleImageSelected = (file: File | null) => {
     if (!activeConversation || !file) return;
     if (!ensureConversationOpenForMessage()) return;
+
+    const readAsBase64 = (f: File) =>
+      new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result;
+          if (typeof result !== "string") {
+            reject(new Error("Falha ao ler imagem"));
+            return;
+          }
+          const base64 = result.includes(",") ? result.split(",")[1] : result;
+          resolve(base64);
+        };
+        reader.onerror = () => reject(new Error("Falha ao ler imagem"));
+        reader.readAsDataURL(f);
+      });
+
+    if (resolvedMode === "api") {
+      void readAsBase64(file)
+        .then((imageBase64) =>
+          api.post(`/agent/conversations/${activeConversation.id}/messages/image`, {
+            imageBase64,
+            mimeType: file.type || "image/jpeg",
+            fileName: file.name,
+            sender_name: userName,
+          })
+        )
+        .then((res) => {
+          const updated = unwrapApiData<Conversation>(res.data);
+          setConversations((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+        })
+        .catch((err) => {
+          setModeNotice(getApiErrorMessage(err, "Erro ao enviar imagem"));
+        });
+      return;
+    }
+
     const imageUrl = URL.createObjectURL(file);
-    const msg: ChatMessage = {
+    pushLocalMessage(activeConversation.id, {
       id: crypto.randomUUID(),
       type: "image",
       direction: "out",
@@ -807,8 +859,7 @@ export default function AgentHome() {
         fileSizeKb: Math.max(1, Math.round(file.size / 1024)),
       },
       text: `Imagem enviada: ${file.name}`,
-    };
-    pushLocalMessage(activeConversation.id, msg);
+    });
   };
 
   const startRecording = async () => {
@@ -1240,7 +1291,7 @@ export default function AgentHome() {
                         <div>
                           <p className="font-semibold">Imagem</p>
                           <img
-                            src={msg.image.url}
+                            src={resolveImageUrl(msg.image.url)}
                             alt={msg.image.fileName}
                             className="mt-1 max-h-44 rounded border border-[#4a5f8f] object-contain"
                           />

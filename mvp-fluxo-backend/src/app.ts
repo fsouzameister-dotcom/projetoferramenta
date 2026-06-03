@@ -14,7 +14,12 @@ import {
   sendSuccess,
   successEnvelopeSchema,
 } from "./http";
-import { updateAgentMessageStatusByProvider } from "./agent-conversations";
+import {
+  recordInboundTwilioImage,
+  recordInboundWhatsAppImage,
+  updateAgentMessageStatusByProvider,
+} from "./agent-conversations";
+import { readAgentMediaPublicFile } from "./agent-media";
 import { processInboundMessage } from "./inbound-orchestrator";
 import {
   whatsAppMetaSourceKey,
@@ -446,6 +451,21 @@ export async function buildApp(options: BuildAppOptions = {}) {
           providerMessageId: ev.messageId,
           mirrorToAgentInbox: true,
         });
+      } else if (ev.kind === "inbound_image") {
+        const ts = ev.timestampSec
+          ? new Date(ev.timestampSec * 1000).toISOString()
+          : new Date().toISOString();
+        await recordInboundWhatsAppImage({
+          tenantId: resolved.tenantId,
+          providerMessageId: ev.messageId,
+          fromWaId: ev.fromWaId,
+          mediaId: ev.mediaId,
+          mimeType: ev.mimeType,
+          caption: ev.caption,
+          contactName: ev.contactName,
+          timestampIso: ts,
+          phoneNumberId: ev.phoneNumberId,
+        });
       } else if (ev.kind === "status") {
         const failed = ev.status === "failed";
         const e0 = failed ? ev.errors?.[0] : undefined;
@@ -509,6 +529,26 @@ export async function buildApp(options: BuildAppOptions = {}) {
         request.log.warn({ msg: "twilio_messages_missing_from_or_sid" });
         return twilioInboundAck(reply);
       }
+      const numMedia = Number(params.NumMedia ?? "0");
+      const mediaUrl0 = params.MediaUrl0?.trim();
+      const mediaType0 = params.MediaContentType0?.trim();
+
+      if (numMedia > 0 && mediaUrl0) {
+        await recordInboundTwilioImage({
+          tenantId: resolved.tenantId,
+          providerMessageId: messageSid,
+          fromWaId: from.replace(/^whatsapp:/i, ""),
+          mediaUrl: mediaUrl0,
+          mimeType: mediaType0,
+          caption: body.trim() || undefined,
+          contactName: undefined,
+          timestampIso: new Date().toISOString(),
+          accountSid,
+          authToken: resolved.authToken,
+        });
+        return twilioInboundAck(reply);
+      }
+
       if (!body.trim()) {
         return twilioInboundAck(reply);
       }
@@ -681,6 +721,29 @@ export async function buildApp(options: BuildAppOptions = {}) {
       });
 
       return sendSuccess(request, reply, result);
+    }
+  );
+
+  app.get<{ Params: { mediaKey: string } }>(
+    "/api/agent/media/public/:mediaKey",
+    async (request, reply) => {
+    const file = await readAgentMediaPublicFile(request.params.mediaKey);
+    if (!file) {
+      return reply.code(404).send("Not found");
+    }
+    const ext = request.params.mediaKey.split(".").pop()?.toLowerCase() ?? "jpg";
+    const mime =
+      ext === "png"
+        ? "image/png"
+        : ext === "gif"
+          ? "image/gif"
+          : ext === "webp"
+            ? "image/webp"
+            : "image/jpeg";
+    return reply
+      .header("Cache-Control", "public, max-age=86400")
+      .type(mime)
+      .send(file.buffer);
     }
   );
 

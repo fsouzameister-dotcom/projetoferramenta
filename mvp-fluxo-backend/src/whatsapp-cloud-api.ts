@@ -61,6 +61,135 @@ export async function sendWhatsAppTextMessage(input: {
   return { ok: true, messageId };
 }
 
+/** Obtém URL temporária para download de mídia recebida (Meta). */
+export async function getWhatsAppMediaUrl(input: {
+  mediaId: string;
+  accessToken: string;
+  phoneNumberId?: string;
+}): Promise<{ ok: true; url: string; mimeType?: string } | { ok: false; message: string }> {
+  const q = input.phoneNumberId
+    ? `?phone_number_id=${encodeURIComponent(input.phoneNumberId)}`
+    : "";
+  const url = `${GRAPH_BASE}/${encodeURIComponent(input.mediaId)}${q}`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${input.accessToken}` },
+  });
+  const json = (await res.json()) as Record<string, unknown>;
+  if (!res.ok) {
+    const err = json?.error as { message?: string } | undefined;
+    return { ok: false, message: err?.message ?? res.statusText ?? "Erro ao obter mídia" };
+  }
+  const mediaUrl = typeof json.url === "string" ? json.url : "";
+  if (!mediaUrl) return { ok: false, message: "Resposta sem url de mídia" };
+  const mimeType = typeof json.mime_type === "string" ? json.mime_type : undefined;
+  return { ok: true, url: mediaUrl, mimeType };
+}
+
+export async function downloadWhatsAppMediaBuffer(mediaUrl: string, accessToken: string): Promise<Buffer> {
+  const res = await fetch(mediaUrl, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    throw new Error(`Falha ao baixar mídia: ${res.statusText}`);
+  }
+  const arr = await res.arrayBuffer();
+  return Buffer.from(arr);
+}
+
+/** Upload de imagem para envio (multipart). */
+export async function uploadWhatsAppMedia(input: {
+  phoneNumberId: string;
+  accessToken: string;
+  buffer: Buffer;
+  mimeType: string;
+  fileName: string;
+}): Promise<WhatsAppSendTextResult> {
+  const url = `${GRAPH_BASE}/${encodeURIComponent(input.phoneNumberId)}/media`;
+  const form = new FormData();
+  form.append("messaging_product", "whatsapp");
+  form.append(
+    "file",
+    new Blob([Uint8Array.from(input.buffer)], { type: input.mimeType }),
+    input.fileName || "image.jpg"
+  );
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${input.accessToken}` },
+    body: form,
+  });
+
+  const json = (await res.json()) as Record<string, unknown>;
+  if (!res.ok) {
+    const err = json?.error as
+      | { message?: string; code?: number; error_subcode?: number }
+      | undefined;
+    const numeric = err ? graphWhatsAppNumericCode(err) : undefined;
+    return {
+      ok: false,
+      message: err?.message ?? res.statusText ?? "Erro upload mídia",
+      code: numeric,
+      details: JSON.stringify(json),
+    };
+  }
+  const mediaId = typeof json.id === "string" ? json.id : "";
+  if (!mediaId) {
+    return { ok: false, message: "Upload sem id de mídia", details: JSON.stringify(json) };
+  }
+  return { ok: true, messageId: mediaId };
+}
+
+export async function sendWhatsAppImageMessage(input: {
+  phoneNumberId: string;
+  accessToken: string;
+  toDigits: string;
+  mediaId: string;
+  caption?: string;
+}): Promise<WhatsAppSendTextResult> {
+  const url = `${GRAPH_BASE}/${encodeURIComponent(input.phoneNumberId)}/messages`;
+  const image: Record<string, string> = { id: input.mediaId };
+  if (input.caption?.trim()) {
+    image.caption = input.caption.trim().slice(0, 1024);
+  }
+  const body = {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: input.toDigits.replace(/\D/g, ""),
+    type: "image",
+    image,
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${input.accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const json = (await res.json()) as Record<string, unknown>;
+  if (!res.ok) {
+    const err = json?.error as
+      | { message?: string; code?: number; error_subcode?: number }
+      | undefined;
+    const numeric = err ? graphWhatsAppNumericCode(err) : undefined;
+    return {
+      ok: false,
+      message: err?.message ?? res.statusText ?? "Erro Graph API",
+      code: numeric,
+      details: JSON.stringify(json),
+    };
+  }
+
+  const messages = json?.messages as Array<{ id?: string }> | undefined;
+  const messageId = messages?.[0]?.id;
+  if (!messageId) {
+    return { ok: false, message: "Resposta sem messages[0].id", details: JSON.stringify(json) };
+  }
+  return { ok: true, messageId };
+}
+
 /** Envia template aprovado na Meta (fora da janela de 24h). */
 export async function sendWhatsAppTemplateMessage(input: {
   phoneNumberId: string;
@@ -303,6 +432,18 @@ export type ParsedWebhookEvent =
       contactName?: string;
     }
   | {
+      kind: "inbound_image";
+      phoneNumberId: string;
+      wabaId: string;
+      messageId: string;
+      fromWaId: string;
+      timestampSec: number;
+      mediaId: string;
+      mimeType?: string;
+      caption?: string;
+      contactName?: string;
+    }
+  | {
       kind: "status";
       phoneNumberId: string;
       messageId: string;
@@ -384,6 +525,7 @@ export function parseWhatsAppWebhookPayload(body: unknown): ParsedWebhookEvent[]
             timestamp?: string;
             type?: string;
             text?: { body?: string };
+            image?: { id?: string; mime_type?: string; caption?: string };
             interactive?: {
               type?: string;
               button_reply?: { id?: string };
@@ -412,6 +554,23 @@ export function parseWhatsAppWebhookPayload(body: unknown): ParsedWebhookEvent[]
             } else if (interactive?.type === "list_reply" && interactive.list_reply?.id) {
               textBody = interactive.list_reply.id;
             }
+          } else if (msg.type === "image" && msg.image?.id) {
+            let contactName: string | undefined;
+            const c = contacts?.find((x) => (x as { wa_id?: string }).wa_id === fromWaId);
+            if (c?.profile?.name) contactName = c.profile.name;
+            out.push({
+              kind: "inbound_image",
+              phoneNumberId,
+              wabaId,
+              messageId: mid,
+              fromWaId,
+              timestampSec: Number(msg.timestamp ?? 0) || 0,
+              mediaId: msg.image.id,
+              mimeType: msg.image.mime_type,
+              caption: msg.image.caption,
+              contactName,
+            });
+            continue;
           }
           if (!textBody) continue;
 

@@ -75,6 +75,7 @@ import {
 } from "../server-whatsapp-settings";
 import {
   AgentConversationRuleError,
+  appendAgentImageMessage,
   appendAgentMessage,
   closeAgentConversation,
   createAgentConversation,
@@ -3399,6 +3400,88 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           500,
           ERROR_CODES.agent.AGENT_MESSAGE_SEND_FAILED,
           "Erro ao enviar mensagem"
+        );
+      }
+    }
+  );
+
+  fastify.post<{
+    Params: { conversationId: string };
+    Body: {
+      imageBase64: string;
+      mimeType: string;
+      fileName?: string;
+      caption?: string;
+      sender_name?: string;
+    };
+  }>(
+    "/agent/conversations/:conversationId/messages/image",
+    {
+      schema: {
+        params: conversationIdParamSchema,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["imageBase64", "mimeType"],
+          properties: {
+            imageBase64: { type: "string", minLength: 1 },
+            mimeType: { type: "string", minLength: 1 },
+            fileName: { type: "string" },
+            caption: { type: "string" },
+            sender_name: { type: "string" },
+          },
+        },
+        response: {
+          200: successEnvelopeSchema({ type: "object", additionalProperties: true }),
+          409: errorEnvelopeSchema([ERROR_CODES.agent.AGENT_MESSAGE_SEND_FAILED]),
+          404: errorEnvelopeSchema([ERROR_CODES.agent.AGENT_CONVERSATION_NOT_FOUND]),
+          500: errorEnvelopeSchema([ERROR_CODES.agent.AGENT_MESSAGE_SEND_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      const host = request.headers.host ?? "api.clienton.com.br";
+      const proto =
+        typeof request.headers["x-forwarded-proto"] === "string"
+          ? request.headers["x-forwarded-proto"].split(",")[0].trim()
+          : "https";
+      const publicApiBaseUrl =
+        process.env.PUBLIC_API_BASE_URL?.trim() || `${proto}://${host}`;
+
+      try {
+        const updated = await appendAgentImageMessage(
+          request.tenant.id,
+          request.params.conversationId,
+          {
+            imageBase64: request.body.imageBase64,
+            mimeType: request.body.mimeType,
+            fileName: request.body.fileName,
+            caption: request.body.caption,
+            senderName:
+              request.body.sender_name || request.user?.name || request.user?.email,
+            publicApiBaseUrl,
+          }
+        );
+        if (!updated) {
+          throw new ApiError(
+            404,
+            ERROR_CODES.agent.AGENT_CONVERSATION_NOT_FOUND,
+            "Conversa não encontrada"
+          );
+        }
+        return sendSuccess(request, reply, updated);
+      } catch (error) {
+        request.log.error(error);
+        if (error instanceof AgentConversationRuleError) {
+          throw new ApiError(409, ERROR_CODES.agent.AGENT_MESSAGE_SEND_FAILED, error.message, {
+            rule: error.code,
+          });
+        }
+        if (error instanceof ApiError) throw error;
+        throw new ApiError(
+          500,
+          ERROR_CODES.agent.AGENT_MESSAGE_SEND_FAILED,
+          "Erro ao enviar imagem"
         );
       }
     }
