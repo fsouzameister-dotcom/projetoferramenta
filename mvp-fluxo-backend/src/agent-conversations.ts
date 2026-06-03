@@ -12,12 +12,15 @@ import {
   type AgentAudioPayload,
   type AgentImagePayload,
 } from "./agent-media";
+import { parseVcardContact } from "./agent-vcard";
 import {
   downloadWhatsAppMediaBuffer,
   getWhatsAppMediaUrl,
   sendWhatsAppAudioMessage,
+  sendWhatsAppContactMessage,
   sendWhatsAppDocumentMessage,
   sendWhatsAppImageMessage,
+  sendWhatsAppLocationMessage,
   sendWhatsAppTextMessage,
   uploadWhatsAppMedia,
 } from "./whatsapp-cloud-api";
@@ -1604,6 +1607,185 @@ export async function appendAgentAttachmentMessage(
   return refreshed.find((c) => c.id === conversationId) ?? null;
 }
 
+export async function recordInboundWhatsAppLocation(input: {
+  tenantId: string;
+  providerMessageId: string;
+  fromWaId: string;
+  latitude: number;
+  longitude: number;
+  label?: string;
+  address?: string;
+  contactName?: string;
+  timestampIso: string;
+}): Promise<{ duplicate: boolean; conversationId?: string }> {
+  await ensureSchema();
+  await syncWindowClosure(input.tenantId);
+  const convId = await findOrCreateConversationForInbound({
+    tenantId: input.tenantId,
+    fromWaId: input.fromWaId,
+    contactName: input.contactName,
+  });
+  const locationPayload = {
+    label: input.label?.trim() || input.address?.trim() || "Localização",
+    lat: input.latitude,
+    lng: input.longitude,
+  };
+  const textContent = `${locationPayload.label} (${input.latitude}, ${input.longitude})`;
+
+  try {
+    await pool.query(
+      `INSERT INTO agent_messages
+       (conversation_id, tenant_id, provider_message_id, type, direction, delivery_status, text_content, location_payload, created_at)
+       VALUES ($1, $2, $3, 'location', 'in', 'read', $4, $5::jsonb, $6::timestamptz)`,
+      [
+        convId,
+        input.tenantId,
+        input.providerMessageId,
+        textContent,
+        JSON.stringify(locationPayload),
+        input.timestampIso,
+      ]
+    );
+  } catch (e: unknown) {
+    const err = e as { code?: string };
+    if (err.code === "23505") return { duplicate: true };
+    throw e;
+  }
+
+  await touchConversationAfterInbound(convId, input.tenantId, input.timestampIso, input.contactName);
+  return { duplicate: false, conversationId: convId };
+}
+
+export async function recordInboundWhatsAppContacts(input: {
+  tenantId: string;
+  providerMessageId: string;
+  fromWaId: string;
+  contacts: Array<{ name: string; phone: string }>;
+  contactName?: string;
+  timestampIso: string;
+}): Promise<{ duplicate: boolean; conversationId?: string }> {
+  await ensureSchema();
+  await syncWindowClosure(input.tenantId);
+  const convId = await findOrCreateConversationForInbound({
+    tenantId: input.tenantId,
+    fromWaId: input.fromWaId,
+    contactName: input.contactName,
+  });
+  const primary = input.contacts[0];
+  const contactPayload = { name: primary.name, phone: primary.phone };
+  const textContent =
+    input.contacts.length > 1
+      ? `Contatos compartilhados: ${input.contacts.map((c) => c.name).join(", ")}`
+      : `Contato: ${primary.name} — ${primary.phone}`;
+
+  try {
+    await pool.query(
+      `INSERT INTO agent_messages
+       (conversation_id, tenant_id, provider_message_id, type, direction, delivery_status, text_content, contact_payload, created_at)
+       VALUES ($1, $2, $3, 'contact', 'in', 'read', $4, $5::jsonb, $6::timestamptz)`,
+      [
+        convId,
+        input.tenantId,
+        input.providerMessageId,
+        textContent,
+        JSON.stringify(contactPayload),
+        input.timestampIso,
+      ]
+    );
+  } catch (e: unknown) {
+    const err = e as { code?: string };
+    if (err.code === "23505") return { duplicate: true };
+    throw e;
+  }
+
+  await touchConversationAfterInbound(convId, input.tenantId, input.timestampIso, input.contactName);
+  return { duplicate: false, conversationId: convId };
+}
+
+export async function recordInboundTwilioContact(input: {
+  tenantId: string;
+  providerMessageId: string;
+  fromWaId: string;
+  mediaUrl: string;
+  mimeType?: string;
+  contactName?: string;
+  timestampIso: string;
+  accountSid: string;
+  authToken: string;
+}): Promise<{ duplicate: boolean; conversationId?: string }> {
+  await ensureSchema();
+  await syncWindowClosure(input.tenantId);
+  const convId = await findOrCreateConversationForInbound({
+    tenantId: input.tenantId,
+    fromWaId: input.fromWaId,
+    contactName: input.contactName,
+  });
+
+  let contactPayload = { name: "Contato", phone: "" };
+  try {
+    const buffer = await downloadTwilioMediaBuffer({
+      accountSid: input.accountSid,
+      authToken: input.authToken,
+      mediaUrl: input.mediaUrl,
+    });
+    const parsed = parseVcardContact(buffer);
+    if (parsed) contactPayload = parsed;
+  } catch {
+    /* ignore */
+  }
+
+  if (!contactPayload.phone) {
+    return recordInboundTwilioAttachment({
+      tenantId: input.tenantId,
+      providerMessageId: input.providerMessageId,
+      fromWaId: input.fromWaId,
+      mediaUrl: input.mediaUrl,
+      mimeType: input.mimeType,
+      fileName: "contato.vcf",
+      contactName: input.contactName,
+      timestampIso: input.timestampIso,
+      accountSid: input.accountSid,
+      authToken: input.authToken,
+    });
+  }
+
+  try {
+    await pool.query(
+      `INSERT INTO agent_messages
+       (conversation_id, tenant_id, provider_message_id, type, direction, delivery_status, text_content, contact_payload, created_at)
+       VALUES ($1, $2, $3, 'contact', 'in', 'read', $4, $5::jsonb, $6::timestamptz)`,
+      [
+        convId,
+        input.tenantId,
+        input.providerMessageId,
+        `Contato: ${contactPayload.name} — ${contactPayload.phone}`,
+        JSON.stringify(contactPayload),
+        input.timestampIso,
+      ]
+    );
+  } catch (e: unknown) {
+    const err = e as { code?: string };
+    if (err.code === "23505") return { duplicate: true };
+    throw e;
+  }
+
+  await touchConversationAfterInbound(convId, input.tenantId, input.timestampIso, input.contactName);
+  return { duplicate: false, conversationId: convId };
+}
+
+function buildTwilioContactFallbackText(contact: { name: string; phone: string }): string {
+  return `Contato: ${contact.name}\nTelefone: ${contact.phone}`;
+}
+
+function buildTwilioLocationFallbackText(location: {
+  label: string;
+  lat: number;
+  lng: number;
+}): string {
+  const maps = `https://maps.google.com/?q=${location.lat},${location.lng}`;
+  return `Localização: ${location.label}\n${maps}`;
+}
+
 export async function appendAgentMessage(
   tenantId: string,
   conversationId: string,
@@ -1625,10 +1807,19 @@ export async function appendAgentMessage(
         ? `${normalizedSender}:\n${payload.text}`
         : payload.text
       : payload.text;
-  const useWhatsApp =
-    Boolean(waCtx) &&
-    payload.type === "text" &&
-    Boolean((normalizedText ?? "").trim());
+
+  const hasContact =
+    payload.type === "contact" &&
+    Boolean(payload.contact?.name?.trim()) &&
+    Boolean(payload.contact?.phone?.trim());
+  const hasLocation =
+    payload.type === "location" &&
+    payload.location &&
+    Number.isFinite(payload.location.lat) &&
+    Number.isFinite(payload.location.lng);
+  const hasText = payload.type === "text" && Boolean((normalizedText ?? "").trim());
+
+  const useWhatsApp = Boolean(waCtx) && (hasText || hasContact || hasLocation);
 
   let outboundMessageId: string | null = null;
   let customerPhone = "";
@@ -1659,7 +1850,7 @@ export async function appendAgentMessage(
         "Conversa encerrada. Reabra o atendimento para enviar mensagens."
       );
     }
-    if (outsideWindow && payload.type === "text") {
+    if (outsideWindow) {
       throw new AgentConversationRuleError(
         "WINDOW_CLOSED_TEMPLATE_REQUIRED",
         "Janela da Meta encerrada. Envie template para retomar o atendimento."
@@ -1712,23 +1903,74 @@ export async function appendAgentMessage(
   }
 
   if (useWhatsApp && waCtx && outboundMessageId) {
-    const sendResult =
-      waCtx.provider === WHATSAPP_PROVIDER_TWILIO
-        ? await sendTwilioWhatsAppTextMessage({
-            accountSid: waCtx.accountSid,
-            authToken: waCtx.authToken,
-            fromE164: waCtx.fromE164,
-            toDigits: customerPhone,
-            textBody: normalizedText ?? "",
-          })
-        : waCtx.provider === WHATSAPP_PROVIDER_CLOUD
-          ? await sendWhatsAppTextMessage({
-              phoneNumberId: waCtx.phoneNumberId,
-              accessToken: waCtx.accessToken,
+    let sendResult:
+      | { ok: true; messageId: string }
+      | { ok: false; message: string; code?: number | string; details?: string };
+
+    if (hasContact && payload.contact) {
+      if (waCtx.provider === WHATSAPP_PROVIDER_CLOUD) {
+        sendResult = await sendWhatsAppContactMessage({
+          phoneNumberId: waCtx.phoneNumberId,
+          accessToken: waCtx.accessToken,
+          toDigits: customerPhone,
+          name: payload.contact.name,
+          phone: payload.contact.phone,
+        });
+      } else if (waCtx.provider === WHATSAPP_PROVIDER_TWILIO) {
+        sendResult = await sendTwilioWhatsAppTextMessage({
+          accountSid: waCtx.accountSid,
+          authToken: waCtx.authToken,
+          fromE164: waCtx.fromE164,
+          toDigits: customerPhone,
+          textBody: buildTwilioContactFallbackText(payload.contact),
+        });
+      } else {
+        sendResult = { ok: false, message: "Provedor WhatsApp desconhecido" };
+      }
+    } else if (hasLocation && payload.location) {
+      if (waCtx.provider === WHATSAPP_PROVIDER_CLOUD) {
+        sendResult = await sendWhatsAppLocationMessage({
+          phoneNumberId: waCtx.phoneNumberId,
+          accessToken: waCtx.accessToken,
+          toDigits: customerPhone,
+          latitude: payload.location.lat,
+          longitude: payload.location.lng,
+          name: payload.location.label,
+          address: payload.location.label,
+        });
+      } else if (waCtx.provider === WHATSAPP_PROVIDER_TWILIO) {
+        sendResult = await sendTwilioWhatsAppTextMessage({
+          accountSid: waCtx.accountSid,
+          authToken: waCtx.authToken,
+          fromE164: waCtx.fromE164,
+          toDigits: customerPhone,
+          textBody: buildTwilioLocationFallbackText(payload.location),
+        });
+      } else {
+        sendResult = { ok: false, message: "Provedor WhatsApp desconhecido" };
+      }
+    } else if (hasText) {
+      sendResult =
+        waCtx.provider === WHATSAPP_PROVIDER_TWILIO
+          ? await sendTwilioWhatsAppTextMessage({
+              accountSid: waCtx.accountSid,
+              authToken: waCtx.authToken,
+              fromE164: waCtx.fromE164,
               toDigits: customerPhone,
               textBody: normalizedText ?? "",
             })
-          : { ok: false as const, message: "Provedor WhatsApp desconhecido" };
+          : waCtx.provider === WHATSAPP_PROVIDER_CLOUD
+            ? await sendWhatsAppTextMessage({
+                phoneNumberId: waCtx.phoneNumberId,
+                accessToken: waCtx.accessToken,
+                toDigits: customerPhone,
+                textBody: normalizedText ?? "",
+              })
+            : { ok: false, message: "Provedor WhatsApp desconhecido" };
+    } else {
+      sendResult = { ok: false, message: "Payload de mensagem inválido" };
+    }
+
     if (sendResult.ok) {
       await patchAgentMessageWhatsAppDelivery({
         tenantId,

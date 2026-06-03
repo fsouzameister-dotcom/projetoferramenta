@@ -281,6 +281,14 @@ export default function AgentHome() {
   const [masterClientById, setMasterClientById] = useState<Record<string, MasterClientPayload>>({});
   const [showTour, setShowTour] = useState(false);
   const [tourStepIndex, setTourStepIndex] = useState(0);
+  const [showContactModal, setShowContactModal] = useState(false);
+  const [showLocationModal, setShowLocationModal] = useState(false);
+  const [outboundContactForm, setOutboundContactForm] = useState({ name: "", phone: "" });
+  const [outboundLocationForm, setOutboundLocationForm] = useState({
+    label: "Unidade Atendimento",
+    lat: "-23.55052",
+    lng: "-46.633308",
+  });
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   const mergeWithPendingMedia = (apiConversations: Conversation[]) => {
@@ -722,22 +730,35 @@ export default function AgentHome() {
     });
   };
 
-  const handleSendContact = () => {
+  const submitOutboundContact = () => {
     if (!activeConversation) return;
     if (!ensureConversationOpenForMessage()) return;
+    const name = outboundContactForm.name.trim();
+    const phone = outboundContactForm.phone.trim();
+    if (!name || !phone) {
+      setModeNotice("Informe nome e telefone do contato.");
+      return;
+    }
+    const contact = { name, phone };
+
     if (resolvedMode === "api") {
       void api
         .post(`/agent/conversations/${activeConversation.id}/messages`, {
           type: "contact",
-          contact: { name: "Equipe Comercial", phone: "+55 11 4000-1000" },
+          contact,
           sender_name: userName,
         })
         .then((res) => {
           const updated = unwrapApiData<Conversation>(res.data);
           setConversations((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+          setShowContactModal(false);
         })
-        .catch(() => undefined);
+        .catch((err) => {
+          setModeNotice(getApiErrorMessage(err, "Erro ao enviar contato"));
+        });
+      return;
     }
+
     pushLocalMessage(activeConversation.id, {
       id: crypto.randomUUID(),
       type: "contact",
@@ -747,27 +768,42 @@ export default function AgentHome() {
         hour: "2-digit",
         minute: "2-digit",
       }),
-      delivery: "delivered",
-      contact: { name: "Equipe Comercial", phone: "+55 11 4000-1000" },
+      delivery: "sent",
+      contact,
     });
+    setShowContactModal(false);
   };
 
-  const handleSendLocation = () => {
+  const submitOutboundLocation = () => {
     if (!activeConversation) return;
     if (!ensureConversationOpenForMessage()) return;
+    const label = outboundLocationForm.label.trim() || "Localização";
+    const lat = Number(outboundLocationForm.lat);
+    const lng = Number(outboundLocationForm.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      setModeNotice("Informe latitude e longitude válidas.");
+      return;
+    }
+    const location = { label, lat, lng };
+
     if (resolvedMode === "api") {
       void api
         .post(`/agent/conversations/${activeConversation.id}/messages`, {
           type: "location",
-          location: { label: "Unidade Atendimento", lat: -23.55052, lng: -46.633308 },
+          location,
           sender_name: userName,
         })
         .then((res) => {
           const updated = unwrapApiData<Conversation>(res.data);
           setConversations((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+          setShowLocationModal(false);
         })
-        .catch(() => undefined);
+        .catch((err) => {
+          setModeNotice(getApiErrorMessage(err, "Erro ao enviar localização"));
+        });
+      return;
     }
+
     pushLocalMessage(activeConversation.id, {
       id: crypto.randomUUID(),
       type: "location",
@@ -777,9 +813,10 @@ export default function AgentHome() {
         hour: "2-digit",
         minute: "2-digit",
       }),
-      delivery: "delivered",
-      location: { label: "Unidade Atendimento", lat: -23.55052, lng: -46.633308 },
+      delivery: "sent",
+      location,
     });
+    setShowLocationModal(false);
   };
 
   const readFileAsBase64 = (f: File) =>
@@ -1430,14 +1467,14 @@ export default function AgentHome() {
                   </label>
                   <button
                     type="button"
-                    onClick={handleSendContact}
+                    onClick={() => setShowContactModal(true)}
                     className="px-3 py-2 rounded-lg bg-[#223150] text-gray-200 text-sm hover:bg-[#2b3f66]"
                   >
                     Enviar contato
                   </button>
                   <button
                     type="button"
-                    onClick={handleSendLocation}
+                    onClick={() => setShowLocationModal(true)}
                     className="px-3 py-2 rounded-lg bg-[#223150] text-gray-200 text-sm hover:bg-[#2b3f66]"
                   >
                     Enviar localização
@@ -1662,6 +1699,121 @@ export default function AgentHome() {
                   </button>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {showContactModal ? (
+        <div className="fixed inset-0 z-[70] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-[#1b2540] border border-[#2f3d63] rounded-xl p-5">
+            <h2 className="text-lg font-semibold text-white mb-3">Enviar contato</h2>
+            <p className="text-xs text-gray-400 mb-3">
+              O cartão de contato será enviado pelo WhatsApp (Meta) ou como texto formatado (Twilio).
+            </p>
+            <div className="grid gap-3">
+              <input
+                className="bg-[#0f1a33] border border-[#314263] rounded-lg px-3 py-2 text-sm text-gray-100"
+                placeholder="Nome do contato"
+                value={outboundContactForm.name}
+                onChange={(e) =>
+                  setOutboundContactForm((p) => ({ ...p, name: e.target.value }))
+                }
+              />
+              <input
+                className="bg-[#0f1a33] border border-[#314263] rounded-lg px-3 py-2 text-sm text-gray-100"
+                placeholder="Telefone (ex.: +5511999990000)"
+                value={outboundContactForm.phone}
+                onChange={(e) =>
+                  setOutboundContactForm((p) => ({ ...p, phone: e.target.value }))
+                }
+              />
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowContactModal(false)}
+                className="px-3 py-2 rounded-lg border border-[#314263] text-gray-300 text-sm"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={submitOutboundContact}
+                className="px-3 py-2 rounded-lg bg-accent text-white text-sm hover:bg-accent-dark"
+              >
+                Enviar
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {showLocationModal ? (
+        <div className="fixed inset-0 z-[70] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-[#1b2540] border border-[#2f3d63] rounded-xl p-5">
+            <h2 className="text-lg font-semibold text-white mb-3">Enviar localização</h2>
+            <div className="grid gap-3">
+              <input
+                className="bg-[#0f1a33] border border-[#314263] rounded-lg px-3 py-2 text-sm text-gray-100"
+                placeholder="Nome do local"
+                value={outboundLocationForm.label}
+                onChange={(e) =>
+                  setOutboundLocationForm((p) => ({ ...p, label: e.target.value }))
+                }
+              />
+              <input
+                className="bg-[#0f1a33] border border-[#314263] rounded-lg px-3 py-2 text-sm text-gray-100"
+                placeholder="Latitude"
+                value={outboundLocationForm.lat}
+                onChange={(e) =>
+                  setOutboundLocationForm((p) => ({ ...p, lat: e.target.value }))
+                }
+              />
+              <input
+                className="bg-[#0f1a33] border border-[#314263] rounded-lg px-3 py-2 text-sm text-gray-100"
+                placeholder="Longitude"
+                value={outboundLocationForm.lng}
+                onChange={(e) =>
+                  setOutboundLocationForm((p) => ({ ...p, lng: e.target.value }))
+                }
+              />
+              <button
+                type="button"
+                className="text-left text-xs text-cyan-300 hover:underline"
+                onClick={() => {
+                  if (!navigator.geolocation) {
+                    setModeNotice("Geolocalização não disponível neste navegador.");
+                    return;
+                  }
+                  navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                      setOutboundLocationForm((p) => ({
+                        ...p,
+                        lat: String(pos.coords.latitude),
+                        lng: String(pos.coords.longitude),
+                      }));
+                    },
+                    () => setModeNotice("Não foi possível obter sua localização.")
+                  );
+                }}
+              >
+                Usar minha localização atual
+              </button>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowLocationModal(false)}
+                className="px-3 py-2 rounded-lg border border-[#314263] text-gray-300 text-sm"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={submitOutboundLocation}
+                className="px-3 py-2 rounded-lg bg-accent text-white text-sm hover:bg-accent-dark"
+              >
+                Enviar
+              </button>
             </div>
           </div>
         </div>

@@ -190,6 +190,115 @@ export async function sendWhatsAppImageMessage(input: {
   return { ok: true, messageId };
 }
 
+export async function sendWhatsAppLocationMessage(input: {
+  phoneNumberId: string;
+  accessToken: string;
+  toDigits: string;
+  latitude: number;
+  longitude: number;
+  name?: string;
+  address?: string;
+}): Promise<WhatsAppSendTextResult> {
+  const url = `${GRAPH_BASE}/${encodeURIComponent(input.phoneNumberId)}/messages`;
+  const location: Record<string, string | number> = {
+    latitude: input.latitude,
+    longitude: input.longitude,
+  };
+  if (input.name?.trim()) location.name = input.name.trim().slice(0, 256);
+  if (input.address?.trim()) location.address = input.address.trim().slice(0, 256);
+  const body = {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: input.toDigits.replace(/\D/g, ""),
+    type: "location",
+    location,
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${input.accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const json = (await res.json()) as Record<string, unknown>;
+  if (!res.ok) {
+    const err = json?.error as
+      | { message?: string; code?: number; error_subcode?: number }
+      | undefined;
+    const numeric = err ? graphWhatsAppNumericCode(err) : undefined;
+    return {
+      ok: false,
+      message: err?.message ?? res.statusText ?? "Erro Graph API",
+      code: numeric,
+      details: JSON.stringify(json),
+    };
+  }
+
+  const messages = json?.messages as Array<{ id?: string }> | undefined;
+  const messageId = messages?.[0]?.id;
+  if (!messageId) {
+    return { ok: false, message: "Resposta sem messages[0].id", details: JSON.stringify(json) };
+  }
+  return { ok: true, messageId };
+}
+
+export async function sendWhatsAppContactMessage(input: {
+  phoneNumberId: string;
+  accessToken: string;
+  toDigits: string;
+  name: string;
+  phone: string;
+}): Promise<WhatsAppSendTextResult> {
+  const url = `${GRAPH_BASE}/${encodeURIComponent(input.phoneNumberId)}/messages`;
+  const formattedName = input.name.trim().slice(0, 256) || "Contato";
+  const phone = input.phone.replace(/\s/g, "");
+  const body = {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: input.toDigits.replace(/\D/g, ""),
+    type: "contacts",
+    contacts: [
+      {
+        name: { formatted_name: formattedName },
+        phones: [{ phone, type: "CELL" }],
+      },
+    ],
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${input.accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const json = (await res.json()) as Record<string, unknown>;
+  if (!res.ok) {
+    const err = json?.error as
+      | { message?: string; code?: number; error_subcode?: number }
+      | undefined;
+    const numeric = err ? graphWhatsAppNumericCode(err) : undefined;
+    return {
+      ok: false,
+      message: err?.message ?? res.statusText ?? "Erro Graph API",
+      code: numeric,
+      details: JSON.stringify(json),
+    };
+  }
+
+  const messages = json?.messages as Array<{ id?: string }> | undefined;
+  const messageId = messages?.[0]?.id;
+  if (!messageId) {
+    return { ok: false, message: "Resposta sem messages[0].id", details: JSON.stringify(json) };
+  }
+  return { ok: true, messageId };
+}
+
 export async function sendWhatsAppAudioMessage(input: {
   phoneNumberId: string;
   accessToken: string;
@@ -575,6 +684,29 @@ export type ParsedWebhookEvent =
       contactName?: string;
     }
   | {
+      kind: "inbound_location";
+      phoneNumberId: string;
+      wabaId: string;
+      messageId: string;
+      fromWaId: string;
+      timestampSec: number;
+      latitude: number;
+      longitude: number;
+      name?: string;
+      address?: string;
+      contactName?: string;
+    }
+  | {
+      kind: "inbound_contacts";
+      phoneNumberId: string;
+      wabaId: string;
+      messageId: string;
+      fromWaId: string;
+      timestampSec: number;
+      sharedContacts: Array<{ name: string; phone: string }>;
+      contactName?: string;
+    }
+  | {
       kind: "status";
       phoneNumberId: string;
       messageId: string;
@@ -664,6 +796,16 @@ export function parseWhatsAppWebhookPayload(body: unknown): ParsedWebhookEvent[]
               filename?: string;
               caption?: string;
             };
+            location?: {
+              latitude?: number;
+              longitude?: number;
+              name?: string;
+              address?: string;
+            };
+            contacts?: Array<{
+              name?: { formatted_name?: string };
+              phones?: Array<{ phone?: string; wa_id?: string }>;
+            }>;
             interactive?: {
               type?: string;
               button_reply?: { id?: string };
@@ -744,6 +886,57 @@ export function parseWhatsAppWebhookPayload(body: unknown): ParsedWebhookEvent[]
               contactName,
             });
             continue;
+          } else if (msg.type === "location" && msg.location) {
+            const lat = Number(msg.location.latitude);
+            const lng = Number(msg.location.longitude);
+            if (Number.isFinite(lat) && Number.isFinite(lng)) {
+              let contactName: string | undefined;
+              const c = contacts?.find((x) => (x as { wa_id?: string }).wa_id === fromWaId);
+              if (c?.profile?.name) contactName = c.profile.name;
+              out.push({
+                kind: "inbound_location",
+                phoneNumberId,
+                wabaId,
+                messageId: mid,
+                fromWaId,
+                timestampSec: Number(msg.timestamp ?? 0) || 0,
+                latitude: lat,
+                longitude: lng,
+                name: msg.location.name,
+                address: msg.location.address,
+                contactName,
+              });
+              continue;
+            }
+          } else if (msg.type === "contacts" && Array.isArray(msg.contacts) && msg.contacts.length) {
+            const sharedContacts: Array<{ name: string; phone: string }> = [];
+            for (const shared of msg.contacts) {
+              const name =
+                shared.name?.formatted_name?.trim() ||
+                shared.phones?.[0]?.phone?.trim() ||
+                "Contato";
+              const phone =
+                shared.phones?.[0]?.phone?.trim() ||
+                shared.phones?.[0]?.wa_id?.trim() ||
+                "";
+              if (phone) sharedContacts.push({ name, phone });
+            }
+            if (sharedContacts.length) {
+              let contactName: string | undefined;
+              const c = contacts?.find((x) => (x as { wa_id?: string }).wa_id === fromWaId);
+              if (c?.profile?.name) contactName = c.profile.name;
+              out.push({
+                kind: "inbound_contacts",
+                phoneNumberId,
+                wabaId,
+                messageId: mid,
+                fromWaId,
+                timestampSec: Number(msg.timestamp ?? 0) || 0,
+                sharedContacts,
+                contactName,
+              });
+              continue;
+            }
           }
           if (!textBody) continue;
 

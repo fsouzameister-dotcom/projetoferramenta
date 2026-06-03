@@ -15,15 +15,19 @@ import {
   successEnvelopeSchema,
 } from "./http";
 import {
-  recordInboundTwilioImage,
-  recordInboundWhatsAppAudio,
-  recordInboundWhatsAppDocument,
-  recordInboundWhatsAppImage,
   recordInboundTwilioAttachment,
   recordInboundTwilioAudio,
+  recordInboundTwilioContact,
+  recordInboundTwilioImage,
+  recordInboundWhatsAppAudio,
+  recordInboundWhatsAppContacts,
+  recordInboundWhatsAppDocument,
+  recordInboundWhatsAppImage,
+  recordInboundWhatsAppLocation,
   updateAgentMessageStatusByProvider,
 } from "./agent-conversations";
 import { mimeFromExtension, readAgentMediaPublicFile } from "./agent-media";
+import { isVcardMimeType } from "./agent-vcard";
 import { processInboundMessage } from "./inbound-orchestrator";
 import {
   whatsAppMetaSourceKey,
@@ -501,6 +505,33 @@ export async function buildApp(options: BuildAppOptions = {}) {
           timestampIso: ts,
           phoneNumberId: ev.phoneNumberId,
         });
+      } else if (ev.kind === "inbound_location") {
+        const ts = ev.timestampSec
+          ? new Date(ev.timestampSec * 1000).toISOString()
+          : new Date().toISOString();
+        await recordInboundWhatsAppLocation({
+          tenantId: resolved.tenantId,
+          providerMessageId: ev.messageId,
+          fromWaId: ev.fromWaId,
+          latitude: ev.latitude,
+          longitude: ev.longitude,
+          label: ev.name,
+          address: ev.address,
+          contactName: ev.contactName,
+          timestampIso: ts,
+        });
+      } else if (ev.kind === "inbound_contacts") {
+        const ts = ev.timestampSec
+          ? new Date(ev.timestampSec * 1000).toISOString()
+          : new Date().toISOString();
+        await recordInboundWhatsAppContacts({
+          tenantId: resolved.tenantId,
+          providerMessageId: ev.messageId,
+          fromWaId: ev.fromWaId,
+          contacts: ev.sharedContacts,
+          contactName: ev.contactName,
+          timestampIso: ts,
+        });
       } else if (ev.kind === "status") {
         const failed = ev.status === "failed";
         const e0 = failed ? ev.errors?.[0] : undefined;
@@ -588,6 +619,8 @@ export async function buildApp(options: BuildAppOptions = {}) {
             ...inboundBase,
             caption: body.trim() || undefined,
           });
+        } else if (isVcardMimeType(mediaType0)) {
+          await recordInboundTwilioContact(inboundBase);
         } else {
           await recordInboundTwilioAttachment({
             ...inboundBase,
