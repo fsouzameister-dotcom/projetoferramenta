@@ -19,6 +19,7 @@ import { authMiddleware } from "../middlewares/auth.middleware";
 // Adaptei os handlers para usar request.tenant.id e request.user.id
 // Você precisará garantir que listFlowsByTenant, createFlow, etc.,
 // aceitem esses parâmetros ou que você crie wrappers para eles.
+import { aiFlowRoutes } from "./ai-flow.routes";
 import { listFlowsByTenant, createFlow, updateFlow } from "../flows";
 import { listNodesByFlow, createNode, updateNode, deleteNode } from "../nodes";
 import { executeFlow } from "../flow-executor";
@@ -4395,6 +4396,8 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       });
     }
   );
+
+  await fastify.register(aiFlowRoutes);
 };
 
 export default protectedRoutes;

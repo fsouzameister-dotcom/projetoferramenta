@@ -2,9 +2,10 @@
 
 ## Checkpoint atual
 
-- Data: 2026-05-28
+- Data: 2026-06-03
 - Escopo vigente: **[Escopo vigente — maio/2026](#escopo-vigente--maio2026)** (prioridades atuais)
-- Retomada rápida: **[Checkpoint sessão 2026-05-28 — Operação (filas, tabulações, encerramento)](#checkpoint-de-sessão-2026-05-28--operação-filas-tabulações-encerramento)**
+- Retomada rápida: **[Checkpoint sessão 2026-06-03 — Motor IA no fluxo](#checkpoint-de-sessão-2026-06-03--motor-ia-no-fluxo)**
+- Sessão anterior: **[Checkpoint sessão 2026-05-28 — Operação (filas, tabulações, encerramento)](#checkpoint-de-sessão-2026-05-28--operação-filas-tabulações-encerramento)**
 - Sessão anterior: **[Checkpoint sessão 2026-05-22 — alinhamento produto](#checkpoint-de-sessão-2026-05-22--alinhamento-produto)**
 - Telefonia (discussão pausada): **[Discussão telefonia — a retomar](#discussão-telefonia--a-retomar-2026-05-22)**
 - Benchmark mercado 2026: **[Benchmark omnichannel — matriz ClientOn](#benchmark-omnichannel-2026--matriz-clienton)**
@@ -1984,6 +1985,28 @@ git pull origin master
 git log -5 --oneline
 python scripts/deploy-vps-remote.py   # a partir da pasta do projeto; VPS_ROOT_PASSWORD ou .vps-deploy-secret
 ```
+
+---
+
+## Checkpoint de sessão (2026-06-03) — Motor IA no fluxo
+
+### Entregue
+
+- **Config do fluxo** (`flows.ai_settings`, `GET/PATCH /flows/:id/ai-settings`): prompt global, idioma, voz, modo flexível/rígido, persona, RAG, guardrails.
+- **Node `conversa`**: prompt/fala estática, transições IA, nó global, executor rígido + flexível.
+- **RAG**: `ai_knowledge_bases` + Admin IA + seleção no editor.
+- **Guardrails**: `ai_guardrail_policies` (BLOCK:termo), live/shadow no fluxo.
+- **UI**: editor → **Config. IA**; paleta **Conversa (IA)**; Admin → IA (provedor, persona, bases, policies).
+
+### Testar (sem passar API key no chat)
+
+1. **Admin → IA** — OpenAI + modelo + API key + persona.
+2. **Fluxos** — Config. IA + nodes Conversa + salvar.
+3. Executar fluxo com `userInput` na retomada (inbound ou API execute).
+
+### Pendente (evolução)
+
+- RAG semântico (embeddings); TTS por `voiceId`; autorização de bases por campanha.
 
 ---
 

@@ -75,6 +75,145 @@ function createEmptyStage(stepNumber: number): ScriptStage {
   };
 }
 
+function KnowledgeBasesAdmin() {
+  const [rows, setRows] = useState<
+    Array<{ id: string; name: string; key: string; content: Record<string, unknown> }>
+  >([]);
+  const [form, setForm] = useState({ key: "", name: "", contentJson: '{"tables":[],"rules":[]}' });
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const load = async () => {
+    const res = await api.get("/ai/knowledge-bases");
+    setRows(unwrapApiData(res.data));
+  };
+
+  useEffect(() => {
+    void load().catch(() => setNotice("Falha ao listar bases."));
+  }, []);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    try {
+      const content = JSON.parse(form.contentJson) as Record<string, unknown>;
+      await api.post("/ai/knowledge-bases", {
+        key: form.key,
+        name: form.name,
+        content,
+      });
+      setForm({ key: "", name: "", contentJson: '{"tables":[],"rules":[]}' });
+      setNotice("Base criada.");
+      await load();
+    } catch (error) {
+      setNotice(getApiErrorMessage(error, "Erro ao criar base."));
+    }
+  };
+
+  return (
+    <div>
+      {notice && <p className="text-sm text-cyan-200 mb-2">{notice}</p>}
+      <ul className="text-sm text-gray-200 mb-4 space-y-1">
+        {rows.map((r) => (
+          <li key={r.id}>
+            {r.name} <span className="text-gray-400">({r.key})</span>
+          </li>
+        ))}
+      </ul>
+      <form onSubmit={submit} className="grid gap-2 max-w-lg">
+        <input
+          className="bg-[#0f1a33] border border-[#314263] rounded px-3 py-2 text-sm text-gray-100"
+          placeholder="Chave (ex.: precos_vivo)"
+          value={form.key}
+          onChange={(e) => setForm((f) => ({ ...f, key: e.target.value }))}
+          required
+        />
+        <input
+          className="bg-[#0f1a33] border border-[#314263] rounded px-3 py-2 text-sm text-gray-100"
+          placeholder="Nome"
+          value={form.name}
+          onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+          required
+        />
+        <textarea
+          className="bg-[#0f1a33] border border-[#314263] rounded px-3 py-2 text-sm font-mono h-24 text-gray-100"
+          value={form.contentJson}
+          onChange={(e) => setForm((f) => ({ ...f, contentJson: e.target.value }))}
+        />
+        <button type="submit" className="px-4 py-2 rounded-lg bg-accent text-white text-sm w-fit">
+          Criar base
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function GuardrailsAdmin() {
+  const [rows, setRows] = useState<
+    Array<{ id: string; name: string; key: string; version: string; status: string }>
+  >([]);
+  const [form, setForm] = useState({
+    key: "protecao_dados",
+    name: "Proteção de dados",
+    version: "v1",
+    status: "draft",
+    rulesText: "BLOCK:cpf completo\nBLOCK:senha do cartão",
+  });
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const load = async () => {
+    const res = await api.get("/ai/guardrail-policies");
+    setRows(unwrapApiData(res.data));
+  };
+
+  useEffect(() => {
+    void load().catch(() => setNotice("Falha ao listar policies."));
+  }, []);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    try {
+      await api.post("/ai/guardrail-policies", {
+        key: form.key,
+        name: form.name,
+        version: form.version,
+        status: form.status,
+        rulesText: form.rulesText,
+      });
+      setNotice("Policy criada.");
+      await load();
+    } catch (error) {
+      setNotice(getApiErrorMessage(error, "Erro ao criar policy."));
+    }
+  };
+
+  return (
+    <div>
+      {notice && <p className="text-sm text-cyan-200 mb-2">{notice}</p>}
+      <ul className="text-sm text-gray-200 mb-4 space-y-1">
+        {rows.map((r) => (
+          <li key={r.id}>
+            {r.name} — {r.version} ({r.status})
+          </li>
+        ))}
+      </ul>
+      <form onSubmit={submit} className="grid gap-2 max-w-lg">
+        <input
+          className="bg-[#0f1a33] border border-[#314263] rounded px-3 py-2 text-sm text-gray-100"
+          value={form.name}
+          onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+        />
+        <textarea
+          className="bg-[#0f1a33] border border-[#314263] rounded px-3 py-2 text-sm font-mono h-28 text-gray-100"
+          value={form.rulesText}
+          onChange={(e) => setForm((f) => ({ ...f, rulesText: e.target.value }))}
+        />
+        <button type="submit" className="px-4 py-2 rounded-lg bg-accent text-white text-sm w-fit">
+          Criar policy
+        </button>
+      </form>
+    </div>
+  );
+}
+
 export default function AiAdmin() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [personas, setPersonas] = useState<Persona[]>([]);
@@ -608,6 +747,26 @@ export default function AiAdmin() {
           </button>
         </form>
       </section>
+
+      <section className="rounded-xl border border-[#324569] bg-[#1b2540] p-4 space-y-3">
+        <h2 className="font-semibold text-white">Bases de conhecimento (RAG)</h2>
+        <p className="text-sm text-gray-300">
+          JSON com <code className="text-xs text-cyan-200">tables</code> e{" "}
+          <code className="text-xs text-cyan-200">rules</code>. Vincule no editor do fluxo em{" "}
+          <strong>Config. IA</strong>.
+        </p>
+        <KnowledgeBasesAdmin />
+      </section>
+
+      <section className="rounded-xl border border-[#324569] bg-[#1b2540] p-4 space-y-3">
+        <h2 className="font-semibold text-white">Guardrails (policies)</h2>
+        <p className="text-sm text-gray-300">
+          Uma regra por linha: <code className="text-xs text-cyan-200">BLOCK:termo</code> (modo live no
+          fluxo).
+        </p>
+        <GuardrailsAdmin />
+      </section>
+
       {showTour ? (
         <div className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-[#111827] border border-[#334155] rounded-xl p-5">

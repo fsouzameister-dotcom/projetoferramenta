@@ -102,9 +102,18 @@ Este documento consolida o que cada node faz hoje no projeto, considerando:
 
 ### `conversa`
 
-- Status: `Sem função de negócio`
-- Frontend: node visual com edição de conteúdo no painel.
-- Backend: não possui lógica específica; cai no fluxo genérico (`next_node_id`).
+- Status: `Implementado` (motor IA do fluxo)
+- Frontend:
+  - modo **Prompt** ou **Fala estática**;
+  - flag **Nó global** (contexto injetado em todas as etapas);
+  - **Transições** com condição em linguagem natural + destino no canvas;
+  - **Configurações do fluxo (IA)** no editor: prompt global, idioma/voz, modo flexível/rígido, RAG, guardrails.
+- Backend (`execute-conversa-node.ts`, `flow-ai-runtime.ts`):
+  - compõe prompt global + nós globais + bases de conhecimento + etapa atual;
+  - **Modo rígido:** gera fala, aguarda input, resolve transição via IA;
+  - **Modo flexível:** catálogo de etapas; IA escolhe resposta e próximo node;
+  - **Guardrails:** policy anexada ao fluxo (live bloqueia/mascara; shadow audita);
+  - retoma com `awaiting_input` e variável `last_user_message`.
 
 ### `funcao`
 

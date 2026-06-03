@@ -1,16 +1,26 @@
 import { Handle, Position } from "reactflow";
 
-export const ConversaNode = ({ data }: { data: any }) => (
-  <div
-    className="px-4 py-3 shadow-lg rounded-lg bg-gray-900 border-2 border-pink-500 min-w-[160px] cursor-pointer hover:shadow-xl transition-shadow"
-    onClick={() => data.onSelect?.(data.id)}
-  >
-    <div className="text-xs font-bold text-pink-400 mb-1">💬 Conversa</div>
-    <div className="text-sm font-semibold text-white">{data.label}</div>
-    <Handle type="target" position={Position.Top} />
-    <Handle type="source" position={Position.Bottom} />
-  </div>
-);
+export const ConversaNode = ({ data }: { data: any }) => {
+  const isGlobal = data.config?.isGlobal === true;
+  const mode = data.config?.contentMode === "static" ? "Estática" : "Prompt";
+  return (
+    <div
+      className="px-4 py-3 shadow-lg rounded-lg bg-gray-900 border-2 border-pink-500 min-w-[180px] cursor-pointer hover:shadow-xl transition-shadow relative"
+      onClick={() => data.onSelect?.(data.id)}
+    >
+      {isGlobal && (
+        <span className="absolute -top-2 left-2 text-[9px] font-bold uppercase tracking-wide bg-amber-500 text-black px-1.5 py-0.5 rounded">
+          Global
+        </span>
+      )}
+      <div className="text-xs font-bold text-pink-400 mb-1">💬 Conversa IA</div>
+      <div className="text-sm font-semibold text-white">{data.label}</div>
+      <div className="text-[10px] text-pink-200/80 mt-1">{mode}</div>
+      <Handle type="target" position={Position.Top} />
+      <Handle type="source" position={Position.Bottom} />
+    </div>
+  );
+};
 
 export const FuncaoNode = ({ data }: { data: any }) => (
   <div

@@ -378,6 +378,8 @@ export async function generateAiText(input: {
   scriptId?: string;
   message: string;
   conversationId?: string;
+  /** Substitui o system_prompt da persona (fluxo IA compõe contexto próprio). */
+  systemPromptOverride?: string;
 }): Promise<{
   text: string;
   provider: ProviderName;
@@ -421,19 +423,21 @@ export async function generateAiText(input: {
   try {
     const apiKey = decryptAiSecret(provider.api_key_encrypted);
     const finalPrompt = `${input.message.trim()}${scriptContext}`;
+    const systemPrompt =
+      input.systemPromptOverride?.trim() || persona.system_prompt;
     const output =
       provider.provider === "openai"
         ? await callOpenAi({
             apiKey,
             model: provider.model,
             prompt: finalPrompt,
-            systemPrompt: persona.system_prompt,
+            systemPrompt,
           })
         : await callGemini({
             apiKey,
             model: provider.model,
             prompt: finalPrompt,
-            systemPrompt: persona.system_prompt,
+            systemPrompt,
           });
 
     if (!output.text) {

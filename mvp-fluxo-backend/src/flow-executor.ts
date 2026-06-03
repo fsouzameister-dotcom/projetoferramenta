@@ -24,6 +24,9 @@ import { executeTransferirAgenteNode } from "./transferir-agente";
 import { recordFlowResponseEvent } from "./flow-response-events";
 import { ApiError, ERROR_CODES } from "./http";
 import { generateAiText } from "./ai";
+import { executeConversaNode } from "./execute-conversa-node";
+import { buildConversaAwaiting } from "./flow-conversa-node";
+import { parseJsonFromModel } from "./flow-executor-utils";
 import { listNodesByFlow } from "./nodes";
 import { executeTabulacaoNode, parseTabulacaoNodeConfig } from "./tabulacao-node";
 import {
@@ -199,23 +202,6 @@ function evaluateDecisionRule(
   return { result, variableName, leftValue, operator, comparisonValue };
 }
 
-function parseJsonFromModel(text: string): Record<string, unknown> | null {
-  const trimmed = text.trim();
-  try {
-    return JSON.parse(trimmed) as Record<string, unknown>;
-  } catch {
-    const first = trimmed.indexOf("{");
-    const last = trimmed.lastIndexOf("}");
-    if (first >= 0 && last > first) {
-      try {
-        return JSON.parse(trimmed.slice(first, last + 1)) as Record<string, unknown>;
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  }
-}
 
 async function executeApiCallNode(
   config: FlowConfig,
@@ -682,10 +668,23 @@ export async function executeFlow(
   let steps = 0;
   let lastResponseEventId: string | undefined;
   let captureInputConsumed = false;
+  const allNodesLite = nodes.map((n) => ({
+    id: n.id,
+    type: n.type,
+    name: n.name,
+    config: n.config,
+  }));
+
   while (currentNode && steps < maxSteps) {
     steps += 1;
     visitedNodeIds.push(currentNode.id);
     const config = asObject(currentNode.config);
+
+    if (input.userInput !== undefined && !captureInputConsumed) {
+      variables.last_user_message = Array.isArray(input.userInput)
+        ? input.userInput.join(", ")
+        : String(input.userInput);
+    }
 
     let nextNodeId: string | null = null;
     let details: Record<string, unknown> | undefined;
@@ -959,6 +958,56 @@ export async function executeFlow(
         trace,
         ...(lastResponseEventId ? { lastResponseEventId } : {}),
       };
+    } else if (currentNode.type === "conversa") {
+      const conversaInput: ExecuteFlowInput = captureInputConsumed
+        ? { ...input, userInput: undefined }
+        : input;
+      if (!captureInputConsumed && input.userInput !== undefined) {
+        captureInputConsumed = true;
+      }
+      const conversaResult = await executeConversaNode({
+        tenantId,
+        flowId,
+        currentNode: {
+          id: currentNode.id,
+          type: currentNode.type,
+          name: currentNode.name,
+          config: currentNode.config,
+        },
+        nodes: allNodesLite,
+        variables,
+        userInput: conversaInput.userInput,
+        conversationId: input.conversationId,
+        resolveTemplate: (text) => resolveTemplate(text, variables),
+      });
+      if (conversaResult.message) {
+        messages.push(conversaResult.message);
+      }
+      if (conversaResult.awaitingInput) {
+        trace.push({
+          nodeId: currentNode.id,
+          nodeType: currentNode.type,
+          nodeName: currentNode.name,
+          nextNodeId: null,
+          details: conversaResult.details,
+        });
+        return {
+          flowId,
+          status: "awaiting_input",
+          visitedNodeIds,
+          currentNodeId: currentNode.id,
+          messages,
+          outboundMessages,
+          variables,
+          trace,
+          awaitingInput: buildConversaAwaiting({
+            nodeId: currentNode.id,
+            prompt: conversaResult.message || "Aguardando resposta do cliente.",
+          }),
+        };
+      }
+      nextNodeId = conversaResult.nextNodeId;
+      details = conversaResult.details;
     } else if (currentNode.type === "tabulacao") {
       const tabResult = executeTabulacaoNode({ config, variables });
       const parsedTab = parseTabulacaoNodeConfig(config);

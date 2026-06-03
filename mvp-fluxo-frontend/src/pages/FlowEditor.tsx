@@ -13,6 +13,7 @@ import ReactFlow, {
 } from "reactflow";
 import "reactflow/dist/style.css";
 import api, { getApiErrorMessage, unwrapApiData } from "../api/client"; // Importa o cliente axios configurado
+import FlowAiSettingsPanel from "../components/FlowAiSettingsPanel";
 import { nodeTypes } from "../components/flownodes"; // Seus tipos de nós personalizados
 
 // REMOVA ESTA LINHA: const tenantId = "1be433d5-f15b-4764-9a85-e88f3bc88732";
@@ -73,10 +74,10 @@ const productionPaletteItems: PaletteItem[] = [
   { id: "chamada_api", name: "Chamada API", icon: "🔌" },
   { id: "transferir_agente", name: "Transferir Agente", icon: "👤" },
   { id: "encerramento", name: "Encerramento", icon: "⏹️" },
+  { id: "conversa", name: "Conversa (IA)", icon: "💬" },
 ];
 
 const comingSoonPaletteItems: PaletteItem[] = [
-  { id: "conversa", name: "Conversa", icon: "💬" },
   { id: "funcao", name: "Função", icon: "⚡" },
   { id: "transferir_chamada", name: "Transferir Chamada", icon: "📞" },
   { id: "digitar_tecla", name: "Digitar Tecla", icon: "🔢" },
@@ -90,6 +91,38 @@ const paletteItems: PaletteItem[] = [
   ...productionPaletteItems,
   ...comingSoonPaletteItems,
 ];
+
+function ConversaPersonaSelect(props: {
+  value: string;
+  onChange: (personaId: string) => void;
+}) {
+  const [personas, setPersonas] = useState<Array<{ id: string; name: string }>>([]);
+  useEffect(() => {
+    api
+      .get("/ai/personas")
+      .then((res) => setPersonas(unwrapApiData(res.data)))
+      .catch(() => setPersonas([]));
+  }, []);
+  return (
+    <div className="mb-4">
+      <label className="block text-sm font-medium text-gray-700 mb-1">
+        Persona (opcional — usa a do fluxo)
+      </label>
+      <select
+        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900"
+        value={props.value}
+        onChange={(e) => props.onChange(e.target.value)}
+      >
+        <option value="">Padrão do fluxo</option>
+        {personas.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
 
 const FLOW_EDITOR_TOUR_STORAGE_KEY = "flow_editor_tour_completed_v1";
 const FLOW_EDITOR_TOUR_STEPS = [
@@ -129,6 +162,7 @@ export default function FlowEditor() {
   const [editingNode, setEditingNode] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedNodeType, setSelectedNodeType] = useState<string | null>(null);
+  const [showFlowAiSettings, setShowFlowAiSettings] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [showTestResult, setShowTestResult] = useState(false);
   const [flowVariables, setFlowVariables] = useState<Record<string, any>>({});
@@ -435,6 +469,19 @@ export default function FlowEditor() {
               });
             }
           }
+          if (node.data.type === "conversa" && Array.isArray(node.data.config?.transitions)) {
+            node.data.config.transitions.forEach((tr: any, idx: number) => {
+              if (tr?.next_node_id) {
+                initialEdges.push({
+                  id: `e${node.id}-tr-${idx}-${tr.next_node_id}`,
+                  source: node.id,
+                  target: tr.next_node_id,
+                  animated: true,
+                  label: tr.label || tr.id || `Transição ${idx + 1}`,
+                });
+              }
+            });
+          }
           if (node.data.type === "decisao" || node.data.type === "divisao_logica") {
             const routeRules = Array.isArray(node.data.config?.routeRules)
               ? node.data.config.routeRules
@@ -688,8 +735,25 @@ export default function FlowEditor() {
     if (node) {
       setEditingNodeId(nodeId);
       setEditNodeName(node.data.label);
-      setEditNodeContent(node.data.config?.content || "");
-      setEditNodeConfig(node.data.config || {});
+      const cfg = node.data.config || {};
+      let content = cfg.content || "";
+      if (node.data.type === "conversa") {
+        content =
+          cfg.contentMode === "static"
+            ? cfg.staticSpeech || cfg.content || ""
+            : cfg.prompt || cfg.content || "";
+      }
+      setEditNodeContent(content);
+      setEditNodeConfig(
+        node.data.type === "conversa"
+          ? {
+              contentMode: "prompt",
+              transitions: [],
+              isGlobal: false,
+              ...cfg,
+            }
+          : cfg
+      );
     }
   };
 
@@ -709,16 +773,61 @@ export default function FlowEditor() {
     }
   };
 
+  const buildConversaDraftEdges = (sourceId: string, config: Record<string, unknown>) => {
+    const draftEdges: Array<{
+      id: string;
+      source: string;
+      target: string;
+      animated: boolean;
+      label?: string;
+    }> = [];
+    const transitions = Array.isArray(config.transitions) ? config.transitions : [];
+    transitions.forEach((tr: { id?: string; label?: string; next_node_id?: string }, idx: number) => {
+      if (!tr?.next_node_id) return;
+      draftEdges.push({
+        id: `e${sourceId}-tr-${idx}-${tr.next_node_id}`,
+        source: sourceId,
+        target: tr.next_node_id,
+        animated: true,
+        label: tr.label || tr.id || `Transição ${idx + 1}`,
+      });
+    });
+    if (typeof config.default_next_node_id === "string" && config.default_next_node_id) {
+      draftEdges.push({
+        id: `e${sourceId}-default-${config.default_next_node_id}`,
+        source: sourceId,
+        target: config.default_next_node_id,
+        animated: true,
+        label: "Fallback",
+      });
+    }
+    return draftEdges;
+  };
+
   const handleSaveEdit = async () => {
     if (!editingNodeId) return;
     setEditingNode(true);
     try {
+      const nodeType = nodes.find((n) => n.id === editingNodeId)?.data?.type;
+      let configPayload: Record<string, unknown> = {
+        ...editNodeConfig,
+        content: editNodeContent,
+      };
+      if (nodeType === "conversa") {
+        const mode = editNodeConfig.contentMode === "static" ? "static" : "prompt";
+        configPayload = {
+          ...editNodeConfig,
+          contentMode: mode,
+          content: editNodeContent,
+          prompt: mode === "prompt" ? editNodeContent : editNodeConfig.prompt || "",
+          staticSpeech:
+            mode === "static" ? editNodeContent : editNodeConfig.staticSpeech || "",
+        };
+      }
+
       const response = await api.put(`/flows/${flowId}/nodes/${editingNodeId}`, {
         name: editNodeName,
-        config: {
-          ...editNodeConfig,
-          content: editNodeContent,
-        },
+        config: configPayload,
       });
       const updatedNode = unwrapApiData<NodeDataType>(response.data);
       setNodes((nds) =>
@@ -735,6 +844,14 @@ export default function FlowEditor() {
             : n
         )
       );
+      if (nodeType === "conversa") {
+        const cfg = (updatedNode.config || configPayload) as Record<string, unknown>;
+        const newDraftEdges = buildConversaDraftEdges(editingNodeId, cfg);
+        setEdges((prev) => {
+          const filtered = prev.filter((edge) => edge.source !== editingNodeId);
+          return [...filtered, ...newDraftEdges];
+        });
+      }
       setHasUnsavedChanges(true);
       setEditingNodeId(null);
       setEditNodeName("");
@@ -1231,6 +1348,23 @@ export default function FlowEditor() {
         </span>
         <button
           type="button"
+          onClick={() => {
+            setShowFlowAiSettings((v) => !v);
+            if (!showFlowAiSettings) {
+              setSelectedNodeId(null);
+              setSelectedNodeType(null);
+            }
+          }}
+          className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
+            showFlowAiSettings
+              ? "border-pink-500 bg-pink-500/20 text-pink-100"
+              : "border-[#334155] text-gray-200 hover:bg-[#1e293b]"
+          }`}
+        >
+          Config. IA
+        </button>
+        <button
+          type="button"
           onClick={handleSaveFlow}
           disabled={savingFlow}
           className="px-4 py-2 bg-teal-600 text-white text-sm font-semibold rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-60"
@@ -1320,8 +1454,14 @@ export default function FlowEditor() {
         </ReactFlow>
       </div>
 
+      {showFlowAiSettings && flowId && (
+        <div className="w-96 bg-white shadow-lg border-l border-[#1e293b] shrink-0 overflow-hidden">
+          <FlowAiSettingsPanel flowId={flowId} />
+        </div>
+      )}
+
       {/* Painel Direito (Configurações do Node) */}
-      {selectedNodeId && (
+      {selectedNodeId && !showFlowAiSettings && (
         <div className="w-80 bg-[#111827] shadow-lg p-6 overflow-y-auto border-l border-[#1e293b] shrink-0 flow-node-config-panel">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold text-gray-100">
@@ -1623,7 +1763,147 @@ export default function FlowEditor() {
             )}
 
             {/* Outros tipos de Node (Conversa, Mensagem, etc.) */}
-            {selectedNodeType === "conversa" || selectedNodeType === "mensagem" ? (
+            {selectedNodeType === "conversa" && (
+              <>
+                <label className="flex items-center gap-2 text-sm text-gray-700 mb-3">
+                  <input
+                    type="checkbox"
+                    checked={editNodeConfig.isGlobal === true}
+                    onChange={(e) =>
+                      setEditNodeConfig({ ...editNodeConfig, isGlobal: e.target.checked })
+                    }
+                  />
+                  Nó global (acessível pela IA em qualquer etapa)
+                </label>
+                <div className="flex gap-2 mb-3">
+                  <button
+                    type="button"
+                    className={`flex-1 py-2 text-xs rounded-lg border ${
+                      (editNodeConfig.contentMode || "prompt") === "prompt"
+                        ? "border-pink-500 bg-pink-50 text-pink-900"
+                        : "border-gray-300"
+                    }`}
+                    onClick={() =>
+                      setEditNodeConfig({ ...editNodeConfig, contentMode: "prompt" })
+                    }
+                  >
+                    Prompt
+                  </button>
+                  <button
+                    type="button"
+                    className={`flex-1 py-2 text-xs rounded-lg border ${
+                      editNodeConfig.contentMode === "static"
+                        ? "border-pink-500 bg-pink-50 text-pink-900"
+                        : "border-gray-300"
+                    }`}
+                    onClick={() =>
+                      setEditNodeConfig({ ...editNodeConfig, contentMode: "static" })
+                    }
+                  >
+                    Fala estática
+                  </button>
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    {(editNodeConfig.contentMode || "prompt") === "static"
+                      ? "Texto fixo"
+                      : "Prompt da etapa"}
+                  </label>
+                  <textarea
+                    value={
+                      (editNodeConfig.contentMode || "prompt") === "static"
+                        ? editNodeConfig.staticSpeech || editNodeContent
+                        : editNodeConfig.prompt || editNodeContent
+                    }
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if ((editNodeConfig.contentMode || "prompt") === "static") {
+                        setEditNodeConfig({ ...editNodeConfig, staticSpeech: v });
+                      } else {
+                        setEditNodeConfig({ ...editNodeConfig, prompt: v });
+                      }
+                      setEditNodeContent(v);
+                    }}
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg h-32 resize-none text-sm"
+                    placeholder="Instruções para a IA nesta etapa…"
+                  />
+                </div>
+                <ConversaPersonaSelect
+                  value={editNodeConfig.personaId || ""}
+                  onChange={(personaId) =>
+                    setEditNodeConfig({ ...editNodeConfig, personaId: personaId || undefined })
+                  }
+                />
+                <div className="mb-4">
+                  <div className="flex justify-between items-center mb-2">
+                    <label className="text-sm font-medium text-gray-700">Transições</label>
+                    <button
+                      type="button"
+                      className="text-xs text-teal-700 font-medium"
+                      onClick={() => {
+                        const list = Array.isArray(editNodeConfig.transitions)
+                          ? editNodeConfig.transitions
+                          : [];
+                        setEditNodeConfig({
+                          ...editNodeConfig,
+                          transitions: [
+                            ...list,
+                            {
+                              id: `tr_${list.length + 1}`,
+                              label: `Transição ${list.length + 1}`,
+                              condition: "Descreva quando usar esta transição",
+                              next_node_id: "",
+                            },
+                          ],
+                        });
+                      }}
+                    >
+                      + Adicionar
+                    </button>
+                  </div>
+                  {(Array.isArray(editNodeConfig.transitions)
+                    ? editNodeConfig.transitions
+                    : []
+                  ).map((tr: any, index: number) => (
+                    <div
+                      key={index}
+                      className="border border-gray-200 rounded-lg p-2 mb-2 space-y-2 bg-gray-50"
+                    >
+                      <input
+                        className="w-full px-2 py-1 border rounded text-xs"
+                        value={tr.condition || ""}
+                        placeholder="Condição (linguagem natural)"
+                        onChange={(e) => {
+                          const next = [...(editNodeConfig.transitions || [])];
+                          next[index] = { ...next[index], condition: e.target.value };
+                          setEditNodeConfig({ ...editNodeConfig, transitions: next });
+                        }}
+                      />
+                      <select
+                        className="w-full px-2 py-1 border rounded text-xs"
+                        value={tr.next_node_id || ""}
+                        onChange={(e) => {
+                          const next = [...(editNodeConfig.transitions || [])];
+                          next[index] = { ...next[index], next_node_id: e.target.value };
+                          setEditNodeConfig({ ...editNodeConfig, transitions: next });
+                        }}
+                      >
+                        <option value="">— Próximo node —</option>
+                        {nodes
+                          .filter((n) => n.id !== selectedNodeId)
+                          .map((n) => (
+                            <option key={n.id} value={n.id}>
+                              {n.data.label || n.id}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {selectedNodeType === "mensagem" ? (
               <>
                 <div className="mb-4">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
