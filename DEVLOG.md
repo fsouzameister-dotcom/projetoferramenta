@@ -2,19 +2,36 @@
 
 ## Checkpoint atual
 
-- Data: 2026-05-22
+- Data: 2026-05-28
 - Escopo vigente: **[Escopo vigente — maio/2026](#escopo-vigente--maio2026)** (prioridades atuais)
-- Retomada rápida: **[Checkpoint sessão 2026-05-22 — alinhamento produto](#checkpoint-de-sessão-2026-05-22--alinhamento-produto)**
+- Retomada rápida: **[Checkpoint sessão 2026-05-28 — Operação (filas, tabulações, encerramento)](#checkpoint-de-sessão-2026-05-28--operação-filas-tabulações-encerramento)**
+- Sessão anterior: **[Checkpoint sessão 2026-05-22 — alinhamento produto](#checkpoint-de-sessão-2026-05-22--alinhamento-produto)**
 - Telefonia (discussão pausada): **[Discussão telefonia — a retomar](#discussão-telefonia--a-retomar-2026-05-22)**
 - Benchmark mercado 2026: **[Benchmark omnichannel — matriz ClientOn](#benchmark-omnichannel-2026--matriz-clienton)**
 - Backlog produto: **[BACKLOG.md](BACKLOG.md)** · resumo no [DEVLOG](#backlog--roadmap-produto)
-- Commits locais (push pendente se ainda não publicou): `7111392`, `6291e7f` + checkpoint desta sessão
+- Commits Operação/atendimento (branch `master`, GitHub): `70fa8d2`, `b44ed5c`, `12dee52`, `6af1c28` — **validar deploy na VPS** após `6af1c28`
+- Pendências desta linha: **[BACKLOG.md — Operação atendimento fase 2](BACKLOG.md#épico-operação-atendimento--fase-2-pós-mvp-filastabulações)**
 - Plataforma **multi-vertical** (pesquisa, atendimento, captação, vendas); 1º tenant cliente = **pesquisas**
 - Multi-tenant master: vários `platform_admin`, vê tudo, impersonação total, email único global (a implementar)
 - Meta **0–30 dias:** ~80% WhatsApp pesquisa + IA texto + insights (agregados + LLM) + cadastro mestre + ads
 - Meta **31–60 dias:** telefonia piloto (1 fluxo, 1 número)
 - ✅ Validação inicial concluída em produção: node `mensagem` com interativos (`buttons` e `list`) e novo fluxo relacionado.
 - ✅ Sessão 2026-05-27 concluída: tabulações + migrations + cadastro mestre API inicial em produção.
+- ✅ Sessão 2026-05-28 concluída (código no repo): **Operação** admin (`/admin/operations`) — filas, tabulações × filas, configurações de serviço, protocolo, encerramento obrigatório no agente.
+
+### Atualização rápida (2026-05-28)
+
+- **Admin Operação** (`OperationsAdmin.tsx`, rota `/admin/operations`):
+  - CRUD filas (`service_queues`), horário de atendimento, permissão de agentes por fila;
+  - CRUD tabulações com vínculo M2M a filas (`tabulacao_queues`);
+  - configurações do tenant: template de mensagem de encerramento + `returnLookupDays` (janela de retorno do cliente, default 7).
+- **Backend:**
+  - `conversation-protocol.ts` — protocolo `CLI-AAAAMMDD-NNNN` no início da conversa;
+  - `closeAgentConversation` exige `tabulacaoId`; envia mensagem de encerramento do tenant; node `encerramento` do fluxo alinhado;
+  - `resolveConversationQueueKey` + fallback de tabulações no encerramento (`6af1c28`);
+  - fix rotas `/queues` e `/service-settings` ausentes (`b44ed5c`).
+- **Agente** (`AgentHome.tsx`): modal de encerramento com tabulação obrigatória; protocolo no cabeçalho.
+- **Deploy:** script `scripts/deploy-vps-remote.py` (senha em `VPS_ROOT_PASSWORD` ou `scripts/.vps-deploy-secret`). Confirmar `DEPLOY_OK` na VPS antes de validar em produção.
 
 ### Atualização rápida (2026-05-27)
 
@@ -462,6 +479,7 @@ Resumo (prioridade sujeita a revisão após go-live do núcleo pesquisa WhatsApp
 
 | Prioridade | Épico | Janela |
 |------------|-------|--------|
+| **P1** | Operação atendimento — fase 2 (retorno cliente, protocolo, filas no agente) | 0–30d |
 | P2 | Tutoriais interativos in-app (product tours) | 61–90d |
 | P2 | Checklist configuração mínima do tenant | 61–90d |
 | P2 | NPS / CSAT pós-interação | 61–90d |
@@ -1919,6 +1937,55 @@ git log -3 --oneline
 Ler: `DEVLOG.md` → [Escopo vigente — maio/2026](#escopo-vigente--maio2026).
 
 Deploy VPS (quando houver código novo): `DEPLOY_COMPLETO_VPS.md`.
+
+## Checkpoint de sessão (2026-05-28) — Operação: filas, tabulações, encerramento
+
+### Objetivo da sessão
+
+Operação de atendimento no admin (filas, tabulações de encerramento, mensagem automática) + encerramento humano/bot com tabulação obrigatória e protocolo visível no agente.
+
+### Decisões de produto alinhadas (registrar na implementação futura)
+
+| Tema | Decisão |
+|------|---------|
+| Protocolo | Nasce no **início** da conversa; **mesmo protocolo** ao “continuar” atendimento (reabertura com rastreio interno — ver backlog) |
+| Roteamento | Por **fila**, não por agente individual |
+| Tabulação no encerramento | **Obrigatória** (humano e fluxo); resumo/relatórios por tabulação, **sem** expor nome do atendente ao cliente |
+| Tabulações × filas | Sem filas vinculadas = todas as filas; com filas = só atendimentos dessas filas (+ fallback técnico se lista vazia) |
+| Mensagem de encerramento | Template **único do tenant** (mesmo texto do nó `encerramento` do fluxo) |
+| Janela 24h WhatsApp | Fora da janela: **não envia**; registrar `closure_message_status` para relatórios (backlog) |
+| Retorno do cliente | Janela configurável (`returnLookupDays`, default 7); pré-carga “continuar vs nova solicitação” — **não implementado** |
+| Pós-encerramento humano | Cliente pode voltar ao **bot/fluxo** — discutido, **não implementado** |
+
+### Entregue no repositório (commits)
+
+| Commit | Conteúdo |
+|--------|----------|
+| `70fa8d2` | feat: filas, tabulações, protocolo, encerramento obrigatório, APIs e UI Operação |
+| `b44ed5c` | fix: registrar rotas `/queues` e `/service-settings` |
+| `12dee52` | fix: contraste UI Operação no layout escuro do admin |
+| `6af1c28` | fix: resolução de fila da conversa + tabulações no modal de encerramento |
+
+### Validar em produção (após deploy)
+
+1. Operação → Tabulações: fila nova aparece nos checkboxes; tabulações usadas pelo agente vinculadas à fila correta (ou globais).
+2. Agente → Encerrar atendimento: lista de tabulações carrega; encerramento conclui com mensagem do tenant quando dentro da janela 24h.
+3. Handoff `transferir_agente`: `metadata.queue` gravado como **chave** da fila.
+
+### Próxima sessão de código (ver backlog)
+
+Itens discutidos e **não** tratados nesta sessão: **[BACKLOG.md — Operação atendimento fase 2](BACKLOG.md#épico-operação-atendimento--fase-2-pós-mvp-filastabulações)**.
+
+### Comandos de retomada
+
+```powershell
+cd c:\projetoferramenta
+git pull origin master
+git log -5 --oneline
+python scripts/deploy-vps-remote.py   # a partir da pasta do projeto; VPS_ROOT_PASSWORD ou .vps-deploy-secret
+```
+
+---
 
 ### Pendências técnicas herdadas (ainda válidas)
 

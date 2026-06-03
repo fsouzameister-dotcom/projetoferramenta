@@ -3,7 +3,7 @@
 > Fonte viva de itens **fora do escopo 0–30 / 31–60** ou **polish pós go-live**.  
 > Escopo ativo e prioridades de release: **[DEVLOG.md → Escopo vigente — maio/2026](DEVLOG.md#escopo-vigente--maio2026)**.
 
-**Última atualização:** 2026-05-29
+**Última atualização:** 2026-05-28
 
 ---
 
@@ -28,6 +28,7 @@
 
 | P | Épico | Janela | Status | Detalhe |
 |---|-------|--------|--------|---------|
+| **P1** | [Operação atendimento — fase 2 (pós-MVP filas/tabulações)](#épico-operação-atendimento--fase-2-pós-mvp-filastabulações) | 0–30d | 📋 | Retorno cliente, protocolo/reabertura, UX filas no agente, relatórios encerramento |
 | P2 | [Tutoriais interativos in-app (product tours)](#épico-tutoriais-interativos-in-app) | 61–90d | 📋 | Driver.js / Joyride; tours por role |
 | P2 | [Checklist configuração mínima do tenant](#épico-checklist-configuração-mínima-do-tenant) | 61–90d | 📋 | Onboarding self-service (% WhatsApp, fluxo, agente) |
 | P2 | [NPS / CSAT pós-interação](#épico-nps--csat-pós-interação) | 61–90d | 📋 | Node ou pesquisa pós-fluxo; correlacionar relatórios |
@@ -42,6 +43,40 @@
 | — | Identity graph / CDP enterprise | — | ❌ | |
 | — | IoT field service proativo | — | ❌ | |
 | — | RCS / SMS | — | ❌ SMS fora de escopo |
+
+---
+
+## Épico: Operação atendimento — fase 2 (pós-MVP filas/tabulações)
+
+**Contexto:** sessão 2026-05-28 entregou admin Operação (`/admin/operations`), filas, tabulações × filas, protocolo `CLI-*`, encerramento obrigatório no agente e fix de resolução de fila (`6af1c28`). Ver [DEVLOG — checkpoint 2026-05-28](DEVLOG.md#checkpoint-de-sessão-2026-05-28--operação-filas-tabulações-encerramento).
+
+**Problema:** operação básica funciona, mas faltam fluxos de retorno do cliente, relatórios de encerramento e polish no painel do agente.
+
+### Itens (ordem sugerida)
+
+| # | Item | Notas |
+|---|------|--------|
+| 1 | **Pré-carga inbound — continuar vs nova solicitação** | Usar `returnLookupDays` (já em `tenant_service_settings`); se cliente voltar dentro da janela, oferecer retomar atendimento ou abrir nova solicitação |
+| 2 | **Reabertura com mesmo protocolo** | Manter `CLI-*` na continuação; registrar eventos internos de reabertura (ticket/histórico) para auditoria |
+| 3 | **Retorno ao bot após encerramento humano** | Após encerramento pelo agente, mensagens do cliente reentram no fluxo automatizado (estado da conversa + handoff reverso) |
+| 4 | **Dropdown de filas no agente** | Substituir campo texto livre em “Novo contato” por `GET /queues` (chave + rótulo); alinhar com `resolveConversationQueueKey` |
+| 5 | **`closure_message_status` em relatórios** | Quando encerramento não envia WhatsApp (fora da 24h), persistir status e expor em `/reports` ou export |
+| 6 | **Onboarding Operação ao criar fila** | Aviso/checklist: vincular tabulações à nova fila em Operação → Tabulações (ou deixar tabulação global) |
+| 7 | **Resumo por tabulação (sem nome do atendente)** | Relatórios/insights de encerramento agregados por tabulação, não por agente, conforme decisão de produto |
+| 8 | **Polish modal encerramento** | Revisar contraste do botão “Confirmar encerramento” em tema escuro após deploy |
+
+### Critério de pronto (MVP fase 2)
+
+- Cliente que retorna em até N dias vê fluxo claro (continuar / nova solicitação).
+- Encerramento fora da 24h não falha silenciosamente — status visível para supervisor.
+- Agente sempre escolhe fila válida ao criar contato; tabulações corretas por fila sem depender só de fallback.
+
+### Dependências
+
+- Deploy em produção do pacote `70fa8d2` … `6af1c28`.
+- Inbound WhatsApp → `executeFlow` (épico separado no DEVLOG) para item 3 fazer sentido ponta a ponta.
+
+**Não bloqueia:** uso atual de filas “Geral”, tabulações vinculadas e encerramento com tabulação após deploy.
 
 ---
 
