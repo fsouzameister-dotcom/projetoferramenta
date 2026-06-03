@@ -1,0 +1,636 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import api, { getApiErrorMessage, unwrapApiData } from "../api/client";
+import InfoTooltip from "~components/InfoTooltip";
+
+type QueueRow = {
+  id: string;
+  key: string;
+  label: string;
+  description: string | null;
+  active: boolean;
+  businessHours: {
+    timezone: string;
+    schedule: Record<string, { start: string; end: string }[]>;
+  } | null;
+  userIds: string[];
+};
+
+type TabulacaoRow = {
+  id: string;
+  key: string;
+  label: string;
+  description: string | null;
+  active: boolean;
+  queueIds: string[];
+};
+
+type UserRow = { id: string; name: string; email: string; role_name: string };
+
+type ServiceSettings = {
+  closureMessageTemplate: string;
+  returnLookupDays: number;
+};
+
+const WEEKDAYS: { key: string; label: string }[] = [
+  { key: "mon", label: "Segunda" },
+  { key: "tue", label: "Terça" },
+  { key: "wed", label: "Quarta" },
+  { key: "thu", label: "Quinta" },
+  { key: "fri", label: "Sexta" },
+  { key: "sat", label: "Sábado" },
+  { key: "sun", label: "Domingo" },
+];
+
+const emptySchedule = (): QueueRow["businessHours"] => ({
+  timezone: "America/Sao_Paulo",
+  schedule: Object.fromEntries(WEEKDAYS.map((d) => [d.key, [{ start: "09:00", end: "18:00" }]])),
+});
+
+type TabKey = "queues" | "tabulacoes" | "settings";
+
+export default function OperationsAdmin() {
+  const [activeTab, setActiveTab] = useState<TabKey>("queues");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const [queues, setQueues] = useState<QueueRow[]>([]);
+  const [tabulacoes, setTabulacoes] = useState<TabulacaoRow[]>([]);
+  const [users, setUsers] = useState<UserRow[]>([]);
+  const [settings, setSettings] = useState<ServiceSettings | null>(null);
+
+  const [queueForm, setQueueForm] = useState({
+    label: "",
+    key: "",
+    description: "",
+    active: true,
+    userIds: [] as string[],
+    hoursEnabled: true,
+    schedule: emptySchedule(),
+  });
+  const [editingQueueId, setEditingQueueId] = useState<string | null>(null);
+
+  const [tabForm, setTabForm] = useState({
+    label: "",
+    key: "",
+    description: "",
+    active: true,
+    queueIds: [] as string[],
+  });
+  const [editingTabId, setEditingTabId] = useState<string | null>(null);
+
+  const [settingsForm, setSettingsForm] = useState({
+    closureMessageTemplate: "",
+    returnLookupDays: 7,
+  });
+
+  const queueLabelById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const q of queues) m.set(q.id, q.label);
+    return m;
+  }, [queues]);
+
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [queuesRes, tabRes, usersRes, settingsRes] = await Promise.all([
+        api.get("/queues"),
+        api.get("/tabulacoes"),
+        api.get("/users"),
+        api.get("/service-settings"),
+      ]);
+      setQueues(unwrapApiData<QueueRow[]>(queuesRes.data));
+      setTabulacoes(unwrapApiData<TabulacaoRow[]>(tabRes.data));
+      setUsers(unwrapApiData<UserRow[]>(usersRes.data));
+      const s = unwrapApiData<ServiceSettings & { tenantId: string }>(settingsRes.data);
+      setSettings(s);
+      setSettingsForm({
+        closureMessageTemplate: s.closureMessageTemplate,
+        returnLookupDays: s.returnLookupDays,
+      });
+      setError(null);
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Erro ao carregar operação"));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAll();
+  }, [loadAll]);
+
+  const resetQueueForm = () => {
+    setEditingQueueId(null);
+    setQueueForm({
+      label: "",
+      key: "",
+      description: "",
+      active: true,
+      userIds: [],
+      hoursEnabled: true,
+      schedule: emptySchedule(),
+    });
+  };
+
+  const resetTabForm = () => {
+    setEditingTabId(null);
+    setTabForm({ label: "", key: "", description: "", active: true, queueIds: [] });
+  };
+
+  const onSaveQueue = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const payload = {
+        label: queueForm.label.trim(),
+        key: queueForm.key.trim() || undefined,
+        description: queueForm.description.trim() || undefined,
+        active: queueForm.active,
+        userIds: queueForm.userIds,
+        businessHours: queueForm.hoursEnabled ? queueForm.schedule : null,
+      };
+      if (editingQueueId) {
+        await api.put(`/queues/${editingQueueId}`, payload);
+        setNotice("Fila atualizada.");
+      } else {
+        await api.post("/queues", payload);
+        setNotice("Fila criada.");
+      }
+      resetQueueForm();
+      await loadAll();
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Erro ao salvar fila"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onEditQueue = (q: QueueRow) => {
+    setEditingQueueId(q.id);
+    setQueueForm({
+      label: q.label,
+      key: q.key,
+      description: q.description ?? "",
+      active: q.active,
+      userIds: q.userIds ?? [],
+      hoursEnabled: Boolean(q.businessHours),
+      schedule: q.businessHours ?? emptySchedule(),
+    });
+  };
+
+  const onDeleteQueue = async (id: string) => {
+    if (!window.confirm("Remover esta fila?")) return;
+    setSaving(true);
+    try {
+      await api.delete(`/queues/${id}`);
+      setNotice("Fila removida.");
+      await loadAll();
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Erro ao remover fila"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onSaveTab = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const payload = {
+        label: tabForm.label.trim(),
+        key: tabForm.key.trim() || undefined,
+        description: tabForm.description.trim() || undefined,
+        active: tabForm.active,
+        queueIds: tabForm.queueIds,
+      };
+      if (editingTabId) {
+        await api.put(`/tabulacoes/${editingTabId}`, payload);
+        setNotice("Tabulação atualizada.");
+      } else {
+        await api.post("/tabulacoes", payload);
+        setNotice("Tabulação criada.");
+      }
+      resetTabForm();
+      await loadAll();
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Erro ao salvar tabulação"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onEditTab = (t: TabulacaoRow) => {
+    setEditingTabId(t.id);
+    setTabForm({
+      label: t.label,
+      key: t.key,
+      description: t.description ?? "",
+      active: t.active,
+      queueIds: t.queueIds ?? [],
+    });
+  };
+
+  const onDeleteTab = async (id: string) => {
+    if (!window.confirm("Remover esta tabulação?")) return;
+    setSaving(true);
+    try {
+      await api.delete(`/tabulacoes/${id}`);
+      setNotice("Tabulação removida.");
+      await loadAll();
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Erro ao remover tabulação"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await api.put("/service-settings", settingsForm);
+      setNotice("Configurações salvas.");
+      await loadAll();
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Erro ao salvar configurações"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleQueueUser = (userId: string) => {
+    setQueueForm((prev) => ({
+      ...prev,
+      userIds: prev.userIds.includes(userId)
+        ? prev.userIds.filter((id) => id !== userId)
+        : [...prev.userIds, userId],
+    }));
+  };
+
+  const toggleTabQueue = (queueId: string) => {
+    setTabForm((prev) => ({
+      ...prev,
+      queueIds: prev.queueIds.includes(queueId)
+        ? prev.queueIds.filter((id) => id !== queueId)
+        : [...prev.queueIds, queueId],
+    }));
+  };
+
+  const updateDaySlot = (day: string, field: "start" | "end", value: string) => {
+    setQueueForm((prev) => {
+      const schedule = { ...prev.schedule!.schedule };
+      const slots = [...(schedule[day] ?? [{ start: "09:00", end: "18:00" }])];
+      slots[0] = { ...slots[0], [field]: value };
+      schedule[day] = slots;
+      return { ...prev, schedule: { ...prev.schedule!, schedule } };
+    });
+  };
+
+  return (
+    <div className="p-6 max-w-5xl mx-auto space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-zinc-900">Operação</h1>
+        <p className="text-sm text-zinc-600 mt-1">
+          Filas, tabulações de encerramento e mensagens automáticas ao cliente.
+        </p>
+      </div>
+
+      {error ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 text-red-800 px-4 py-3 text-sm">
+          {error}
+        </div>
+      ) : null}
+      {notice ? (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 px-4 py-3 text-sm">
+          {notice}
+        </div>
+      ) : null}
+
+      <div className="flex gap-2 border-b border-zinc-200">
+        {(
+          [
+            ["queues", "Filas"],
+            ["tabulacoes", "Tabulações"],
+            ["settings", "Configurações"],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setActiveTab(key)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
+              activeTab === key
+                ? "border-cyan-600 text-cyan-700"
+                : "border-transparent text-zinc-500 hover:text-zinc-800"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {loading ? <p className="text-sm text-zinc-500">Carregando…</p> : null}
+
+      {!loading && activeTab === "queues" ? (
+        <div className="grid gap-6 lg:grid-cols-2">
+          <form onSubmit={onSaveQueue} className="rounded-xl border border-zinc-200 bg-white p-5 space-y-4 shadow-sm">
+            <h2 className="font-semibold text-zinc-900">
+              {editingQueueId ? "Editar fila" : "Nova fila"}
+            </h2>
+            <label className="block text-sm">
+              <span className="text-zinc-700">Nome</span>
+              <input
+                className="mt-1 w-full border rounded-lg px-3 py-2"
+                value={queueForm.label}
+                onChange={(e) => setQueueForm((p) => ({ ...p, label: e.target.value }))}
+                required
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="text-zinc-700">Chave (opcional)</span>
+              <input
+                className="mt-1 w-full border rounded-lg px-3 py-2"
+                value={queueForm.key}
+                onChange={(e) => setQueueForm((p) => ({ ...p, key: e.target.value }))}
+                placeholder="ex.: suporte"
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="text-zinc-700">Descrição</span>
+              <input
+                className="mt-1 w-full border rounded-lg px-3 py-2"
+                value={queueForm.description}
+                onChange={(e) => setQueueForm((p) => ({ ...p, description: e.target.value }))}
+              />
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={queueForm.active}
+                onChange={(e) => setQueueForm((p) => ({ ...p, active: e.target.checked }))}
+              />
+              Fila ativa
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={queueForm.hoursEnabled}
+                onChange={(e) => setQueueForm((p) => ({ ...p, hoursEnabled: e.target.checked }))}
+              />
+              Horário de atendimento
+              <InfoTooltip text="Usado para relatórios e regras futuras de roteamento fora do expediente." />
+            </label>
+            {queueForm.hoursEnabled ? (
+              <div className="space-y-2 border rounded-lg p-3 bg-zinc-50">
+                {WEEKDAYS.map((day) => (
+                  <div key={day.key} className="flex items-center gap-2 text-sm">
+                    <span className="w-16 text-zinc-600">{day.label}</span>
+                    <input
+                      type="time"
+                      className="border rounded px-2 py-1"
+                      value={queueForm.schedule?.schedule[day.key]?.[0]?.start ?? "09:00"}
+                      onChange={(e) => updateDaySlot(day.key, "start", e.target.value)}
+                    />
+                    <span>—</span>
+                    <input
+                      type="time"
+                      className="border rounded px-2 py-1"
+                      value={queueForm.schedule?.schedule[day.key]?.[0]?.end ?? "18:00"}
+                      onChange={(e) => updateDaySlot(day.key, "end", e.target.value)}
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <div>
+              <p className="text-sm font-medium text-zinc-700 mb-2">
+                Agentes com acesso à fila
+              </p>
+              <div className="max-h-40 overflow-y-auto border rounded-lg p-2 space-y-1">
+                {users.map((u) => (
+                  <label key={u.id} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={queueForm.userIds.includes(u.id)}
+                      onChange={() => toggleQueueUser(u.id)}
+                    />
+                    {u.name} ({u.role_name})
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={saving}
+                className="px-4 py-2 rounded-lg bg-cyan-600 text-white text-sm font-medium disabled:opacity-50"
+              >
+                {saving ? "Salvando…" : "Salvar fila"}
+              </button>
+              {editingQueueId ? (
+                <button type="button" className="text-sm text-zinc-600" onClick={resetQueueForm}>
+                  Cancelar
+                </button>
+              ) : null}
+            </div>
+          </form>
+          <div className="rounded-xl border border-zinc-200 bg-white shadow-sm overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-zinc-50 text-zinc-600">
+                <tr>
+                  <th className="text-left px-4 py-2">Fila</th>
+                  <th className="text-left px-4 py-2">Chave</th>
+                  <th className="px-4 py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {queues.map((q) => (
+                  <tr key={q.id} className="border-t border-zinc-100">
+                    <td className="px-4 py-2">
+                      {q.label}
+                      {!q.active ? (
+                        <span className="ml-2 text-xs text-amber-600">inativa</span>
+                      ) : null}
+                    </td>
+                    <td className="px-4 py-2 text-zinc-500">{q.key}</td>
+                    <td className="px-4 py-2 text-right space-x-2">
+                      <button type="button" className="text-cyan-700" onClick={() => onEditQueue(q)}>
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        className="text-red-600"
+                        onClick={() => void onDeleteQueue(q.id)}
+                      >
+                        Excluir
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+
+      {!loading && activeTab === "tabulacoes" ? (
+        <div className="grid gap-6 lg:grid-cols-2">
+          <form onSubmit={onSaveTab} className="rounded-xl border border-zinc-200 bg-white p-5 space-y-4 shadow-sm">
+            <h2 className="font-semibold text-zinc-900">
+              {editingTabId ? "Editar tabulação" : "Nova tabulação"}
+            </h2>
+            <p className="text-xs text-zinc-500">
+              Sem filas vinculadas = disponível em todas. Com filas = só atendimentos dessas filas.
+            </p>
+            <label className="block text-sm">
+              <span className="text-zinc-700">Rótulo</span>
+              <input
+                className="mt-1 w-full border rounded-lg px-3 py-2"
+                value={tabForm.label}
+                onChange={(e) => setTabForm((p) => ({ ...p, label: e.target.value }))}
+                required
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="text-zinc-700">Chave (opcional)</span>
+              <input
+                className="mt-1 w-full border rounded-lg px-3 py-2"
+                value={tabForm.key}
+                onChange={(e) => setTabForm((p) => ({ ...p, key: e.target.value }))}
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="text-zinc-700">Descrição</span>
+              <input
+                className="mt-1 w-full border rounded-lg px-3 py-2"
+                value={tabForm.description}
+                onChange={(e) => setTabForm((p) => ({ ...p, description: e.target.value }))}
+              />
+            </label>
+            <div>
+              <p className="text-sm font-medium text-zinc-700 mb-2">Filas</p>
+              <div className="border rounded-lg p-2 space-y-1 max-h-36 overflow-y-auto">
+                {queues.map((q) => (
+                  <label key={q.id} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={tabForm.queueIds.includes(q.id)}
+                      onChange={() => toggleTabQueue(q.id)}
+                    />
+                    {q.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={saving}
+                className="px-4 py-2 rounded-lg bg-cyan-600 text-white text-sm font-medium disabled:opacity-50"
+              >
+                {saving ? "Salvando…" : "Salvar tabulação"}
+              </button>
+              {editingTabId ? (
+                <button type="button" className="text-sm text-zinc-600" onClick={resetTabForm}>
+                  Cancelar
+                </button>
+              ) : null}
+            </div>
+          </form>
+          <div className="rounded-xl border border-zinc-200 bg-white shadow-sm overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-zinc-50 text-zinc-600">
+                <tr>
+                  <th className="text-left px-4 py-2">Tabulação</th>
+                  <th className="text-left px-4 py-2">Filas</th>
+                  <th className="px-4 py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {tabulacoes.map((t) => (
+                  <tr key={t.id} className="border-t border-zinc-100">
+                    <td className="px-4 py-2">{t.label}</td>
+                    <td className="px-4 py-2 text-zinc-500 text-xs">
+                      {!t.queueIds?.length
+                        ? "Todas"
+                        : t.queueIds.map((id) => queueLabelById.get(id) ?? id).join(", ")}
+                    </td>
+                    <td className="px-4 py-2 text-right space-x-2">
+                      <button type="button" className="text-cyan-700" onClick={() => onEditTab(t)}>
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        className="text-red-600"
+                        onClick={() => void onDeleteTab(t.id)}
+                      >
+                        Excluir
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+
+      {!loading && activeTab === "settings" ? (
+        <form
+          onSubmit={onSaveSettings}
+          className="rounded-xl border border-zinc-200 bg-white p-5 space-y-4 shadow-sm max-w-2xl"
+        >
+          <h2 className="font-semibold text-zinc-900">Encerramento e retorno</h2>
+          <label className="block text-sm">
+            <span className="text-zinc-700 flex items-center gap-1">
+              Mensagem de encerramento
+              <InfoTooltip text="Placeholders: {{protocolo}}, {{nome_cliente}}, {{resumo_tabulacao}}, {{data}}. Enviada na janela 24h; fora dela fica registrado nos relatórios." />
+            </span>
+            <textarea
+              className="mt-1 w-full border rounded-lg px-3 py-2 min-h-[120px]"
+              value={settingsForm.closureMessageTemplate}
+              onChange={(e) =>
+                setSettingsForm((p) => ({ ...p, closureMessageTemplate: e.target.value }))
+              }
+              required
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="text-zinc-700">Dias para oferecer “continuar atendimento”</span>
+            <input
+              type="number"
+              min={1}
+              max={365}
+              className="mt-1 w-32 border rounded-lg px-3 py-2"
+              value={settingsForm.returnLookupDays}
+              onChange={(e) =>
+                setSettingsForm((p) => ({
+                  ...p,
+                  returnLookupDays: Number(e.target.value) || 7,
+                }))
+              }
+            />
+          </label>
+          {settings ? (
+            <p className="text-xs text-zinc-500">Última atualização: {settings.closureMessageTemplate ? "ok" : "—"}</p>
+          ) : null}
+          <button
+            type="submit"
+            disabled={saving}
+            className="px-4 py-2 rounded-lg bg-cyan-600 text-white text-sm font-medium disabled:opacity-50"
+          >
+            {saving ? "Salvando…" : "Salvar configurações"}
+          </button>
+        </form>
+      ) : null}
+    </div>
+  );
+}

@@ -13,6 +13,9 @@ import {
 } from "./mensagem-outbound";
 import { executeContadorPassagensNode } from "./contador-passagens";
 import { executeEncerramentoNode } from "./encerramento";
+import { sendTenantClosureMessage } from "./agent-conversations";
+import { ensureConversationProtocol } from "./conversation-protocol";
+import { pool } from "./db";
 import {
   toCapturarEntradaConfigFromReceber,
   parseReceberMensagemConfig,
@@ -907,6 +910,35 @@ export async function executeFlow(
       const endResult = executeEncerramentoNode({ config, variables });
       if (endResult.message) {
         messages.push(endResult.message);
+      }
+      if (input.conversationId) {
+        const tabLabel =
+          typeof variables.tabulacao_label === "string"
+            ? variables.tabulacao_label
+            : typeof variables.tabulacao === "string"
+              ? variables.tabulacao
+              : undefined;
+        await ensureConversationProtocol({
+          tenantId,
+          conversationId: input.conversationId,
+        });
+        const closureStatus = await sendTenantClosureMessage({
+          tenantId,
+          conversationId: input.conversationId,
+          tabulacaoLabel: tabLabel,
+        });
+        await pool.query(
+          `UPDATE agent_conversations
+           SET lifecycle_status = 'closed_manual',
+               status = 'historico',
+               closed_at = now(),
+               closed_by = 'flow:encerramento',
+               closure_message_status = $1,
+               tabulacao_label = COALESCE($2, tabulacao_label),
+               updated_at = now()
+           WHERE id = $3::uuid AND tenant_id = $4::uuid`,
+          [closureStatus, tabLabel ?? null, input.conversationId, tenantId]
+        );
       }
       trace.push({
         nodeId: currentNode.id,

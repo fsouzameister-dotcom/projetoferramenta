@@ -29,6 +29,13 @@ import {
   sendTwilioWhatsAppMediaMessage,
   sendTwilioWhatsAppTextMessage,
 } from "./whatsapp-twilio-api";
+import { ensureConversationProtocol } from "./conversation-protocol";
+import { assertTabulacaoAllowedForQueue } from "./tabulacoes";
+import {
+  getTenantServiceSettings,
+  renderClosureMessageTemplate,
+} from "./tenant-service-settings";
+import { ensureDefaultQueue } from "./service-queues";
 import {
   buildTemplateMessageText,
   formatTemplateErrorDescription,
@@ -71,6 +78,10 @@ export type AgentConversation = {
   window_expires_at?: string;
   outside_service_window: boolean;
   requires_template_to_resume: boolean;
+  protocol_number?: string;
+  tabulacao_id?: string;
+  tabulacao_label?: string;
+  closure_message_status?: string;
   tags?: string[];
   metadata?: {
     queue?: string;
@@ -81,8 +92,19 @@ export type AgentConversation = {
 };
 
 export class AgentConversationRuleError extends Error {
-  code: "CONVERSATION_CLOSED" | "WINDOW_CLOSED_TEMPLATE_REQUIRED";
-  constructor(code: "CONVERSATION_CLOSED" | "WINDOW_CLOSED_TEMPLATE_REQUIRED", message: string) {
+  code:
+    | "CONVERSATION_CLOSED"
+    | "WINDOW_CLOSED_TEMPLATE_REQUIRED"
+    | "TABULACAO_REQUIRED"
+    | "TABULACAO_NOT_ALLOWED";
+  constructor(
+    code:
+      | "CONVERSATION_CLOSED"
+      | "WINDOW_CLOSED_TEMPLATE_REQUIRED"
+      | "TABULACAO_REQUIRED"
+      | "TABULACAO_NOT_ALLOWED",
+    message: string
+  ) {
     super(message);
     this.code = code;
   }
@@ -199,6 +221,7 @@ export function phoneDigitsOnly(phone: string): string {
 
 async function ensureTenantSeed(tenantId: string) {
   await ensureSchema();
+  await ensureDefaultQueue(tenantId);
   const client = await pool.connect();
   try {
     const exists = await client.query(`SELECT id FROM agent_conversations WHERE tenant_id = $1 LIMIT 1`, [
@@ -267,6 +290,10 @@ export async function listAgentConversations(tenantId: string): Promise<AgentCon
       closed_by: string | null;
       last_customer_message_at: string | null;
       window_expires_at: string | null;
+      protocol_number: string | null;
+      tabulacao_id: string | null;
+      tabulacao_label: string | null;
+      closure_message_status: string | null;
       tags: string[];
       metadata: {
         queue?: string;
@@ -276,7 +303,8 @@ export async function listAgentConversations(tenantId: string): Promise<AgentCon
       updated_at: string;
     }>(
       `SELECT id, contact_name, phone, status, lifecycle_status, closed_at, closed_by,
-              last_customer_message_at, window_expires_at, tags, metadata, updated_at
+              last_customer_message_at, window_expires_at, protocol_number, tabulacao_id,
+              tabulacao_label, closure_message_status, tags, metadata, updated_at
        FROM agent_conversations
        WHERE tenant_id = $1
        ORDER BY updated_at DESC`,
@@ -354,6 +382,12 @@ export async function listAgentConversations(tenantId: string): Promise<AgentCon
           : {}),
         ...(conv.window_expires_at ? { window_expires_at: conv.window_expires_at } : {}),
         ...(conv.metadata ? { metadata: conv.metadata } : {}),
+        ...(conv.protocol_number ? { protocol_number: conv.protocol_number } : {}),
+        ...(conv.tabulacao_id ? { tabulacao_id: conv.tabulacao_id } : {}),
+        ...(conv.tabulacao_label ? { tabulacao_label: conv.tabulacao_label } : {}),
+        ...(conv.closure_message_status
+          ? { closure_message_status: conv.closure_message_status }
+          : {}),
       };
     });
   } finally {
@@ -452,7 +486,7 @@ export async function createAgentConversation(input: {
       ]
     );
     createdId = created.rows[0].id;
-
+    await ensureConversationProtocol({ tenantId: input.tenantId, conversationId: createdId });
   } finally {
     client.release();
   }
@@ -567,10 +601,144 @@ export async function recordInboundWhatsAppMessage(input: {
       [input.timestampIso, convId, input.contactName?.trim() || null, input.tenantId]
     );
 
+    await ensureConversationProtocol({ tenantId: input.tenantId, conversationId: convId });
     return { duplicate: false, conversationId: convId };
   } finally {
     client.release();
   }
+}
+
+function conversationQueueKey(metadata: { queue?: string } | null | undefined): string | null {
+  const q = metadata?.queue;
+  return typeof q === "string" && q.trim() ? q.trim() : null;
+}
+
+async function sendClosureWhatsAppText(input: {
+  tenantId: string;
+  conversationId: string;
+  phone: string;
+  textBody: string;
+}): Promise<{
+  ok: boolean;
+  messageId?: string;
+  code?: string | number;
+  message?: string;
+}> {
+  const waCtx = await getOutboundWhatsAppContext(input.tenantId);
+  if (!waCtx) {
+    await pool.query(
+      `INSERT INTO agent_messages
+       (conversation_id, tenant_id, provider_message_id, type, direction, sender_name, delivery_status, text_content, metadata)
+       VALUES ($1, $2, $3, 'text', 'out', 'Sistema', 'sent', $4, $5::jsonb)`,
+      [
+        input.conversationId,
+        input.tenantId,
+        `closure-mock-${Date.now()}`,
+        input.textBody,
+        JSON.stringify({ closure: true }),
+      ]
+    );
+    return { ok: true, messageId: `closure-mock-${Date.now()}` };
+  }
+
+  const inserted = await pool.query<{ id: string }>(
+    `INSERT INTO agent_messages
+     (conversation_id, tenant_id, provider_message_id, type, direction, sender_name, delivery_status, text_content, metadata)
+     VALUES ($1, $2, NULL, 'text', 'out', 'Sistema', 'sending', $3, $4::jsonb)
+     RETURNING id`,
+    [
+      input.conversationId,
+      input.tenantId,
+      input.textBody,
+      JSON.stringify({ closure: true, automated: true }),
+    ]
+  );
+  const messageId = inserted.rows[0]?.id;
+  const digits = phoneDigitsOnly(input.phone);
+
+  const sendResult =
+    waCtx.provider === WHATSAPP_PROVIDER_TWILIO
+      ? await sendTwilioWhatsAppTextMessage({
+          accountSid: waCtx.accountSid,
+          authToken: waCtx.authToken,
+          fromE164: waCtx.fromE164,
+          toDigits: digits,
+          textBody: input.textBody,
+        })
+      : waCtx.provider === WHATSAPP_PROVIDER_CLOUD
+        ? await sendWhatsAppTextMessage({
+            phoneNumberId: waCtx.phoneNumberId,
+            accessToken: waCtx.accessToken,
+            toDigits: digits,
+            textBody: input.textBody,
+          })
+        : { ok: false as const, message: "Provedor WhatsApp desconhecido" };
+
+  if (messageId) {
+    if (sendResult.ok) {
+      await patchAgentMessageWhatsAppDelivery({
+        tenantId: input.tenantId,
+        messageId,
+        providerMessageId: sendResult.messageId,
+        deliveryStatus: "sent",
+      });
+    } else {
+      await patchAgentMessageWhatsAppDelivery({
+        tenantId: input.tenantId,
+        messageId,
+        providerMessageId: null,
+        deliveryStatus: "failed",
+        errorCode: sendResult.code != null ? String(sendResult.code) : "CLOSURE_SEND",
+        errorDescription: sendResult.message,
+      });
+    }
+  }
+  return sendResult;
+}
+
+/** Mensagem de encerramento do tenant (humano ou fluxo). */
+export async function sendTenantClosureMessage(input: {
+  tenantId: string;
+  conversationId: string;
+  contactName?: string;
+  tabulacaoLabel?: string;
+}): Promise<"sent" | "failed" | "skipped_window_closed"> {
+  const conv = await pool.query<{
+    phone: string;
+    contact_name: string;
+    window_expires_at: string | null;
+    lifecycle_status: string;
+  }>(
+    `SELECT phone, contact_name, window_expires_at, lifecycle_status
+     FROM agent_conversations WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+    [input.conversationId, input.tenantId]
+  );
+  if (!conv.rows[0]) return "skipped_window_closed";
+
+  const outsideWindow = Boolean(
+    conv.rows[0].window_expires_at &&
+      new Date(conv.rows[0].window_expires_at).getTime() <= Date.now()
+  );
+  if (outsideWindow) return "skipped_window_closed";
+
+  const protocol = await ensureConversationProtocol({
+    tenantId: input.tenantId,
+    conversationId: input.conversationId,
+  });
+  const settings = await getTenantServiceSettings(input.tenantId);
+  const text = renderClosureMessageTemplate(settings.closureMessageTemplate, {
+    protocolo: protocol,
+    nome_cliente: input.contactName ?? conv.rows[0].contact_name,
+    resumo_tabulacao: input.tabulacaoLabel,
+  });
+
+  const result = await sendClosureWhatsAppText({
+    tenantId: input.tenantId,
+    conversationId: input.conversationId,
+    phone: conv.rows[0].phone,
+    textBody: text,
+  });
+  return result.ok ? "sent" : "failed";
 }
 
 async function findOrCreateConversationForInbound(input: {
@@ -647,6 +815,7 @@ async function touchConversationAfterInbound(
      WHERE id = $2 AND tenant_id = $4`,
     [timestampIso, convId, contactName?.trim() || null, tenantId]
   );
+  await ensureConversationProtocol({ tenantId, conversationId: convId });
 }
 
 export async function recordInboundWhatsAppImage(input: {
@@ -2060,8 +2229,61 @@ export async function closeAgentConversation(input: {
   tenantId: string;
   conversationId: string;
   closedBy?: string;
+  tabulacaoId: string;
 }): Promise<AgentConversation | null> {
   await ensureSchema();
+  if (!input.tabulacaoId?.trim()) {
+    throw new AgentConversationRuleError(
+      "TABULACAO_REQUIRED",
+      "Selecione uma tabulação para encerrar o atendimento."
+    );
+  }
+
+  const convRow = await pool.query<{
+    id: string;
+    contact_name: string;
+    metadata: { queue?: string } | null;
+  }>(
+    `SELECT id, contact_name, metadata FROM agent_conversations
+     WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+    [input.conversationId, input.tenantId]
+  );
+  if (!convRow.rows[0]) return null;
+
+  const queueKey = conversationQueueKey(convRow.rows[0].metadata);
+  let tabulacao;
+  try {
+    tabulacao = await assertTabulacaoAllowedForQueue({
+      tenantId: input.tenantId,
+      tabulacaoId: input.tabulacaoId.trim(),
+      queueKey,
+    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "TABULACAO_NOT_ALLOWED_FOR_QUEUE") {
+      throw new AgentConversationRuleError(
+        "TABULACAO_NOT_ALLOWED",
+        "Tabulação não permitida para a fila deste atendimento."
+      );
+    }
+    throw new AgentConversationRuleError(
+      "TABULACAO_REQUIRED",
+      "Tabulação inválida ou inativa."
+    );
+  }
+
+  await ensureConversationProtocol({
+    tenantId: input.tenantId,
+    conversationId: input.conversationId,
+  });
+
+  const closureStatus = await sendTenantClosureMessage({
+    tenantId: input.tenantId,
+    conversationId: input.conversationId,
+    contactName: convRow.rows[0].contact_name,
+    tabulacaoLabel: tabulacao.label,
+  });
+
   const client = await pool.connect();
   try {
     const result = await client.query(
@@ -2070,10 +2292,20 @@ export async function closeAgentConversation(input: {
            status = 'historico',
            closed_at = now(),
            closed_by = $3,
+           tabulacao_id = $4::uuid,
+           tabulacao_label = $5,
+           closure_message_status = $6,
            updated_at = now()
        WHERE id = $1 AND tenant_id = $2
        RETURNING id`,
-      [input.conversationId, input.tenantId, input.closedBy?.trim() || "agent"]
+      [
+        input.conversationId,
+        input.tenantId,
+        input.closedBy?.trim() || "agent",
+        tabulacao.id,
+        tabulacao.label,
+        closureStatus,
+      ]
     );
     if (result.rows.length === 0) return null;
   } finally {

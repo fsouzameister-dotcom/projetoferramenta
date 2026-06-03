@@ -52,6 +52,9 @@ type Conversation = {
   window_expires_at?: string;
   outside_service_window?: boolean;
   requires_template_to_resume?: boolean;
+  protocol_number?: string;
+  tabulacao_label?: string;
+  closure_message_status?: string;
   tags?: string[];
   metadata?: {
     clientId?: string;
@@ -285,6 +288,13 @@ export default function AgentHome() {
   const [masterClientById, setMasterClientById] = useState<Record<string, MasterClientPayload>>({});
   const [showTour, setShowTour] = useState(false);
   const [tourStepIndex, setTourStepIndex] = useState(0);
+  const [showCloseModal, setShowCloseModal] = useState(false);
+  const [closeTabulacoes, setCloseTabulacoes] = useState<
+    { id: string; label: string; description: string | null }[]
+  >([]);
+  const [selectedTabulacaoId, setSelectedTabulacaoId] = useState("");
+  const [loadingCloseTabulacoes, setLoadingCloseTabulacoes] = useState(false);
+  const [closingConversation, setClosingConversation] = useState(false);
   const [showContactModal, setShowContactModal] = useState(false);
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [outboundContactForm, setOutboundContactForm] = useState({ name: "", phone: "" });
@@ -657,28 +667,68 @@ export default function AgentHome() {
     return false;
   };
 
-  const handleCloseConversation = async () => {
+  const openCloseModal = async () => {
     if (!activeConversation) return;
-    const ok = window.confirm("Encerrar este atendimento agora?");
-    if (!ok) return;
+    setShowCloseModal(true);
+    setSelectedTabulacaoId("");
+    if (resolvedMode !== "api") {
+      setCloseTabulacoes([
+        { id: "mock-resolvido", label: "Resolvido", description: null },
+        { id: "mock-sem-retorno", label: "Sem retorno", description: null },
+      ]);
+      return;
+    }
+    setLoadingCloseTabulacoes(true);
+    try {
+      const res = await api.get("/agent/tabulacoes-for-close", {
+        params: { conversationId: activeConversation.id },
+      });
+      const rows = unwrapApiData<
+        { id: string; label: string; description: string | null }[]
+      >(res.data);
+      setCloseTabulacoes(rows);
+      if (rows.length === 1) setSelectedTabulacaoId(rows[0].id);
+    } catch (error) {
+      window.alert(getApiErrorMessage(error, "Não foi possível carregar tabulações."));
+      setShowCloseModal(false);
+    } finally {
+      setLoadingCloseTabulacoes(false);
+    }
+  };
+
+  const confirmCloseConversation = async () => {
+    if (!activeConversation) return;
+    if (!selectedTabulacaoId.trim()) {
+      window.alert("Selecione uma tabulação para encerrar o atendimento.");
+      return;
+    }
     if (resolvedMode === "api") {
+      setClosingConversation(true);
       try {
-        const res = await api.post(`/agent/conversations/${activeConversation.id}/close`);
+        const res = await api.post(`/agent/conversations/${activeConversation.id}/close`, {
+          tabulacaoId: selectedTabulacaoId,
+        });
         const updated = unwrapApiData<Conversation>(res.data);
         setConversations((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+        setShowCloseModal(false);
         return;
       } catch (error) {
         window.alert(getApiErrorMessage(error, "Não foi possível encerrar atendimento."));
         return;
+      } finally {
+        setClosingConversation(false);
       }
     }
+    const tab = closeTabulacoes.find((t) => t.id === selectedTabulacaoId);
     updateConversation(activeConversation.id, (conv) => ({
       ...conv,
       status: "historico",
       lifecycle_status: "closed_manual",
       closed_at: new Date().toISOString(),
       closed_by: userName,
+      tabulacao_label: tab?.label,
     }));
+    setShowCloseModal(false);
   };
 
   const handleReopenConversation = async () => {
@@ -1286,9 +1336,14 @@ export default function AgentHome() {
                       ))}
                     </div>
                   ) : null}
+                  {activeConversation?.protocol_number ? (
+                    <p className="text-[11px] text-amber-200/90 mt-0.5 font-mono">
+                      Protocolo: {activeConversation.protocol_number}
+                    </p>
+                  ) : null}
                   <p className="text-[11px] text-cyan-200 mt-0.5">
                     {activeConversation?.lifecycle_status === "closed_manual"
-                      ? "Encerrado manualmente"
+                      ? `Encerrado manualmente${activeConversation.tabulacao_label ? ` · ${activeConversation.tabulacao_label}` : ""}`
                       : activeConversation?.lifecycle_status === "closed_window"
                         ? "Encerrado por janela Meta"
                         : activeConversation?.status === "historico"
@@ -1310,7 +1365,7 @@ export default function AgentHome() {
                   ) : (
                     <button
                       type="button"
-                      onClick={() => void handleCloseConversation()}
+                      onClick={() => void openCloseModal()}
                       className="px-2.5 py-1 rounded-lg bg-red-500/20 border border-red-400/40 text-red-200 text-[11px] hover:bg-red-500/30"
                     >
                       Encerrar atendimento
@@ -1656,6 +1711,73 @@ export default function AgentHome() {
                 className="px-4 py-2 rounded-lg bg-accent text-white hover:bg-accent-dark"
               >
                 Enviar
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {showCloseModal ? (
+        <div className="fixed inset-0 z-[75] bg-black/55 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-[#1b2540] border border-[#2f3d63] rounded-xl p-5">
+            <h2 className="text-lg font-semibold text-white mb-1">Encerrar atendimento</h2>
+            <p className="text-sm text-gray-300 mb-4">
+              Selecione a tabulação do atendimento. O encerramento só é concluído após essa escolha.
+            </p>
+            {activeConversation?.protocol_number ? (
+              <p className="text-xs text-amber-200/90 font-mono mb-3">
+                Protocolo: {activeConversation.protocol_number}
+              </p>
+            ) : null}
+            {loadingCloseTabulacoes ? (
+              <p className="text-sm text-gray-400">Carregando tabulações…</p>
+            ) : closeTabulacoes.length === 0 ? (
+              <p className="text-sm text-amber-200">
+                Nenhuma tabulação disponível para esta fila. Peça ao administrador configurar em
+                Operação → Tabulações.
+              </p>
+            ) : (
+              <ul className="space-y-2 max-h-64 overflow-y-auto">
+                {closeTabulacoes.map((tab) => (
+                  <li key={tab.id}>
+                    <label className="flex items-start gap-3 p-3 rounded-lg border border-[#314263] bg-[#0f1a33] cursor-pointer hover:border-cyan-500/50">
+                      <input
+                        type="radio"
+                        name="close-tabulacao"
+                        className="mt-1"
+                        checked={selectedTabulacaoId === tab.id}
+                        onChange={() => setSelectedTabulacaoId(tab.id)}
+                      />
+                      <span>
+                        <span className="text-sm font-medium text-white block">{tab.label}</span>
+                        {tab.description ? (
+                          <span className="text-xs text-gray-400 block mt-0.5">{tab.description}</span>
+                        ) : null}
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowCloseModal(false)}
+                className="px-4 py-2 rounded-lg bg-[#223150] text-gray-200 hover:bg-[#2b3f66] text-sm"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={
+                  closingConversation ||
+                  loadingCloseTabulacoes ||
+                  !selectedTabulacaoId ||
+                  closeTabulacoes.length === 0
+                }
+                onClick={() => void confirmCloseConversation()}
+                className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-500 disabled:opacity-50"
+              >
+                {closingConversation ? "Encerrando…" : "Confirmar encerramento"}
               </button>
             </div>
           </div>

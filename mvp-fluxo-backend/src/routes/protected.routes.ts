@@ -1,4 +1,5 @@
 import { FastifyPluginAsync } from "fastify";
+import { pool } from "../db";
 import {
   ApiError,
   ERROR_CODES,
@@ -29,8 +30,19 @@ import {
   createTabulacao,
   deleteTabulacao,
   listTabulacoesByTenant,
+  listTabulacoesForConversationClose,
   updateTabulacao,
 } from "../tabulacoes";
+import {
+  createQueue,
+  deleteQueue,
+  listQueuesByTenant,
+  updateQueue,
+} from "../service-queues";
+import {
+  getTenantServiceSettings,
+  upsertTenantServiceSettings,
+} from "../tenant-service-settings";
 import {
   createMasterClient,
   createMasterClientPhone,
@@ -143,7 +155,7 @@ const nodeSchema = {
 const tabulacaoSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["id", "tenantId", "key", "label", "active", "createdAt", "updatedAt"],
+  required: ["id", "tenantId", "key", "label", "active", "queueIds", "createdAt", "updatedAt"],
   properties: {
     id: { type: "string" },
     tenantId: { type: "string" },
@@ -151,7 +163,38 @@ const tabulacaoSchema = {
     label: { type: "string" },
     description: { anyOf: [{ type: "string" }, { type: "null" }] },
     active: { type: "boolean" },
+    queueIds: { type: "array", items: { type: "string" } },
     createdAt: { type: "string" },
+    updatedAt: { type: "string" },
+  },
+} as const;
+
+const queueSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "tenantId", "key", "label", "active", "userIds", "createdAt", "updatedAt"],
+  properties: {
+    id: { type: "string" },
+    tenantId: { type: "string" },
+    key: { type: "string" },
+    label: { type: "string" },
+    description: { anyOf: [{ type: "string" }, { type: "null" }] },
+    active: { type: "boolean" },
+    businessHours: { type: ["object", "null"], additionalProperties: true },
+    userIds: { type: "array", items: { type: "string" } },
+    createdAt: { type: "string" },
+    updatedAt: { type: "string" },
+  },
+} as const;
+
+const serviceSettingsSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["tenantId", "closureMessageTemplate", "returnLookupDays", "updatedAt"],
+  properties: {
+    tenantId: { type: "string" },
+    closureMessageTemplate: { type: "string" },
+    returnLookupDays: { type: "integer", minimum: 1, maximum: 365 },
     updatedAt: { type: "string" },
   },
 } as const;
@@ -1942,7 +1985,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
   });
 
   fastify.post<{
-    Body: { key?: string; label: string; description?: string };
+    Body: { key?: string; label: string; description?: string; queueIds?: string[] };
   }>("/tabulacoes", {
     schema: {
       body: {
@@ -1953,6 +1996,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           key: { type: "string", minLength: 1, maxLength: 64 },
           label: { type: "string", minLength: 1, maxLength: 120 },
           description: { type: "string", maxLength: 255 },
+          queueIds: { type: "array", items: { type: "string" } },
         },
       },
       response: {
@@ -1973,6 +2017,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
         key: body.key ?? body.label,
         label: body.label,
         description: body.description,
+        queueIds: body.queueIds,
       });
       return sendSuccess(request, reply, created, 201);
     } catch (err: any) {
@@ -1994,7 +2039,13 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
 
   fastify.put<{
     Params: { tabulacaoId: string };
-    Body: { key?: string; label?: string; description?: string | null; active?: boolean };
+    Body: {
+      key?: string;
+      label?: string;
+      description?: string | null;
+      active?: boolean;
+      queueIds?: string[];
+    };
   }>("/tabulacoes/:tabulacaoId", {
     schema: {
       params: {
@@ -2011,6 +2062,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           label: { type: "string", minLength: 1, maxLength: 120 },
           description: { anyOf: [{ type: "string", maxLength: 255 }, { type: "null" }] },
           active: { type: "boolean" },
+          queueIds: { type: "array", items: { type: "string" } },
         },
       },
       response: {
@@ -3650,18 +3702,71 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
     }
   );
 
+  fastify.get<{
+    Querystring: { conversationId: string };
+  }>(
+    "/agent/tabulacoes-for-close",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          additionalProperties: false,
+          required: ["conversationId"],
+          properties: { conversationId: { type: "string", minLength: 1 } },
+        },
+        response: {
+          200: successEnvelopeSchema({ type: "array", items: tabulacaoSchema }),
+          404: errorEnvelopeSchema([ERROR_CODES.agent.AGENT_CONVERSATION_NOT_FOUND]),
+          500: errorEnvelopeSchema([ERROR_CODES.tabulacoes.TABULACOES_LIST_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      const tenantId = request.tenant.id;
+      const { conversationId } = request.query;
+      const conv = await pool.query<{ metadata: { queue?: string } | null }>(
+        `SELECT metadata FROM agent_conversations WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+        [conversationId, tenantId]
+      );
+      if (!conv.rows[0]) {
+        throw new ApiError(
+          404,
+          ERROR_CODES.agent.AGENT_CONVERSATION_NOT_FOUND,
+          "Conversa não encontrada"
+        );
+      }
+      const queueKey =
+        typeof conv.rows[0].metadata?.queue === "string"
+          ? conv.rows[0].metadata.queue.trim()
+          : null;
+      const rows = await listTabulacoesForConversationClose({ tenantId, queueKey });
+      return sendSuccess(request, reply, rows);
+    }
+  );
+
   fastify.post<{
     Params: { conversationId: string };
+    Body: { tabulacaoId: string };
   }>(
     "/agent/conversations/:conversationId/close",
     {
       schema: {
         params: conversationIdParamSchema,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["tabulacaoId"],
+          properties: { tabulacaoId: { type: "string", minLength: 1 } },
+        },
         response: {
           200: successEnvelopeSchema({
             type: "object",
             additionalProperties: true,
           }),
+          400: errorEnvelopeSchema([
+            ERROR_CODES.agent.TABULACAO_REQUIRED,
+            ERROR_CODES.agent.TABULACAO_NOT_ALLOWED,
+          ]),
           404: errorEnvelopeSchema([ERROR_CODES.agent.AGENT_CONVERSATION_NOT_FOUND]),
           500: errorEnvelopeSchema([ERROR_CODES.agent.AGENT_CONVERSATION_CREATE_FAILED]),
         },
@@ -3674,6 +3779,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           tenantId: request.tenant.id,
           conversationId,
           closedBy: request.user?.name || request.user?.email,
+          tabulacaoId: request.body.tabulacaoId,
         });
         if (!updated) {
           throw new ApiError(
@@ -3685,6 +3791,13 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
         return sendSuccess(request, reply, updated);
       } catch (error) {
         request.log.error(error);
+        if (error instanceof AgentConversationRuleError) {
+          const code =
+            error.code === "TABULACAO_NOT_ALLOWED"
+              ? ERROR_CODES.agent.TABULACAO_NOT_ALLOWED
+              : ERROR_CODES.agent.TABULACAO_REQUIRED;
+          throw new ApiError(400, code, error.message);
+        }
         if (error instanceof ApiError) throw error;
         throw new ApiError(
           500,

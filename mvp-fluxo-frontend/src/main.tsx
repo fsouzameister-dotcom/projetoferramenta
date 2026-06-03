@@ -19,6 +19,7 @@ import UsersAdmin from "./pages/UsersAdmin";
 import AiAdmin from "./pages/AiAdmin";
 import WhatsAppAdmin from "./pages/WhatsAppAdmin";
 import InboundAdmin from "./pages/InboundAdmin";
+import OperationsAdmin from "./pages/OperationsAdmin";
 import Reports from "./pages/Reports";
 import PlatformTenants from "./pages/PlatformTenants";
 import Faq from "./pages/Faq";
@@ -177,6 +178,7 @@ const router = createBrowserRouter([
                   { path: "admin/ai", element: <AiAdmin /> },
                   { path: "admin/whatsapp", element: <WhatsAppAdmin /> },
                   { path: "admin/inbound", element: <InboundAdmin /> },
+                  { path: "admin/operations", element: <OperationsAdmin /> },
                   {
                     path: "admin/platform/tenants",
                     element: <PlatformTenants />,
