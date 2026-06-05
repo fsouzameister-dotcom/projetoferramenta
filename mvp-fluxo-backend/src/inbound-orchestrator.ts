@@ -14,7 +14,7 @@ import {
 } from "./flow-outbound-delivery";
 import type { FlowOutboundMessage } from "./mensagem-outbound";
 import { checkAndRecordBotOutbound } from "./bot-outbound-safeguard";
-import { resolveInboundRoute } from "./inbound-routes";
+import { resolveInboundRoute, resolveInboundRouteByFirstMessage } from "./inbound-routes";
 import { getOutboundWhatsAppContext, WHATSAPP_PROVIDER_CLOUD, WHATSAPP_PROVIDER_TWILIO } from "./whatsapp-channels";
 import { redis } from "./redis";
 
@@ -307,13 +307,26 @@ export async function processInboundMessage(
     freshBotSession = recorded.freshBotSession;
   }
 
-  if (freshBotSession && input.phone?.trim()) {
+  const messageRouteEarly = await resolveInboundRouteByFirstMessage({
+    tenantId: input.tenantId,
+    sourceType: input.sourceType,
+    sourceKey: input.sourceKey,
+    messageText,
+  });
+
+  if ((freshBotSession || messageRouteEarly) && input.phone?.trim()) {
     await clearInboundFlowSessionForPhone(input.tenantId, input.phone);
+    try {
+      await clearSession(input.tenantId, contactKey);
+    } catch {
+      /* ignore */
+    }
   }
 
-  const existingSession = freshBotSession
-    ? null
-    : await loadSession(input.tenantId, contactKey);
+  const existingSession =
+    freshBotSession || messageRouteEarly
+      ? null
+      : await loadSession(input.tenantId, contactKey);
   if (existingSession) {
     const resumeInput: ExecuteFlowInput = {
       startNodeId: existingSession.awaitingInput.nodeId,
@@ -378,11 +391,13 @@ export async function processInboundMessage(
     };
   }
 
-  const route = await resolveInboundRoute({
-    tenantId: input.tenantId,
-    sourceType: input.sourceType,
-    sourceKey: input.sourceKey,
-  });
+  const route =
+    messageRouteEarly ??
+    (await resolveInboundRoute({
+      tenantId: input.tenantId,
+      sourceType: input.sourceType,
+      sourceKey: input.sourceKey,
+    }));
 
   if (!route) {
     return { routed: false, conversationId };

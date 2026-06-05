@@ -7,12 +7,20 @@ import {
   type FlowWaitTimeoutConfig,
 } from "./flow-wait-timeout";
 
+import type {
+  FlowFieldValidationOptions,
+  FlowFieldValidationType,
+} from "./flow-field-validators";
+
 export type ReceberMensagemConfig = {
   variableName: string;
   promptKey: string;
   waitHint: string;
   nextNodeId: string | null;
   waitTimeout: FlowWaitTimeoutConfig;
+  validationType?: FlowFieldValidationType;
+  validationOptions?: FlowFieldValidationOptions;
+  invalidPrompt?: string;
 };
 
 export function parseReceberMensagemConfig(
@@ -41,7 +49,34 @@ export function parseReceberMensagemConfig(
       : null;
 
   const waitTimeout = parseFlowWaitTimeoutConfig(raw);
-  return { variableName, promptKey, waitHint, nextNodeId, waitTimeout };
+  const validationType =
+    typeof raw.validationType === "string"
+      ? (raw.validationType as FlowFieldValidationType)
+      : typeof raw.validation_type === "string"
+        ? (raw.validation_type as FlowFieldValidationType)
+        : undefined;
+  const invalidPrompt =
+    typeof raw.invalidPrompt === "string" && raw.invalidPrompt.trim()
+      ? raw.invalidPrompt.trim()
+      : typeof raw.invalid_prompt === "string" && raw.invalid_prompt.trim()
+        ? raw.invalid_prompt.trim()
+        : undefined;
+  const validationOptions =
+    raw.validationOptions && typeof raw.validationOptions === "object"
+      ? (raw.validationOptions as FlowFieldValidationOptions)
+      : raw.validation_options && typeof raw.validation_options === "object"
+        ? (raw.validation_options as FlowFieldValidationOptions)
+        : undefined;
+  return {
+    variableName,
+    promptKey,
+    waitHint,
+    nextNodeId,
+    waitTimeout,
+    validationType,
+    validationOptions,
+    invalidPrompt,
+  };
 }
 
 /** Config para reutilizar capturar_entrada (modo texto) no executor. */
@@ -58,6 +93,9 @@ export function toCapturarEntradaConfigFromReceber(
     next_node_id_on_timeout: parsed.waitTimeout.nextNodeIdOnTimeout,
     minSelections: 1,
     maxSelections: 1,
+    validationType: parsed.validationType,
+    validationOptions: parsed.validationOptions,
+    invalidPrompt: parsed.invalidPrompt,
   };
 }
 

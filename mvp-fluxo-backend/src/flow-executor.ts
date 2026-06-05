@@ -40,6 +40,8 @@ import {
   cancelFlowWaitSchedule,
   scheduleFlowWaitTimeout,
 } from "./flow-wait-scheduler";
+import { validateFlowField } from "./flow-field-validators";
+import { buildFoxCadastroFormBody } from "./fox-form-mapper";
 
 type FlowNode = {
   id: string;
@@ -231,8 +233,16 @@ async function executeApiCallNode(
     }
   }
 
+  const payloadPreset =
+    typeof config.payloadPreset === "string" ? config.payloadPreset.trim() : "";
+  const bodyEncoding =
+    typeof config.bodyEncoding === "string" ? config.bodyEncoding.trim() : "json";
+
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    "Content-Type":
+      bodyEncoding === "form" || payloadPreset === "fox_cadastro_pf"
+        ? "application/x-www-form-urlencoded"
+        : "application/json",
   };
   const customHeaders = asObject(config.headers);
   for (const [k, v] of Object.entries(customHeaders)) {
@@ -281,7 +291,29 @@ async function executeApiCallNode(
   try {
     const bodyAllowed = ["POST", "PUT", "PATCH", "DELETE"].includes(method);
     const bodyRaw = config.body;
-    const body = bodyAllowed && bodyRaw !== undefined ? JSON.stringify(bodyRaw) : undefined;
+    let body: string | undefined;
+    if (bodyAllowed) {
+      if (payloadPreset === "fox_cadastro_pf") {
+        const hidChave =
+          typeof config.foxHidChave === "string" && config.foxHidChave.trim()
+            ? config.foxHidChave.trim()
+            : "1671438126a22f39582f7c";
+        const hidFormulario = String(
+          variables.fox_hid_formulario ?? variables.hid_formulario ?? config.foxHidFormulario ?? ""
+        );
+        body = buildFoxCadastroFormBody(variables, hidChave, hidFormulario).toString();
+      } else if (bodyEncoding === "form" && bodyRaw !== undefined) {
+        const formObj = asObject(bodyRaw);
+        const params = new URLSearchParams();
+        for (const [k, v] of Object.entries(formObj)) {
+          if (v === undefined || v === null) continue;
+          params.set(k, resolveTemplate(String(v), variables));
+        }
+        body = params.toString();
+      } else if (bodyRaw !== undefined) {
+        body = JSON.stringify(bodyRaw);
+      }
+    }
     const response = await fetch(url, {
       method,
       headers,
@@ -581,8 +613,72 @@ async function executeCapturarEntradaNode(
     };
   }
 
-  const resolved = resolveCapturarEntradaInput(parsed, input.userInput);
-  variables[resolved.variableName] = resolved.value;
+  let resolved;
+  try {
+    resolved = resolveCapturarEntradaInput(parsed, input.userInput);
+  } catch (error) {
+    if (
+      error instanceof ApiError &&
+      error.statusCode === 400 &&
+      (parsed.inputMode === "single_choice" || parsed.inputMode === "multi_choice")
+    ) {
+      const retryPrompt = [
+        parsed.invalidPrompt ||
+          "Não entendi. Por favor, digite apenas o número correspondente à sua resposta.",
+        formatCapturarEntradaPrompt(parsed),
+      ].join("\n\n");
+      const awaiting = buildCapturarEntradaAwaiting(node.id, parsed);
+      return {
+        nextNodeId: null,
+        awaitingInput: {
+          ...awaiting,
+          prompt: retryPrompt,
+          awaitingStartedAt: input.awaitingStartedAt ?? new Date().toISOString(),
+        },
+        capturedMessage: retryPrompt,
+        details: { validationFailed: true, inputMode: parsed.inputMode },
+      };
+    }
+    throw error;
+  }
+
+  if (parsed.inputMode === "text" && parsed.validationType) {
+    const rawText = Array.isArray(resolved.value)
+      ? resolved.value.join(", ")
+      : String(resolved.value);
+    const validated = validateFlowField(
+      parsed.validationType,
+      rawText,
+      parsed.validationOptions ?? {}
+    );
+    if (!validated.ok) {
+      const retryPrompt = [
+        parsed.invalidPrompt || validated.reason,
+        parsed.prompt,
+      ].join("\n\n");
+      const awaiting = buildCapturarEntradaAwaiting(node.id, parsed);
+      return {
+        nextNodeId: null,
+        awaitingInput: {
+          ...awaiting,
+          prompt: retryPrompt,
+          awaitingStartedAt: input.awaitingStartedAt ?? new Date().toISOString(),
+        },
+        capturedMessage: retryPrompt,
+        details: {
+          validationFailed: true,
+          validationType: parsed.validationType,
+          reason: validated.reason,
+        },
+      };
+    }
+    variables[resolved.variableName] = validated.normalized;
+    if (validated.rawAccepted) {
+      variables[`${resolved.variableName}_raw`] = validated.rawAccepted;
+    }
+  } else {
+    variables[resolved.variableName] = resolved.value;
+  }
   variables[`${resolved.variableName}_labels`] = resolved.selectedOptions.map((o) => o.label);
   variables[`${resolved.variableName}_options`] = resolved.selectedOptions;
 

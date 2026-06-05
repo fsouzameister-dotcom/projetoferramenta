@@ -1,4 +1,5 @@
 import { pool } from "./db";
+import { matchesInboundTrigger } from "./flow-field-validators";
 import { WHATSAPP_PROVIDER_TWILIO } from "./whatsapp-channels";
 
 export const INBOUND_SOURCE_TYPES = [
@@ -128,6 +129,64 @@ export async function resolveInboundRoute(input: {
       if (fallbackRow) {
         return { ...fallbackRow, metadata: (fallbackRow.metadata as Record<string, unknown>) ?? {} };
       }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Roteia pela primeira mensagem quando a rota tem metadata.message_triggers.
+ * Ex.: ["cadastrar-se"] → Fluxo Fox Pesquisas.
+ */
+export async function resolveInboundRouteByFirstMessage(input: {
+  tenantId: string;
+  sourceType: string;
+  sourceKey: string;
+  messageText: string;
+}): Promise<InboundEntryRouteRow | null> {
+  await ensureSchema();
+  const messageText = input.messageText?.trim();
+  if (!messageText) return null;
+
+  const sourceType = input.sourceType.trim();
+  const sourceKey = input.sourceKey.trim();
+  if (!sourceType || !sourceKey) return null;
+
+  const candidates = await pool.query<InboundEntryRouteRow>(
+    `SELECT id, tenant_id, label, source_type, source_key, flow_id, active,
+            metadata, created_at::text, updated_at::text
+     FROM inbound_entry_routes
+     WHERE tenant_id = $1
+       AND source_type = $2
+       AND active = true
+       AND jsonb_array_length(COALESCE(metadata->'message_triggers', '[]'::jsonb)) > 0
+     ORDER BY updated_at DESC`,
+    [input.tenantId, sourceType]
+  );
+
+  const incomingDigits =
+    sourceType === WHATSAPP_PROVIDER_TWILIO ? twilioRoutePhoneDigits(sourceKey) : "";
+
+  for (const row of candidates.rows) {
+    const meta = (row.metadata as Record<string, unknown>) ?? {};
+    const triggers = Array.isArray(meta.message_triggers)
+      ? meta.message_triggers.map((t) => String(t))
+      : [];
+    if (!triggers.length || !matchesInboundTrigger(messageText, triggers)) {
+      continue;
+    }
+
+    const routeKey = row.source_key.trim();
+    const routeDigits =
+      sourceType === WHATSAPP_PROVIDER_TWILIO ? twilioRoutePhoneDigits(routeKey) : "";
+    const sameChannel =
+      routeKey === sourceKey ||
+      (incomingDigits && routeDigits && incomingDigits === routeDigits) ||
+      meta.match_any_source_key === true;
+
+    if (sameChannel) {
+      return { ...row, metadata: meta };
     }
   }
 

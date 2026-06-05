@@ -1,4 +1,9 @@
 import { ApiError, ERROR_CODES } from "./http";
+import {
+  validateFlowField,
+  type FlowFieldValidationOptions,
+  type FlowFieldValidationType,
+} from "./flow-field-validators";
 
 export type CaptureInputMode = "text" | "single_choice" | "multi_choice";
 
@@ -72,6 +77,9 @@ export function parseCapturarEntradaConfig(
   minSelections: number;
   maxSelections: number;
   variableName: string;
+  validationType?: FlowFieldValidationType;
+  validationOptions?: FlowFieldValidationOptions;
+  invalidPrompt?: string;
 } {
   const config = asObject(raw);
   const prompt =
@@ -121,6 +129,22 @@ export function parseCapturarEntradaConfig(
     typeof config.variableName === "string" && config.variableName.trim()
       ? config.variableName.trim()
       : `resposta_${promptKey}`;
+  const validationType =
+    typeof config.validationType === "string"
+      ? (config.validationType as FlowFieldValidationType)
+      : undefined;
+  const invalidPrompt =
+    typeof config.invalidPrompt === "string" && config.invalidPrompt.trim()
+      ? config.invalidPrompt.trim()
+      : typeof config.invalid_prompt === "string" && config.invalid_prompt.trim()
+        ? config.invalid_prompt.trim()
+        : undefined;
+  const validationOptions =
+    config.validationOptions && typeof config.validationOptions === "object"
+      ? (config.validationOptions as FlowFieldValidationOptions)
+      : config.validation_options && typeof config.validation_options === "object"
+        ? (config.validation_options as FlowFieldValidationOptions)
+        : undefined;
 
   return {
     ...config,
@@ -131,6 +155,9 @@ export function parseCapturarEntradaConfig(
     minSelections,
     maxSelections: inputMode === "multi_choice" ? Math.max(maxSelections, minSelections) : 1,
     variableName,
+    validationType,
+    validationOptions,
+    invalidPrompt,
     next_node_id:
       typeof config.next_node_id === "string" ? config.next_node_id : undefined,
   };
