@@ -212,6 +212,29 @@ export async function executeConversaNode(
     conversationId: input.conversationId,
   });
 
+  const transitionTarget = transition.nextNodeId
+    ? input.nodes.find((n) => n.id === transition.nextNodeId)
+    : undefined;
+  const deferReplyToConversaTarget =
+    Boolean(transition.transitionId) &&
+    transition.nextNodeId !== null &&
+    transition.nextNodeId !== input.currentNode.id &&
+    transitionTarget?.type === "conversa";
+
+  if (deferReplyToConversaTarget) {
+    return {
+      message: null,
+      nextNodeId: transition.nextNodeId,
+      awaitingInput: false,
+      details: {
+        executionMode: "rigid",
+        transitionId: transition.transitionId,
+        transitionReason: transition.reason,
+        deferredReply: true,
+      },
+    };
+  }
+
   const systemPrompt = await buildFlowSystemPrompt({
     settings,
     globalNodes,

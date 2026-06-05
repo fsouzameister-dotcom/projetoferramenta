@@ -989,36 +989,45 @@ export async function executeFlow(
       if (conversaResult.message) {
         messages.push(conversaResult.message);
         outboundMessages.push({ kind: "text", body: conversaResult.message });
-        if (conversaResult.nextNodeId) {
+      }
+
+      if (conversaResult.nextNodeId) {
+        const deferredToConversa = conversaResult.details?.deferredReply === true;
+        if (deferredToConversa) {
+          captureInputConsumed = false;
+        } else {
           flowUserInput = undefined;
           delete variables.last_user_message;
           delete variables.user_message;
-          nextNodeId = conversaResult.nextNodeId;
-          details = conversaResult.details;
-          trace.push({
-            nodeId: currentNode.id,
-            nodeType: currentNode.type,
-            nodeName: currentNode.name,
-            nextNodeId,
-            details,
-          });
-          currentNode = nodesById.get(nextNodeId);
-          if (!currentNode) {
-            return {
-              flowId,
-              status: "stopped",
-              stopReason: `Próximo node não encontrado: ${nextNodeId}`,
-              visitedNodeIds,
-              currentNodeId: null,
-              messages,
-              outboundMessages,
-              variables,
-              trace,
-              ...(lastResponseEventId ? { lastResponseEventId } : {}),
-            };
-          }
-          continue;
         }
+        nextNodeId = conversaResult.nextNodeId;
+        details = conversaResult.details;
+        trace.push({
+          nodeId: currentNode.id,
+          nodeType: currentNode.type,
+          nodeName: currentNode.name,
+          nextNodeId,
+          details,
+        });
+        currentNode = nodesById.get(nextNodeId);
+        if (!currentNode) {
+          return {
+            flowId,
+            status: "stopped",
+            stopReason: `Próximo node não encontrado: ${nextNodeId}`,
+            visitedNodeIds,
+            currentNodeId: null,
+            messages,
+            outboundMessages,
+            variables,
+            trace,
+            ...(lastResponseEventId ? { lastResponseEventId } : {}),
+          };
+        }
+        continue;
+      }
+
+      if (conversaResult.message) {
         trace.push({
           nodeId: currentNode.id,
           nodeType: currentNode.type,
