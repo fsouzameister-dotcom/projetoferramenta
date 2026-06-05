@@ -4,6 +4,22 @@ import InfoTooltip from "~components/InfoTooltip";
 
 type FlowRow = { id: string; name: string; channel: string };
 
+type WhatsAppChannel = {
+  id: string;
+  label: string;
+  provider: string;
+  twilio_account_sid?: string | null;
+  phone_numbers: Array<{
+    display_phone_number?: string | null;
+    phone_number_id: string;
+  }>;
+};
+
+function buildTwilioSourceKey(accountSid: string, phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  return `twilio:${accountSid.trim()}:${digits}`;
+}
+
 type InboundRoute = {
   id: string;
   label: string;
@@ -39,6 +55,7 @@ export default function InboundAdmin() {
 
   const [routes, setRoutes] = useState<InboundRoute[]>([]);
   const [flows, setFlows] = useState<FlowRow[]>([]);
+  const [whatsappChannels, setWhatsappChannels] = useState<WhatsAppChannel[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,15 +77,33 @@ export default function InboundAdmin() {
 
   const sourceKeyPlaceholder = SOURCE_KEY_HINTS[form.sourceType] ?? "chave_da_origem";
 
+  const twilioKeyOptions = useMemo(() => {
+    const options: Array<{ label: string; value: string }> = [];
+    for (const channel of whatsappChannels) {
+      if (channel.provider !== "twilio_whatsapp" || !channel.twilio_account_sid) continue;
+      for (const phone of channel.phone_numbers) {
+        const display = phone.display_phone_number?.trim() || phone.phone_number_id;
+        const value = buildTwilioSourceKey(channel.twilio_account_sid, display);
+        options.push({
+          label: `${channel.label} — ${display}`,
+          value,
+        });
+      }
+    }
+    return options;
+  }, [whatsappChannels]);
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [routesRes, flowsRes] = await Promise.all([
+      const [routesRes, flowsRes, channelsRes] = await Promise.all([
         api.get("/inbound/routes"),
         api.get("/flows"),
+        api.get("/whatsapp/channels"),
       ]);
       setRoutes(unwrapApiData<InboundRoute[]>(routesRes.data));
       setFlows(unwrapApiData<FlowRow[]>(flowsRes.data));
+      setWhatsappChannels(unwrapApiData<WhatsAppChannel[]>(channelsRes.data));
       setError(null);
     } catch (err) {
       setError(getApiErrorMessage(err, "Erro ao carregar rotas de entrada"));
@@ -218,13 +253,35 @@ export default function InboundAdmin() {
             </option>
           ))}
         </select>
-        <input
-          className="border rounded-lg px-3 py-2 text-gray-900"
-          placeholder={sourceKeyPlaceholder}
-          value={form.sourceKey}
-          onChange={(e) => setForm((p) => ({ ...p, sourceKey: e.target.value }))}
-          required
-        />
+        {form.sourceType === "twilio_whatsapp" && twilioKeyOptions.length > 0 ? (
+          <select
+            className="border rounded-lg px-3 py-2 text-gray-900"
+            value={form.sourceKey}
+            onChange={(e) => setForm((p) => ({ ...p, sourceKey: e.target.value }))}
+            required
+          >
+            <option value="">Selecione o número Twilio</option>
+            {twilioKeyOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            className="border rounded-lg px-3 py-2 text-gray-900"
+            placeholder={sourceKeyPlaceholder}
+            value={form.sourceKey}
+            onChange={(e) => setForm((p) => ({ ...p, sourceKey: e.target.value }))}
+            required
+          />
+        )}
+        {form.sourceType === "twilio_whatsapp" ? (
+          <p className="text-xs text-gray-500 md:col-span-2">
+            A chave deve seguir o formato <code className="bg-gray-100 px-1 rounded">twilio:ACxxxx:5511...</code>.
+            O webhook Twilio envia essa chave completa; só o número sem prefixo não casa com a rota.
+          </p>
+        ) : null}
         <select
           className="border rounded-lg px-3 py-2 text-gray-900 md:col-span-2"
           value={form.flowId}

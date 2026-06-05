@@ -1,4 +1,5 @@
 import { pool } from "./db";
+import { WHATSAPP_PROVIDER_TWILIO } from "./whatsapp-channels";
 
 export const INBOUND_SOURCE_TYPES = [
   "whatsapp_meta",
@@ -81,7 +82,7 @@ export async function resolveInboundRoute(input: {
   const sourceType = input.sourceType.trim();
   if (!sourceKey || !sourceType) return null;
 
-  const result = await pool.query<InboundEntryRouteRow>(
+  const exact = await pool.query<InboundEntryRouteRow>(
     `SELECT id, tenant_id, label, source_type, source_key, flow_id, active,
             metadata, created_at::text, updated_at::text
      FROM inbound_entry_routes
@@ -92,9 +93,45 @@ export async function resolveInboundRoute(input: {
      LIMIT 1`,
     [input.tenantId, sourceType, sourceKey]
   );
-  const row = result.rows[0];
-  if (!row) return null;
-  return { ...row, metadata: (row.metadata as Record<string, unknown>) ?? {} };
+  const exactRow = exact.rows[0];
+  if (exactRow) {
+    return { ...exactRow, metadata: (exactRow.metadata as Record<string, unknown>) ?? {} };
+  }
+
+  if (sourceType === WHATSAPP_PROVIDER_TWILIO) {
+    const incomingDigits = twilioRoutePhoneDigits(sourceKey);
+    if (incomingDigits) {
+      const fallback = await pool.query<InboundEntryRouteRow>(
+        `SELECT id, tenant_id, label, source_type, source_key, flow_id, active,
+                metadata, created_at::text, updated_at::text
+         FROM inbound_entry_routes
+         WHERE tenant_id = $1
+           AND source_type = $2
+           AND active = true
+           AND (
+             source_key = $3
+             OR regexp_replace(
+                  CASE
+                    WHEN source_key ~* '^twilio:' THEN regexp_replace(source_key, '^twilio:[^:]+:', '')
+                    ELSE source_key
+                  END,
+                  '[^0-9]', '', 'g'
+                ) = $3
+           )
+         ORDER BY
+           CASE WHEN source_key = $4 THEN 0 ELSE 1 END,
+           updated_at DESC
+         LIMIT 1`,
+        [input.tenantId, sourceType, incomingDigits, sourceKey]
+      );
+      const fallbackRow = fallback.rows[0];
+      if (fallbackRow) {
+        return { ...fallbackRow, metadata: (fallbackRow.metadata as Record<string, unknown>) ?? {} };
+      }
+    }
+  }
+
+  return null;
 }
 
 export async function createInboundRoute(input: {
@@ -109,13 +146,16 @@ export async function createInboundRoute(input: {
   await ensureSchema();
   const label = input.label.trim();
   const sourceType = input.sourceType.trim();
-  const sourceKey = input.sourceKey.trim();
+  let sourceKey = input.sourceKey.trim();
   const flowId = input.flowId.trim();
   if (!label || !sourceType || !sourceKey || !flowId) {
     throw new Error("VALIDATION");
   }
   if (!INBOUND_SOURCE_TYPES.includes(sourceType as InboundSourceType)) {
     throw new Error("INVALID_SOURCE_TYPE");
+  }
+  if (sourceType === WHATSAPP_PROVIDER_TWILIO) {
+    sourceKey = await normalizeTwilioSourceKeyForTenant(input.tenantId, sourceKey);
   }
 
   try {
@@ -164,10 +204,23 @@ export async function updateInboundRoute(
 
   const label = data.label?.trim();
   const sourceType = data.sourceType?.trim();
-  const sourceKey = data.sourceKey?.trim();
+  let sourceKey = data.sourceKey?.trim();
   const flowId = data.flowId?.trim();
   if (sourceType && !INBOUND_SOURCE_TYPES.includes(sourceType as InboundSourceType)) {
     throw new Error("INVALID_SOURCE_TYPE");
+  }
+  if (sourceKey && (sourceType === WHATSAPP_PROVIDER_TWILIO || !sourceType)) {
+    const effectiveType =
+      sourceType ??
+      (
+        await pool.query<{ source_type: string }>(
+          `SELECT source_type FROM inbound_entry_routes WHERE id = $1 AND tenant_id = $2`,
+          [routeId, tenantId]
+        )
+      ).rows[0]?.source_type;
+    if (effectiveType === WHATSAPP_PROVIDER_TWILIO) {
+      sourceKey = await normalizeTwilioSourceKeyForTenant(tenantId, sourceKey);
+    }
   }
 
   try {
@@ -221,4 +274,45 @@ export function whatsAppMetaSourceKey(phoneNumberId: string): string {
 export function whatsAppTwilioSourceKey(accountSid: string, toWhatsApp: string): string {
   const digits = toWhatsApp.replace(/\D/g, "");
   return `twilio:${accountSid.trim()}:${digits}`;
+}
+
+/** Extrai só os dígitos do número WhatsApp de uma chave Twilio (com ou sem prefixo). */
+export function twilioRoutePhoneDigits(sourceKey: string): string {
+  const trimmed = sourceKey.trim();
+  if (!trimmed) return "";
+  const prefixed = trimmed.match(/^twilio:[^:]+:(\d+)$/i);
+  if (prefixed) return prefixed[1];
+  return trimmed.replace(/\D/g, "");
+}
+
+async function normalizeTwilioSourceKeyForTenant(
+  tenantId: string,
+  sourceKey: string
+): Promise<string> {
+  const trimmed = sourceKey.trim();
+  if (!trimmed || /^twilio:/i.test(trimmed)) return trimmed;
+
+  const digits = twilioRoutePhoneDigits(trimmed);
+  if (!digits) return trimmed;
+
+  const result = await pool.query<{ twilio_account_sid: string }>(
+    `SELECT ws.twilio_account_sid
+     FROM whatsapp_channel_accounts wca
+     JOIN whatsapp_channel_secrets ws ON ws.channel_account_id = wca.id
+     JOIN whatsapp_phone_numbers wpn ON wpn.channel_account_id = wca.id
+     WHERE wca.tenant_id = $1
+       AND wca.provider = $2
+       AND ws.twilio_account_sid IS NOT NULL
+       AND (
+         regexp_replace(coalesce(wpn.display_phone_number, ''), '[^0-9]', '', 'g') = $3
+         OR regexp_replace(wpn.phone_number_id, '[^0-9]', '', 'g') = $3
+       )
+     ORDER BY wca.created_at ASC
+     LIMIT 1`,
+    [tenantId, WHATSAPP_PROVIDER_TWILIO, digits]
+  );
+
+  const accountSid = result.rows[0]?.twilio_account_sid?.trim();
+  if (!accountSid) return trimmed;
+  return whatsAppTwilioSourceKey(accountSid, digits);
 }
