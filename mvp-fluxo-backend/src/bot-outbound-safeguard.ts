@@ -5,9 +5,6 @@ import { phoneDigitsOnly } from "./agent-conversations";
 
 /** Mesmo texto para o mesmo número — não reenviar. */
 const DEDUP_WINDOW_SEC = 10 * 60;
-/** Rate por contato. */
-const MAX_PER_MINUTE = 5;
-const MAX_PER_HOUR = 15;
 /** Circuit breaker: mesmo texto + mesmo número. */
 const CIRCUIT_SAME_PHONE_COUNT = 5;
 const CIRCUIT_SAME_PHONE_WINDOW_SEC = 5 * 60;
@@ -73,14 +70,6 @@ function normalizeOutboundBody(body: string): string {
 function bodyHash(body: string): string {
   const normalized = normalizeOutboundBody(body);
   return createHash("sha256").update(normalized).digest("hex").slice(0, 16);
-}
-
-function minuteKey(tenantId: string, phone: string): string {
-  return `bot:rate:min:${tenantId}:${phone}`;
-}
-
-function hourKey(tenantId: string, phone: string): string {
-  return `bot:rate:hour:${tenantId}:${phone}`;
 }
 
 function dedupKey(tenantId: string, phone: string, hash: string): string {
@@ -253,24 +242,6 @@ export async function checkAndRecordBotOutbound(input: {
       };
     }
 
-    const minCount = Number(await redis.get(minuteKey(input.tenantId, phone))) || 0;
-    if (minCount >= MAX_PER_MINUTE) {
-      return {
-        allowed: false,
-        reason: `Limite de ${MAX_PER_MINUTE} mensagens do bot por minuto para este contato.`,
-        code: "RATE_MINUTE",
-      };
-    }
-
-    const hourCount = Number(await redis.get(hourKey(input.tenantId, phone))) || 0;
-    if (hourCount >= MAX_PER_HOUR) {
-      return {
-        allowed: false,
-        reason: `Limite de ${MAX_PER_HOUR} mensagens do bot por hora para este contato.`,
-        code: "RATE_HOUR",
-      };
-    }
-
     const samePhoneKey = samePhoneTextKey(input.tenantId, phone, hash);
     const samePhoneCount = Number(await redis.get(samePhoneKey)) || 0;
     if (samePhoneCount >= CIRCUIT_SAME_PHONE_COUNT) {
@@ -300,8 +271,6 @@ export async function checkAndRecordBotOutbound(input: {
     }
 
     await redis.set(dedupKey(input.tenantId, phone, hash), "1", "EX", DEDUP_WINDOW_SEC);
-    await incrWithTtl(minuteKey(input.tenantId, phone), 60);
-    await incrWithTtl(hourKey(input.tenantId, phone), 3600);
     await incrWithTtl(samePhoneKey, CIRCUIT_SAME_PHONE_WINDOW_SEC);
     await redis.sadd(phonesKey, phone);
     await redis.expire(phonesKey, CIRCUIT_MULTI_PHONE_WINDOW_SEC);

@@ -103,8 +103,8 @@ export default function BotSafeguardPanel({ variant = "dashboard" }: Props) {
       {!paused && !loading ? (
         <ul className="text-xs text-gray-500 mt-3 space-y-1 list-disc list-inside">
           <li>Bloqueia texto repetido para o mesmo número (10 min)</li>
-          <li>Limite de 5 mensagens bot/min e 15/hora por contato</li>
-          <li>Circuit breaker pausa o tenant se detectar padrão de spam</li>
+          <li>Mensagens diferentes no mesmo fluxo não têm limite de volume</li>
+          <li>Circuit breaker pausa o tenant se detectar padrão de spam (texto igual)</li>
         </ul>
       ) : null}
     </div>
