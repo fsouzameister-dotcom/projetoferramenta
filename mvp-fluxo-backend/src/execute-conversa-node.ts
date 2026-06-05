@@ -24,6 +24,8 @@ export type ExecuteConversaInput = {
   nodes: FlowNodeLite[];
   variables: Record<string, unknown>;
   userInput?: string | string[];
+  /** Após transição automática entre nodes Conversa, não reutilizar last_user_message. */
+  freshStage?: boolean;
   conversationId?: string;
   resolveTemplate: (text: string) => string;
 };
@@ -37,12 +39,14 @@ export type ExecuteConversaResult = {
 
 function userMessageFromInput(
   userInput: string | string[] | undefined,
-  variables: Record<string, unknown>
+  variables: Record<string, unknown>,
+  freshStage?: boolean
 ): string {
   if (typeof userInput === "string" && userInput.trim()) return userInput.trim();
   if (Array.isArray(userInput) && userInput.length) {
     return userInput.map(String).join(", ");
   }
+  if (freshStage) return "";
   const fromVar = variables.last_user_message ?? variables.user_message;
   if (typeof fromVar === "string" && fromVar.trim()) return fromVar.trim();
   return "";
@@ -67,7 +71,11 @@ export async function executeConversaNode(
     );
   }
 
-  const userMsg = userMessageFromInput(input.userInput, input.variables);
+  const userMsg = userMessageFromInput(
+    input.userInput,
+    input.variables,
+    input.freshStage
+  );
   const chatHistory =
     input.conversationId && userMsg
       ? await loadConversationHistoryForAi({

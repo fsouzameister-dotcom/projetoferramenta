@@ -968,6 +968,8 @@ export async function executeFlow(
       if (!captureInputConsumed && flowUserInput !== undefined) {
         captureInputConsumed = true;
       }
+      const conversaFreshStage =
+        captureInputConsumed && flowUserInput === undefined;
       const conversaResult = await executeConversaNode({
         tenantId,
         flowId,
@@ -980,6 +982,7 @@ export async function executeFlow(
         nodes: allNodesLite,
         variables,
         userInput: conversaInput.userInput,
+        freshStage: conversaFreshStage,
         conversationId: input.conversationId,
         resolveTemplate: (text) => resolveTemplate(text, variables),
       });
@@ -988,6 +991,8 @@ export async function executeFlow(
         outboundMessages.push({ kind: "text", body: conversaResult.message });
         if (conversaResult.nextNodeId) {
           flowUserInput = undefined;
+          delete variables.last_user_message;
+          delete variables.user_message;
           nextNodeId = conversaResult.nextNodeId;
           details = conversaResult.details;
           trace.push({

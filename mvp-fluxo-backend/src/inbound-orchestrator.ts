@@ -19,6 +19,8 @@ const SESSION_PREFIX = "inbound:flow:session:";
 const CLAIM_PREFIX = "inbound:flow:claim:";
 const SESSION_TTL_SEC = 60 * 60 * 24; // 24h
 const CLAIM_TTL_SEC = 60 * 60 * 24; // 24h
+/** Limite de textos enviados por um único inbound (evita rajada por bug de fluxo). */
+const MAX_OUTBOUND_PER_INBOUND = 3;
 
 export type InboundProcessInput = {
   tenantId: string;
@@ -158,7 +160,13 @@ async function deliverOutboundIfWhatsApp(input: {
   const sendCtx = buildWhatsAppSendContext(waCtx);
   if (!sendCtx) return;
   const toDigits = phoneDigitsOnly(input.phone);
-  for (const outbound of queue) {
+  const capped = queue.slice(0, MAX_OUTBOUND_PER_INBOUND);
+  if (queue.length > capped.length) {
+    console.warn(
+      `[inbound] outbound truncado ${queue.length} -> ${capped.length} para ${toDigits}`
+    );
+  }
+  for (const outbound of capped) {
     const guard = await checkAndRecordBotOutbound({
       tenantId: input.tenantId,
       toPhone: toDigits,

@@ -46,7 +46,6 @@ else
 fi
 if ! "${{PSQL[@]}}" -c 'SELECT 1' >/dev/null 2>&1; then
   echo 'ERRO: nao conectou ao postgres'
-  grep -E '^[A-Z_]+=' /opt/mvp-fluxo-backend/.env | cut -d= -f1 | head -20
   exit 1
 fi
 PHONE='{PHONE_DIGITS}'
@@ -55,60 +54,65 @@ echo '=== CONVERSAS (phone ~ %PHONE%) ==='
 SELECT id, tenant_id, contact_name, phone, status, lifecycle_status,
        closed_at, closed_by, last_customer_message_at, window_expires_at,
        protocol_number, tabulacao_label, closure_message_status, updated_at,
-       metadata::text
+       left(metadata::text, 200) AS metadata_preview
 FROM agent_conversations
 WHERE regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') LIKE '%' || '$PHONE' || '%'
 ORDER BY updated_at DESC
 LIMIT 5;
 "
-echo '=== ULTIMAS MENSAGENS ==='
+echo '=== ULTIMAS MENSAGENS (40) ==='
 "${{PSQL[@]}}" -c "
 SELECT m.created_at, m.direction, m.delivery_status,
-       left(coalesce(m.text_content, m.type), 100) AS preview,
+       left(coalesce(m.text_content, m.type), 120) AS preview,
+       m.provider_message_id,
        m.sender_name
 FROM agent_messages m
 JOIN agent_conversations c ON c.id = m.conversation_id
 WHERE regexp_replace(coalesce(c.phone, ''), '[^0-9]', '', 'g') LIKE '%' || '$PHONE' || '%'
 ORDER BY m.created_at DESC
-LIMIT 12;
+LIMIT 40;
 "
-echo '=== STATUS AGRUPADO (este telefone) ==='
+echo '=== BURST OUTBOUND (mesmo segundo, >1 msg) ==='
 "${{PSQL[@]}}" -c "
-SELECT status, lifecycle_status, count(*) AS n
-FROM agent_conversations
-WHERE regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') LIKE '%' || '$PHONE' || '%'
-GROUP BY status, lifecycle_status
-ORDER BY n DESC;
+SELECT date_trunc('second', m.created_at) AS ts, count(*) AS n,
+       array_agg(left(m.text_content, 80) ORDER BY m.created_at) AS previews
+FROM agent_messages m
+JOIN agent_conversations c ON c.id = m.conversation_id
+WHERE regexp_replace(coalesce(c.phone, ''), '[^0-9]', '', 'g') LIKE '%' || '$PHONE' || '%'
+  AND m.direction = 'out'
+  AND m.created_at > now() - interval '48 hours'
+GROUP BY 1
+HAVING count(*) > 1
+ORDER BY ts DESC
+LIMIT 20;
 "
-echo '=== CONVERSAS em_espera AGORA (qualquer telefone, tenant dev) ==='
+echo '=== DUPLICATAS EXATAS (texto igual, 48h) ==='
 "${{PSQL[@]}}" -c "
-SELECT phone, contact_name, status, lifecycle_status, updated_at
-FROM agent_conversations
-WHERE tenant_id = '00000000-0000-4000-8000-000000000001'
-  AND status = 'em_espera'
-ORDER BY updated_at DESC
-LIMIT 8;
+SELECT left(m.text_content, 100) AS preview, count(*) AS n,
+       min(m.created_at) AS first_at, max(m.created_at) AS last_at
+FROM agent_messages m
+JOIN agent_conversations c ON c.id = m.conversation_id
+WHERE regexp_replace(coalesce(c.phone, ''), '[^0-9]', '', 'g') LIKE '%' || '$PHONE' || '%'
+  AND m.direction = 'out'
+  AND m.created_at > now() - interval '48 hours'
+  AND coalesce(m.text_content, '') <> ''
+GROUP BY m.text_content
+HAVING count(*) > 1
+ORDER BY n DESC, last_at DESC
+LIMIT 15;
 "
-echo '=== DEPLOY (fix isClosedLifecycle) ==='
-if grep -q isClosedLifecycle /opt/mvp-fluxo-backend/dist/agent-conversations.js 2>/dev/null; then
-  echo 'fix_present=yes'
-else
-  echo 'fix_present=no'
-fi
-ls -la /opt/mvp-fluxo-backend/dist/agent-conversations.js 2>/dev/null | head -1
+echo '=== LOGS TWILIO INBOUND (2h) ==='
+journalctl -u mvp-backend --since '2 hours ago' --no-pager 2>/dev/null | grep -i twilio | grep -i messages | tail -n 30 || echo '(sem journal)'
 """
 
-    stdin, stdout, stderr = client.exec_command("bash -s", timeout=90)
-    stdin.write(remote_script)
-    stdin.channel.shutdown_write()
+    stdin, stdout, stderr = client.exec_command(remote_script, timeout=120)
     out = stdout.read().decode("utf-8", errors="replace")
     err = stderr.read().decode("utf-8", errors="replace")
-    code = stdout.channel.recv_exit_status()
     client.close()
     print(out)
     if err.strip():
-        print("stderr:", err, file=sys.stderr)
-    return code
+        print("stderr:", err)
+    return 0
 
 
 if __name__ == "__main__":
