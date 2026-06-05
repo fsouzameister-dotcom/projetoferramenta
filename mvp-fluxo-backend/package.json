@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "test": "tsx --test test/*.test.ts",
     "seed:dev": "tsx scripts/seed-dev-admin.ts",
+    "seed:cleo-flow": "tsx scripts/seed-flow-cleo-apresentacao.ts",
     "migrate": "tsx scripts/migrate.ts"
   },
   "keywords": [],

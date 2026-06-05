@@ -668,6 +668,7 @@ export async function executeFlow(
   let steps = 0;
   let lastResponseEventId: string | undefined;
   let captureInputConsumed = false;
+  let flowUserInput: string | string[] | undefined = input.userInput;
   const allNodesLite = nodes.map((n) => ({
     id: n.id,
     type: n.type,
@@ -680,10 +681,10 @@ export async function executeFlow(
     visitedNodeIds.push(currentNode.id);
     const config = asObject(currentNode.config);
 
-    if (input.userInput !== undefined && !captureInputConsumed) {
-      variables.last_user_message = Array.isArray(input.userInput)
-        ? input.userInput.join(", ")
-        : String(input.userInput);
+    if (flowUserInput !== undefined && !captureInputConsumed) {
+      variables.last_user_message = Array.isArray(flowUserInput)
+        ? flowUserInput.join(", ")
+        : String(flowUserInput);
     }
 
     let nextNodeId: string | null = null;
@@ -725,7 +726,7 @@ export async function executeFlow(
       };
       const captureInput: ExecuteFlowInput = captureInputConsumed
         ? { ...input, userInput: undefined }
-        : input;
+        : { ...input, userInput: flowUserInput };
       const captureResult = await executeCapturarEntradaNode(
         syntheticNode,
         capturarConfig,
@@ -734,8 +735,9 @@ export async function executeFlow(
         tenantId,
         captureInput
       );
-      if (!captureResult.awaitingInput && input.userInput !== undefined) {
+      if (!captureResult.awaitingInput && flowUserInput !== undefined) {
         captureInputConsumed = true;
+        flowUserInput = undefined;
       }
       if (captureResult.capturedMessage) {
         messages.push(captureResult.capturedMessage);
@@ -790,7 +792,7 @@ export async function executeFlow(
     } else if (currentNode.type === "capturar_entrada") {
       const captureInput: ExecuteFlowInput = captureInputConsumed
         ? { ...input, userInput: undefined }
-        : input;
+        : { ...input, userInput: flowUserInput };
       const captureResult = await executeCapturarEntradaNode(
         currentNode,
         config,
@@ -799,8 +801,9 @@ export async function executeFlow(
         tenantId,
         captureInput
       );
-      if (!captureResult.awaitingInput && input.userInput !== undefined) {
+      if (!captureResult.awaitingInput && flowUserInput !== undefined) {
         captureInputConsumed = true;
+        flowUserInput = undefined;
       }
       if (captureResult.capturedMessage) {
         messages.push(captureResult.capturedMessage);
@@ -961,8 +964,8 @@ export async function executeFlow(
     } else if (currentNode.type === "conversa") {
       const conversaInput: ExecuteFlowInput = captureInputConsumed
         ? { ...input, userInput: undefined }
-        : input;
-      if (!captureInputConsumed && input.userInput !== undefined) {
+        : { ...input, userInput: flowUserInput };
+      if (!captureInputConsumed && flowUserInput !== undefined) {
         captureInputConsumed = true;
       }
       const conversaResult = await executeConversaNode({
@@ -983,6 +986,34 @@ export async function executeFlow(
       if (conversaResult.message) {
         messages.push(conversaResult.message);
         outboundMessages.push({ kind: "text", body: conversaResult.message });
+        if (conversaResult.nextNodeId) {
+          flowUserInput = undefined;
+          nextNodeId = conversaResult.nextNodeId;
+          details = conversaResult.details;
+          trace.push({
+            nodeId: currentNode.id,
+            nodeType: currentNode.type,
+            nodeName: currentNode.name,
+            nextNodeId,
+            details,
+          });
+          currentNode = nodesById.get(nextNodeId);
+          if (!currentNode) {
+            return {
+              flowId,
+              status: "stopped",
+              stopReason: `Próximo node não encontrado: ${nextNodeId}`,
+              visitedNodeIds,
+              currentNodeId: null,
+              messages,
+              outboundMessages,
+              variables,
+              trace,
+              ...(lastResponseEventId ? { lastResponseEventId } : {}),
+            };
+          }
+          continue;
+        }
         trace.push({
           nodeId: currentNode.id,
           nodeType: currentNode.type,
