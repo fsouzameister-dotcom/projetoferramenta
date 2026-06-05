@@ -484,6 +484,8 @@ Resumo (prioridade sujeita a revisão após go-live do núcleo pesquisa WhatsApp
 | P2 | Tutoriais interativos in-app (product tours) | 61–90d |
 | P2 | Checklist configuração mínima do tenant | 61–90d |
 | P2 | NPS / CSAT pós-interação | 61–90d |
+| P2 | Uso de IA — painel e custo estimado | 31–60d → [BACKLOG](BACKLOG.md#épico-uso-de-ia--painel-e-custo-estimado) |
+| P2 | Alerta inbound sem envio (bot pausado) | 31–60d → [BACKLOG](BACKLOG.md#épico-alerta--inbound-processado-sem-envio-bot-pausado) |
 | P2 | Telefonia embarcada (protótipo) | 31–60d+ → [telefonia](#discussão-telefonia--a-retomar-2026-05-22) |
 | P3 | Centro de ajuda, tours contextuais, sentiment journey | 90d+ |
 | — | Unified commerce, CDP, IoT, RCS/SMS | Fora do core — ver [BACKLOG.md](BACKLOG.md) |

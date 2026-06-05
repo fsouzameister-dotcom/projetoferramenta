@@ -3,7 +3,7 @@
 > Fonte viva de itens **fora do escopo 0–30 / 31–60** ou **polish pós go-live**.  
 > Escopo ativo e prioridades de release: **[DEVLOG.md → Escopo vigente — maio/2026](DEVLOG.md#escopo-vigente--maio2026)**.
 
-**Última atualização:** 2026-05-28
+**Última atualização:** 2026-06-05 (alerta bot pausado)
 
 ---
 
@@ -34,6 +34,8 @@
 | P2 | [NPS / CSAT pós-interação](#épico-nps--csat-pós-interação) | 61–90d | 📋 | Node ou pesquisa pós-fluxo; correlacionar relatórios |
 | P2 | [Cadastro mestre API consolidada](#épico-cadastro-mestre-api-consolidada) | 61–90d | 📋 | Endpoint único cliente + telefones e visão unificada para UI |
 | P2 | [Glossário de erros de envio WhatsApp](#épico-glossário-de-erros-de-envio-whatsapp) | 61–90d | 📋 | Código Meta/Twilio → significado + ação sugerida na Central do Agente e FAQ |
+| P2 | [Uso de IA — painel e custo estimado](#épico-uso-de-ia--painel-e-custo-estimado) | 31–60d | 📋 | Tokens, chamadas e custo por tenant/fluxo; dados de `ai_usage_logs` |
+| P2 | [Alerta — inbound processado sem envio (bot pausado)](#épico-alerta--inbound-processado-sem-envio-bot-pausado) | 31–60d | 📋 | Visibilidade no monitoramento quando safeguard bloqueia resposta |
 | P2 | Telefonia embarcada (protótipo) | 31–60d+ | 💬 | [DEVLOG — Discussão telefonia](DEVLOG.md#discussão-telefonia--a-retomar-2026-05-22) |
 | P3 | Centro de ajuda in-app (links + vídeos) | 90d+ | 📋 | Complemento aos product tours |
 | P3 | Tours contextuais por node / feature | 90d+ | 📋 | Após tours MVP |
@@ -173,6 +175,79 @@
 **Contexto:** envio de texto do agente já persiste `failed` + código; templates passaram a usar API real (commit `bf9c435`). Glossário complementa ambos os fluxos.
 
 **Não bloqueia:** operação atual; melhoria de UX/suporte.
+
+---
+
+## Épico: Uso de IA — painel e custo estimado
+
+**Contexto:** sessão 2026-06-05 — fluxo Cleo em produção com OpenAI (`gpt-4o-mini`). Cada turno de **Conversa (IA)** pode gerar **duas chamadas** (resolver transição + gerar resposta). O backend já persiste uso em `ai_usage_logs` (`provider`, `model`, `request_tokens`, `response_tokens`, `latency_ms`, `persona_id`, `conversation_id`, `status`). O painel da OpenAI do tenant pode mostrar **$0,00** quando a chave API pertence a outra organização ou quando o gasto com `gpt-4o-mini` é de centavos de dólar.
+
+**Problema:** administrador não vê consumo de IA dentro do ClientOn; depende do dashboard externo (OpenAI/Gemini), que pode não refletir a chave cadastrada ou arredondar valores baixos.
+
+**Solução:** tela em Admin (ex.: **Uso de IA** ou aba em Monitoramento) com visão operacional e financeira estimada, sem substituir a fatura do provedor.
+
+### Escopo MVP sugerido
+
+| # | Item | Notas |
+|---|------|--------|
+| 1 | **Resumo por período** | Filtros 24h / 7d / 30d; totais de chamadas, tokens entrada/saída, latência média |
+| 2 | **Quebra por provedor e modelo** | OpenAI vs Gemini; modelo configurado em `ai_provider_settings` |
+| 3 | **Custo estimado** | Tabela de preços por modelo (configurável ou constante documentada); exibir USD e opcional BRL |
+| 4 | **Quebra por fluxo / persona** | Join com `conversation_id` → fluxo ativo; agregar por `persona_id` |
+| 5 | **Lista de chamadas recentes** | Últimas N entradas de `ai_usage_logs` com status success/error |
+| 6 | **Aviso de chave × org** | Texto de ajuda: gasto pode não aparecer no painel OpenAI se a API key for de outra conta |
+
+### API sugerida
+
+- `GET /api/admin/ai-usage/summary?from=&to=` — agregados
+- `GET /api/admin/ai-usage/recent?limit=` — linhas recentes
+- Permissão: `admin_local` / `platform_admin` (tenant-scoped)
+
+### Critério de pronto (MVP)
+
+- Admin vê tokens e custo estimado do tenant sem consultar OpenAI.
+- Dados batem com amostra manual em `ai_usage_logs` (tolerância de arredondamento de custo).
+- Documentação curta no FAQ ou tooltip sobre diferença vs fatura do provedor.
+
+### Dependências
+
+- `ai_usage_logs` e provedor ativo por tenant (já existem).
+- Fluxos com node **Conversa (IA)** em uso (Cleo e demais).
+
+**Não bloqueia:** operação atual da Cleo nem cadastro de provedor em Admin → IA.
+
+---
+
+## Épico: Alerta — inbound processado sem envio (bot pausado)
+
+**Contexto:** sessão 2026-06-05 — após rajada de mensagens do fluxo Cleo, o bot foi **pausado manualmente** (`bot_outbound_paused`, Dashboard / WhatsApp Admin). O lead Raphael enviou *"Quero saber sobre preço"* às 14:01 UTC: a mensagem apareceu no monitoramento e a IA executou (2 chamadas em `ai_usage_logs`), mas **nenhum texto foi enviado** ao WhatsApp porque `checkAndRecordBotOutbound` retornou `BOT_PAUSED`. Do ponto de vista do cliente, o atendimento “parou”.
+
+**Problema:** não há sinalização clara de que o fluxo rodou e falhou só na entrega; o admin precisa inferir pelo painel de salvaguarda ou logs do servidor.
+
+**Solução:** tornar explícito no produto quando inbound foi roteado e houve resposta gerada, porém **zero outbound** por pausa, dedup ou circuit breaker.
+
+### Escopo MVP sugerido
+
+| # | Item | Notas |
+|---|------|--------|
+| 1 | **Log estruturado** | Em `deliverOutboundIfWhatsApp`, quando todas as mensagens forem bloqueadas, registrar `inbound_outbound_blocked` com `code` (`BOT_PAUSED`, `DUPLICATE_CONTENT`, `CIRCUIT_BREAKER`) |
+| 2 | **Evento em conversa** | Gravar mensagem interna ou metadata na conversa (ex.: *"Bot não enviou: pausado pelo administrador"*) visível no monitoramento / Central do Agente |
+| 3 | **Badge no monitoramento** | Na listagem de conversas, indicador quando último inbound não teve resposta do bot por salvaguarda |
+| 4 | **Banner persistente** | Enquanto `bot_outbound_paused = true`, destaque no Dashboard e WhatsApp Admin (já existe painel; reforçar impacto: *"Leads não recebem resposta automática"*) |
+| 5 | **Métrica opcional** | Contador diário `inbound_blocked_outbound` por tenant para relatório ops |
+
+### Critério de pronto (MVP)
+
+- Admin identifica em até 1 tela por que o cliente não recebeu resposta após falar com o bot.
+- Caso bot pausado: texto de ajuda com link/ação para reativar.
+- Não registrar como falha de entrega Twilio/Meta quando o bloqueio foi interno (código `BOT_PAUSED`).
+
+### Dependências
+
+- Salvaguarda do bot (`bot-outbound-safeguard.ts`, `BotSafeguardPanel`) — já existem.
+- Monitoramento de conversas — UI em evolução.
+
+**Não bloqueia:** operação atual; melhoria de observabilidade pós-incidente Cleo/Raphael.
 
 ---
 
