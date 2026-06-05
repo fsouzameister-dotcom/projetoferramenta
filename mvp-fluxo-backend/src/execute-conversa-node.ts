@@ -7,6 +7,7 @@ import {
   resolveConversaTransition,
   resolveFlexibleStep,
 } from "./flow-ai-runtime";
+import { loadConversationHistoryForAi } from "./agent-conversations";
 import { parseConversaNodeConfig } from "./flow-conversa-node";
 
 type FlowNodeLite = {
@@ -67,6 +68,14 @@ export async function executeConversaNode(
   }
 
   const userMsg = userMessageFromInput(input.userInput, input.variables);
+  const chatHistory =
+    input.conversationId && userMsg
+      ? await loadConversationHistoryForAi({
+          tenantId: input.tenantId,
+          conversationId: input.conversationId,
+          limit: 12,
+        })
+      : [];
 
   if (settings.executionMode === "flexible") {
     if (!userMsg) {
@@ -206,9 +215,10 @@ export async function executeConversaNode(
   });
 
   const replyInstruction = [
-    "Com base na etapa atual, responda ao cliente de forma breve e clara.",
-    `Mensagem do cliente: ${userMsg}`,
-    "Responda apenas com o texto da mensagem.",
+    "Com base na etapa atual e no histórico, responda ao cliente de forma breve, clara e amigável.",
+    `Mensagem atual do cliente: ${userMsg}`,
+    "Não repita saudações ou parágrafos já enviados. Responda especificamente ao que foi perguntado.",
+    "Responda apenas com o texto da mensagem (sem JSON, sem aspas extras).",
   ].join("\n");
 
   const ai = await generateFlowAiReply({
@@ -217,6 +227,7 @@ export async function executeConversaNode(
     systemPrompt,
     userMessage: replyInstruction,
     conversationId: input.conversationId,
+    history: chatHistory,
   });
 
   const guarded = await applyFlowGuardrails({

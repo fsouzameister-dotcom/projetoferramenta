@@ -11,6 +11,7 @@ import {
 import "./index.css";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
+import MonitoringAdmin from "./pages/MonitoringAdmin";
 import Flows from "./pages/Flows";
 import FlowEditor from "./pages/FlowEditor";
 import FlowForm from "./pages/FlowForm";
@@ -178,6 +179,7 @@ const router = createBrowserRouter([
                   { path: "admin/ai", element: <AiAdmin /> },
                   { path: "admin/whatsapp", element: <WhatsAppAdmin /> },
                   { path: "admin/inbound", element: <InboundAdmin /> },
+                  { path: "admin/monitoring", element: <MonitoringAdmin /> },
                   { path: "admin/operations", element: <OperationsAdmin /> },
                   {
                     path: "admin/platform/tenants",

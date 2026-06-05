@@ -106,6 +106,11 @@ export async function buildFlowSystemPrompt(input: {
 
   const sections = [
     `Idioma de resposta: ${input.settings.language}.`,
+    `## Comportamento da conversa
+- Tom amigável, humano e consultivo (não robótico).
+- Responda diretamente à última mensagem do cliente; não ignore a pergunta.
+- Nunca copie literalmente blocos de roteiro já usados na conversa — reformule com palavras novas.
+- Se o cliente pedir informação sobre a empresa, explique de forma clara e acolhedora, sem repetir a saudação inicial.`,
     input.settings.voiceId ? `Perfil de voz (referência): ${input.settings.voiceId}.` : "",
     input.settings.globalPrompt.trim()
       ? `## Prompt global do fluxo\n${input.settings.globalPrompt.trim()}`
@@ -134,6 +139,7 @@ export async function generateFlowAiReply(input: {
   systemPrompt: string;
   userMessage: string;
   conversationId?: string;
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
 }): Promise<{ text: string; provider: string; model: string }> {
   const ai = await generateAiText({
     tenantId: input.tenantId,
@@ -141,6 +147,8 @@ export async function generateFlowAiReply(input: {
     message: input.userMessage,
     conversationId: input.conversationId,
     systemPromptOverride: input.systemPrompt,
+    history: input.history,
+    temperature: 0.65,
   });
   return { text: ai.text, provider: ai.provider, model: ai.model };
 }

@@ -304,12 +304,17 @@ type LlmOutput = {
   responseTokens: number;
 };
 
+type ChatHistoryMessage = { role: "user" | "assistant"; content: string };
+
 async function callOpenAi(input: {
   apiKey: string;
   model: string;
   prompt: string;
   systemPrompt: string;
+  history?: ChatHistoryMessage[];
+  temperature?: number;
 }): Promise<LlmOutput> {
+  const history = input.history ?? [];
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -320,9 +325,10 @@ async function callOpenAi(input: {
       model: input.model,
       messages: [
         { role: "system", content: input.systemPrompt },
+        ...history.map((m) => ({ role: m.role, content: m.content })),
         { role: "user", content: input.prompt },
       ],
-      temperature: 0.4,
+      temperature: input.temperature ?? 0.4,
     }),
   });
   if (!response.ok) {
@@ -380,6 +386,8 @@ export async function generateAiText(input: {
   conversationId?: string;
   /** Substitui o system_prompt da persona (fluxo IA compõe contexto próprio). */
   systemPromptOverride?: string;
+  history?: ChatHistoryMessage[];
+  temperature?: number;
 }): Promise<{
   text: string;
   provider: ProviderName;
@@ -432,6 +440,8 @@ export async function generateAiText(input: {
             model: provider.model,
             prompt: finalPrompt,
             systemPrompt,
+            history: input.history,
+            temperature: input.temperature,
           })
         : await callGemini({
             apiKey,

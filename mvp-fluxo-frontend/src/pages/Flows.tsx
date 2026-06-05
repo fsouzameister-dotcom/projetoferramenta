@@ -13,6 +13,7 @@ interface Flow {
 export default function Flows() {
   const [flows, setFlows] = useState<Flow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -30,6 +31,21 @@ export default function Flows() {
       })
       .finally(() => setLoading(false));
   }, []);
+
+  const toggleActive = async (flow: Flow) => {
+    setSavingId(flow.id);
+    setError(null);
+    try {
+      await api.patch(`/flows/${flow.id}`, { is_active: !flow.is_active });
+      setFlows((prev) =>
+        prev.map((f) => (f.id === flow.id ? { ...f, is_active: !f.is_active } : f))
+      );
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Erro ao atualizar status do fluxo"));
+    } finally {
+      setSavingId(null);
+    }
+  };
 
   return (
     <div className="p-8">
@@ -68,6 +84,7 @@ export default function Flows() {
                 <th className="px-6 py-3 font-medium">Nome</th>
                 <th className="px-6 py-3 font-medium">Canal</th>
                 <th className="px-6 py-3 font-medium">Status</th>
+                <th className="px-6 py-3 font-medium">Ativo</th>
                 <th className="px-6 py-3 font-medium">Criado em</th>
                 <th className="px-6 py-3 font-medium">Acao</th>
               </tr>
@@ -93,8 +110,26 @@ export default function Flows() {
                             : "bg-gray-100 text-gray-500"
                         }`}
                       >
-                        {flow.is_active ? "Ativo" : "Inativo"}
+                        {flow.is_active ? "Publicado" : "Rascunho"}
                       </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <button
+                        type="button"
+                        disabled={savingId === flow.id}
+                        onClick={() => void toggleActive(flow)}
+                        className={`text-xs px-3 py-1.5 rounded-lg border font-medium disabled:opacity-50 ${
+                          flow.is_active
+                            ? "border-gray-300 text-gray-700 hover:bg-gray-50"
+                            : "border-teal-300 text-teal-700 hover:bg-teal-50"
+                        }`}
+                      >
+                        {savingId === flow.id
+                          ? "Salvando..."
+                          : flow.is_active
+                            ? "Desativar"
+                            : "Ativar"}
+                      </button>
                     </td>
                     <td className="px-6 py-4 text-gray-400">
                       {flow.created_at
@@ -114,7 +149,7 @@ export default function Flows() {
               ) : (
                 <tr>
                   <td
-                    colSpan={5}
+                    colSpan={6}
                     className="px-6 py-12 text-center text-gray-400"
                   >
                     {error

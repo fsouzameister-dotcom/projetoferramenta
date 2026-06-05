@@ -621,6 +621,89 @@ export async function recordInboundWhatsAppMessage(input: {
   }
 }
 
+/** Histórico recente para IA do fluxo (evita repetir respostas anteriores). */
+export async function loadConversationHistoryForAi(input: {
+  tenantId: string;
+  conversationId: string;
+  limit?: number;
+}): Promise<Array<{ role: "user" | "assistant"; content: string }>> {
+  await ensureSchema();
+  const limit = Math.min(Math.max(input.limit ?? 10, 1), 24);
+  const result = await pool.query<{
+    direction: AgentMessageDirection;
+    sender_name: string | null;
+    text_content: string | null;
+  }>(
+    `SELECT direction, sender_name, text_content
+     FROM agent_messages
+     WHERE tenant_id = $1::uuid AND conversation_id = $2::uuid
+       AND type = 'text' AND coalesce(text_content, '') <> ''
+     ORDER BY created_at DESC
+     LIMIT $3`,
+    [input.tenantId, input.conversationId, limit]
+  );
+  const rows = [...result.rows].reverse();
+  return rows.map((row) => {
+    if (row.direction === "in") {
+      return { role: "user" as const, content: row.text_content!.trim() };
+    }
+    return {
+      role: "assistant" as const,
+      content: row.text_content!.trim(),
+    };
+  });
+}
+
+/** Grava mensagem outbound do bot/fluxo para monitoramento e histórico da IA. */
+export async function recordBotOutboundMessage(input: {
+  tenantId: string;
+  conversationId?: string;
+  phone?: string;
+  textBody: string;
+  providerMessageId?: string;
+  botName?: string;
+}): Promise<void> {
+  await ensureSchema();
+  const text = input.textBody?.trim();
+  if (!text) return;
+
+  let convId = input.conversationId;
+  if (!convId && input.phone?.trim()) {
+    const digits = phoneDigitsOnly(input.phone);
+    const found = await pool.query<{ id: string }>(
+      `SELECT id FROM agent_conversations
+       WHERE tenant_id = $1
+         AND regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') = $2
+       ORDER BY updated_at DESC LIMIT 1`,
+      [input.tenantId, digits]
+    );
+    convId = found.rows[0]?.id;
+  }
+  if (!convId) return;
+
+  const sender = input.botName?.trim() || "Bot";
+  const messageId =
+    input.providerMessageId?.trim() || `bot-out-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  await pool.query(
+    `INSERT INTO agent_messages
+     (conversation_id, tenant_id, provider_message_id, type, direction, sender_name, delivery_status, text_content, metadata)
+     VALUES ($1, $2, $3, 'text', 'out', $4, 'sent', $5, $6::jsonb)`,
+    [
+      convId,
+      input.tenantId,
+      messageId,
+      sender,
+      text,
+      JSON.stringify({ source: "flow_bot" }),
+    ]
+  );
+  await pool.query(
+    `UPDATE agent_conversations SET updated_at = now() WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+    [convId, input.tenantId]
+  );
+}
+
 function conversationQueueKey(metadata: { queue?: string } | null | undefined): string | null {
   const q = metadata?.queue;
   return typeof q === "string" && q.trim() ? q.trim() : null;

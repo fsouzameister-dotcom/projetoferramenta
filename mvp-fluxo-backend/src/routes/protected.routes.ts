@@ -45,6 +45,10 @@ import {
   setBotSafeguardPaused,
 } from "../bot-outbound-safeguard";
 import {
+  listMonitoringConversations,
+  listMonitoringMessages,
+} from "../conversation-monitoring";
+import {
   getTenantServiceSettings,
   upsertTenantServiceSettings,
 } from "../tenant-service-settings";
@@ -121,11 +125,13 @@ import {
 const flowSchema = {
   type: "object",
   additionalProperties: true,
-  required: ["id", "name", "channel"],
+  required: ["id", "name", "channel", "is_active", "created_at"],
   properties: {
     id: { type: "string" },
     name: { type: "string" },
     channel: { type: "string" },
+    is_active: { type: "boolean" },
+    created_at: { type: "string" },
   },
 } as const;
 
@@ -1500,6 +1506,64 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
     }
   );
 
+  fastify.patch<{
+    Params: { flowId: string };
+    Body: { is_active?: boolean; name?: string; channel?: string };
+  }>(
+    "/flows/:flowId",
+    {
+      schema: {
+        params: flowIdParamSchema,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            is_active: { type: "boolean" },
+            name: { type: "string", minLength: 1 },
+            channel: { type: "string", minLength: 1 },
+          },
+        },
+        response: {
+          200: successEnvelopeSchema(flowSchema),
+          404: errorEnvelopeSchema([ERROR_CODES.flows.FLOW_NOT_FOUND]),
+          500: errorEnvelopeSchema([ERROR_CODES.flows.FLOW_UPDATE_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      ensureAdminAccess(request.user?.role_name);
+      const { flowId } = request.params;
+      const tenantId = request.tenant.id;
+      const body = request.body ?? {};
+      if (
+        body.is_active === undefined &&
+        body.name === undefined &&
+        body.channel === undefined
+      ) {
+        throw new ApiError(400, ERROR_CODES.common.VALIDATION_ERROR, "Nada para atualizar");
+      }
+      try {
+        const flow = await updateFlow(flowId, tenantId, {
+          name: body.name,
+          channel: body.channel,
+          isActive: body.is_active,
+        });
+        if (!flow) {
+          throw new ApiError(
+            404,
+            ERROR_CODES.flows.FLOW_NOT_FOUND,
+            "Flow não encontrado ou não pertence a este tenant"
+          );
+        }
+        return sendSuccess(request, reply, flow);
+      } catch (err) {
+        request.log.error(err);
+        if (err instanceof ApiError) throw err;
+        throw new ApiError(500, ERROR_CODES.flows.FLOW_UPDATE_FAILED, "Erro ao atualizar flow");
+      }
+    }
+  );
+
   // ──────────────────────────────────────────────────────────────────
   // NODES
   // ──────────────────────────────────────────────────────────────────
@@ -2397,6 +2461,62 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
         "Erro ao carregar salvaguarda do bot"
       );
     }
+  });
+
+  fastify.get<{
+    Querystring: { status?: string; search?: string; limit?: string; offset?: string };
+  }>("/admin/monitoring/conversations", {
+    schema: {
+      response: {
+        200: successEnvelopeSchema({
+          type: "object",
+          additionalProperties: true,
+          required: ["items", "total"],
+          properties: {
+            items: { type: "array", items: { type: "object", additionalProperties: true } },
+            total: { type: "integer" },
+          },
+        }),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    const statusRaw = request.query.status?.trim();
+    const status =
+      statusRaw === "em_espera" || statusRaw === "em_andamento" || statusRaw === "historico"
+        ? statusRaw
+        : "todas";
+    const data = await listMonitoringConversations({
+      tenantId: request.tenant.id,
+      status,
+      search: request.query.search,
+      limit: request.query.limit ? Number(request.query.limit) : 50,
+      offset: request.query.offset ? Number(request.query.offset) : 0,
+    });
+    return sendSuccess(request, reply, data);
+  });
+
+  fastify.get<{
+    Params: { conversationId: string };
+  }>("/admin/monitoring/conversations/:conversationId/messages", {
+    schema: {
+      params: conversationIdParamSchema,
+      response: {
+        200: successEnvelopeSchema({
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        }),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    const messages = await listMonitoringMessages(
+      request.tenant.id,
+      request.params.conversationId
+    );
+    return sendSuccess(request, reply, messages);
   });
 
   fastify.patch<{

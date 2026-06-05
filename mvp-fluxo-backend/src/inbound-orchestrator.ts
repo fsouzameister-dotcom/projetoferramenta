@@ -1,5 +1,6 @@
 import type { CapturarEntradaAwaiting } from "./capturar-entrada";
 import {
+  recordBotOutboundMessage,
   recordInboundWhatsAppMessage,
   phoneDigitsOnly,
 } from "./agent-conversations";
@@ -147,6 +148,7 @@ function buildOutboundQueue(input: {
 async function deliverOutboundIfWhatsApp(input: {
   tenantId: string;
   phone?: string;
+  conversationId?: string;
   outboundMessages?: FlowOutboundMessage[];
   messages?: string[];
 }): Promise<void> {
@@ -165,11 +167,21 @@ async function deliverOutboundIfWhatsApp(input: {
     if (!guard.allowed) {
       continue;
     }
-    await deliverFlowOutboundToWhatsApp({
+    const sent = await deliverFlowOutboundToWhatsApp({
       ctx: sendCtx,
       toDigits,
       outbound,
     });
+    if (sent.ok) {
+      await recordBotOutboundMessage({
+        tenantId: input.tenantId,
+        conversationId: input.conversationId,
+        phone: input.phone,
+        textBody: outbound.body,
+        providerMessageId: sent.messageId,
+        botName: "Bot",
+      });
+    }
   }
 }
 
@@ -284,6 +296,7 @@ export async function processInboundMessage(
     await deliverOutboundIfWhatsApp({
       tenantId: input.tenantId,
       phone: input.phone,
+      conversationId,
       outboundMessages: result.outboundMessages,
       messages: result.messages,
     });
@@ -343,6 +356,7 @@ export async function processInboundMessage(
   await deliverOutboundIfWhatsApp({
     tenantId: input.tenantId,
     phone: input.phone,
+    conversationId,
     outboundMessages: result.outboundMessages,
     messages: result.messages,
   });
