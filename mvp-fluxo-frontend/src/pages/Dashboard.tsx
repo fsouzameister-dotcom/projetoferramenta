@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import api, { getApiErrorMessage, unwrapApiData } from "../api/client";
+import BotSafeguardPanel from "../components/BotSafeguardPanel";
 
 interface Flow {
   id: string;
@@ -171,6 +172,8 @@ export default function Dashboard() {
           Visao geral dos seus fluxos de atendimento
         </p>
       </div>
+
+      <BotSafeguardPanel variant="dashboard" />
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-4">
         <div className="flex items-center justify-between gap-3 mb-3">

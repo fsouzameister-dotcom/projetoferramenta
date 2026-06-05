@@ -41,6 +41,10 @@ import {
   updateQueue,
 } from "../service-queues";
 import {
+  getBotSafeguardStatus,
+  setBotSafeguardPaused,
+} from "../bot-outbound-safeguard";
+import {
   getTenantServiceSettings,
   upsertTenantServiceSettings,
 } from "../tenant-service-settings";
@@ -2349,6 +2353,88 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
         500,
         ERROR_CODES.serviceSettings.SERVICE_SETTINGS_GET_FAILED,
         "Erro ao carregar configurações"
+      );
+    }
+  });
+
+  const botSafeguardSchema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["tenantId", "paused", "pauseReason", "pausedAt", "pauseSource", "updatedAt"],
+    properties: {
+      tenantId: { type: "string" },
+      paused: { type: "boolean" },
+      pauseReason: { anyOf: [{ type: "string" }, { type: "null" }] },
+      pausedAt: { anyOf: [{ type: "string" }, { type: "null" }] },
+      pauseSource: {
+        anyOf: [
+          { type: "null" },
+          { type: "string", enum: ["manual", "circuit_breaker"] },
+        ],
+      },
+      updatedAt: { type: "string" },
+    },
+  } as const;
+
+  fastify.get("/bot-safeguard", {
+    schema: {
+      response: {
+        200: successEnvelopeSchema(botSafeguardSchema),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        500: errorEnvelopeSchema([ERROR_CODES.botSafeguard.BOT_SAFEGUARD_GET_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    try {
+      const status = await getBotSafeguardStatus(request.tenant.id);
+      return sendSuccess(request, reply, status);
+    } catch (err) {
+      request.log.error(err);
+      throw new ApiError(
+        500,
+        ERROR_CODES.botSafeguard.BOT_SAFEGUARD_GET_FAILED,
+        "Erro ao carregar salvaguarda do bot"
+      );
+    }
+  });
+
+  fastify.patch<{
+    Body: { paused: boolean };
+  }>("/bot-safeguard", {
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: false,
+        required: ["paused"],
+        properties: {
+          paused: { type: "boolean" },
+        },
+      },
+      response: {
+        200: successEnvelopeSchema(botSafeguardSchema),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        500: errorEnvelopeSchema([ERROR_CODES.botSafeguard.BOT_SAFEGUARD_UPDATE_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    try {
+      const updated = await setBotSafeguardPaused({
+        tenantId: request.tenant.id,
+        paused: request.body.paused,
+        reason: request.body.paused
+          ? "Pausado manualmente pelo administrador."
+          : null,
+        source: request.body.paused ? "manual" : null,
+      });
+      return sendSuccess(request, reply, updated);
+    } catch (err) {
+      request.log.error(err);
+      throw new ApiError(
+        500,
+        ERROR_CODES.botSafeguard.BOT_SAFEGUARD_UPDATE_FAILED,
+        "Erro ao atualizar salvaguarda do bot"
       );
     }
   });

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import api, { getApiErrorMessage, getApiOrigin, unwrapApiData } from "../api/client";
+import BotSafeguardPanel from "../components/BotSafeguardPanel";
 import InfoTooltip from "~components/InfoTooltip";
 
 type PhoneNumber = {
@@ -371,6 +372,10 @@ export default function WhatsAppAdmin() {
           {notice}
         </div>
       )}
+
+      <div className="mt-6">
+        <BotSafeguardPanel variant="compact" />
+      </div>
 
       <section className="mt-6 bg-white rounded-xl border border-slate-300 p-6 text-sm text-gray-800">
         <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">

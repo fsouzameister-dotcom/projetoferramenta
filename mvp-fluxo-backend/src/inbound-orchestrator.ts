@@ -9,6 +9,7 @@ import {
   type FlowWhatsAppSendContext,
 } from "./flow-outbound-delivery";
 import type { FlowOutboundMessage } from "./mensagem-outbound";
+import { checkAndRecordBotOutbound } from "./bot-outbound-safeguard";
 import { resolveInboundRoute } from "./inbound-routes";
 import { getOutboundWhatsAppContext, WHATSAPP_PROVIDER_CLOUD, WHATSAPP_PROVIDER_TWILIO } from "./whatsapp-channels";
 import { redis } from "./redis";
@@ -156,6 +157,14 @@ async function deliverOutboundIfWhatsApp(input: {
   if (!sendCtx) return;
   const toDigits = phoneDigitsOnly(input.phone);
   for (const outbound of queue) {
+    const guard = await checkAndRecordBotOutbound({
+      tenantId: input.tenantId,
+      toPhone: toDigits,
+      body: outbound.body,
+    });
+    if (!guard.allowed) {
+      continue;
+    }
     await deliverFlowOutboundToWhatsApp({
       ctx: sendCtx,
       toDigits,
