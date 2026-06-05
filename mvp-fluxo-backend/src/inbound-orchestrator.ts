@@ -1,4 +1,3 @@
-import type { CapturarEntradaAwaiting } from "./capturar-entrada";
 import {
   recordBotOutboundMessage,
   recordBotPhaseInboundMessage,
@@ -6,7 +5,12 @@ import {
   phoneDigitsOnly,
   shouldRouteInboundToBot,
 } from "./agent-conversations";
-import { clearInboundFlowSessionForPhone } from "./inbound-flow-session";
+import {
+  clearInboundFlowSession,
+  clearInboundFlowSessionForPhone,
+  loadInboundFlowSession,
+  saveInboundFlowSession,
+} from "./inbound-flow-session";
 import { executeFlow, type ExecuteFlowInput, type ExecuteFlowResult } from "./flow-executor";
 import {
   deliverFlowOutboundToWhatsApp,
@@ -18,9 +22,7 @@ import { resolveInboundRoute, resolveInboundRouteByFirstMessage } from "./inboun
 import { getOutboundWhatsAppContext, WHATSAPP_PROVIDER_CLOUD, WHATSAPP_PROVIDER_TWILIO } from "./whatsapp-channels";
 import { redis } from "./redis";
 
-const SESSION_PREFIX = "inbound:flow:session:";
 const CLAIM_PREFIX = "inbound:flow:claim:";
-const SESSION_TTL_SEC = 60 * 60 * 24; // 24h
 const CLAIM_TTL_SEC = 60 * 60 * 24; // 24h
 /** Limite de textos enviados por um único inbound (evita rajada por bug de fluxo). */
 const MAX_OUTBOUND_PER_INBOUND = 3;
@@ -49,54 +51,11 @@ export type InboundProcessResult = {
   messages?: string[];
 };
 
-type StoredInboundSession = {
-  flowId: string;
-  tenantId: string;
-  contactKey: string;
-  phone?: string;
-  conversationId?: string;
-  sessionId: string;
-  variables: Record<string, unknown>;
-  awaitingInput: CapturarEntradaAwaiting;
-  sourceType: string;
-  sourceKey: string;
-};
-
-function sessionRedisKey(tenantId: string, contactKey: string): string {
-  return `${SESSION_PREFIX}${tenantId}:${contactKey}`;
-}
-
 function buildContactKey(input: { phone?: string; email?: string; sessionId?: string }): string {
   if (input.phone?.trim()) return `phone:${phoneDigitsOnly(input.phone)}`;
   if (input.email?.trim()) return `email:${input.email.trim().toLowerCase()}`;
   if (input.sessionId?.trim()) return `session:${input.sessionId.trim()}`;
   return `anon:${Date.now()}`;
-}
-
-async function loadSession(
-  tenantId: string,
-  contactKey: string
-): Promise<StoredInboundSession | null> {
-  const raw = await redis.get(sessionRedisKey(tenantId, contactKey));
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as StoredInboundSession;
-  } catch {
-    return null;
-  }
-}
-
-async function saveSession(session: StoredInboundSession): Promise<void> {
-  await redis.set(
-    sessionRedisKey(session.tenantId, session.contactKey),
-    JSON.stringify(session),
-    "EX",
-    SESSION_TTL_SEC
-  );
-}
-
-async function clearSession(tenantId: string, contactKey: string): Promise<void> {
-  await redis.del(sessionRedisKey(tenantId, contactKey));
 }
 
 /** Evita reprocessar o mesmo webhook (retries Twilio/Meta) em paralelo. */
@@ -315,18 +274,23 @@ export async function processInboundMessage(
   });
 
   if ((freshBotSession || messageRouteEarly) && input.phone?.trim()) {
-    await clearInboundFlowSessionForPhone(input.tenantId, input.phone);
-    try {
-      await clearSession(input.tenantId, contactKey);
-    } catch {
-      /* ignore */
-    }
+    await clearInboundFlowSession({
+      tenantId: input.tenantId,
+      contactKey,
+      phone: input.phone,
+      conversationId,
+    });
   }
 
   const existingSession =
     freshBotSession || messageRouteEarly
       ? null
-      : await loadSession(input.tenantId, contactKey);
+      : await loadInboundFlowSession({
+          tenantId: input.tenantId,
+          contactKey,
+          phone: input.phone,
+          conversationId,
+        });
   if (existingSession) {
     const resumeInput: ExecuteFlowInput = {
       startNodeId: existingSession.awaitingInput.nodeId,
@@ -363,22 +327,20 @@ export async function processInboundMessage(
     });
 
     if (result.status === "awaiting_input" && result.awaitingInput) {
-      try {
-        await saveSession({
-          ...existingSession,
-          variables: result.variables,
-          awaitingInput: result.awaitingInput,
-          conversationId: conversationId ?? existingSession.conversationId,
-        });
-      } catch {
-        /* sessão Redis opcional — não bloqueia envio ao WhatsApp */
-      }
+      await saveInboundFlowSession({
+        ...existingSession,
+        variables: result.variables,
+        awaitingInput: result.awaitingInput,
+        conversationId: conversationId ?? existingSession.conversationId,
+        phone: input.phone ?? existingSession.phone,
+      });
     } else {
-      try {
-        await clearSession(input.tenantId, contactKey);
-      } catch {
-        /* ignore */
-      }
+      await clearInboundFlowSession({
+        tenantId: input.tenantId,
+        contactKey,
+        phone: input.phone,
+        conversationId: conversationId ?? existingSession.conversationId,
+      });
     }
 
     return {
@@ -425,22 +387,18 @@ export async function processInboundMessage(
   });
 
   if (result.status === "awaiting_input" && result.awaitingInput) {
-    try {
-      await saveSession({
-        flowId: route.flow_id,
-        tenantId: input.tenantId,
-        contactKey,
-        phone: input.phone,
-        conversationId,
-        sessionId: `${input.sourceType}:${input.sourceKey}:${contactKey}`,
-        variables: result.variables,
-        awaitingInput: result.awaitingInput,
-        sourceType: input.sourceType,
-        sourceKey: input.sourceKey,
-      });
-    } catch {
-      /* sessão Redis opcional — não bloqueia envio ao WhatsApp */
-    }
+    await saveInboundFlowSession({
+      flowId: route.flow_id,
+      tenantId: input.tenantId,
+      contactKey,
+      phone: input.phone,
+      conversationId,
+      sessionId: `${input.sourceType}:${input.sourceKey}:${contactKey}`,
+      variables: result.variables,
+      awaitingInput: result.awaitingInput,
+      sourceType: input.sourceType,
+      sourceKey: input.sourceKey,
+    });
   }
 
   return {
