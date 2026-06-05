@@ -395,6 +395,7 @@ export async function listAgentConversations(tenantId: string): Promise<AgentCon
               tabulacao_label, closure_message_status, tags, metadata, updated_at
        FROM agent_conversations
        WHERE tenant_id = $1
+         AND COALESCE(metadata->>'bot_only', 'false') <> 'true'
        ORDER BY updated_at DESC`,
       [tenantId]
     );
@@ -575,6 +576,8 @@ export async function createAgentConversation(input: {
           templateName: input.templateName ?? null,
           templateContentSid: input.templateContentSid?.trim() || null,
           templateParams: input.templateParams ?? {},
+          agent_created: true,
+          bot_only: false,
         }),
       ]
     );
@@ -758,14 +761,31 @@ export async function recordBotOutboundMessage(input: {
       `SELECT id FROM agent_conversations
        WHERE tenant_id = $1
          AND regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') = $2
-       ORDER BY updated_at DESC LIMIT 1`,
+         AND lifecycle_status = 'open'
+       ORDER BY
+         CASE WHEN COALESCE(metadata->>'bot_only', 'false') = 'true' THEN 0 ELSE 1 END,
+         updated_at DESC
+       LIMIT 1`,
       [input.tenantId, digits]
     );
     convId = found.rows[0]?.id;
   }
   if (!convId) return;
 
-  const sender = input.botName?.trim() || "Bot";
+  const convMeta = await pool.query<{
+    lifecycle_status: AgentConversationLifecycleStatus;
+    metadata: { bot_only?: boolean } | null;
+  }>(
+    `SELECT lifecycle_status, metadata FROM agent_conversations WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+    [convId, input.tenantId]
+  );
+  const convRow = convMeta.rows[0];
+  if (!convRow) return;
+  if (isClosedLifecycle(convRow.lifecycle_status) && !isBotOnlyConversation(convRow.metadata)) {
+    return;
+  }
+
+  const sender = input.botName?.trim() || "Cleo";
   const messageId =
     input.providerMessageId?.trim() || `bot-out-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -980,6 +1000,119 @@ function twilioMediaPublicUrl(publicUrl: string): string {
 
 function isClosedLifecycle(status: string | null | undefined): boolean {
   return status === "closed_manual" || status === "closed_window";
+}
+
+function isBotOnlyConversation(metadata: { bot_only?: boolean } | null | undefined): boolean {
+  return metadata?.bot_only === true;
+}
+
+/** Conversa técnica do fluxo bot — não aparece na Central do Agente até handoff. */
+async function getOrCreateBotPhaseConversation(input: {
+  tenantId: string;
+  phone: string;
+  contactName?: string | null;
+}): Promise<{ id: string; freshBotSession: boolean }> {
+  const digits = phoneDigitsOnly(input.phone);
+  const displayPhone = normalizeWaIdToPhone(input.phone);
+  const existing = await pool.query<{ id: string }>(
+    `SELECT id
+     FROM agent_conversations
+     WHERE tenant_id = $1::uuid
+       AND lifecycle_status = 'open'
+       AND COALESCE(metadata->>'bot_only', 'false') = 'true'
+       AND regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') = $2
+     ORDER BY updated_at DESC
+     LIMIT 1`,
+    [input.tenantId, digits]
+  );
+  if (existing.rows[0]?.id) {
+    return { id: existing.rows[0].id, freshBotSession: false };
+  }
+
+  const created = await pool.query<{ id: string }>(
+    `INSERT INTO agent_conversations (tenant_id, contact_name, phone, status, tags, lifecycle_status, metadata)
+     VALUES ($1, $2, $3, 'em_espera', '[]'::jsonb, 'open', $4::jsonb)
+     RETURNING id`,
+    [
+      input.tenantId,
+      input.contactName?.trim() || displayPhone,
+      displayPhone,
+      JSON.stringify({ bot_only: true }),
+    ]
+  );
+  await ensureConversationProtocol({
+    tenantId: input.tenantId,
+    conversationId: created.rows[0].id,
+  });
+  return { id: created.rows[0].id, freshBotSession: true };
+}
+
+/** Grava inbound do WhatsApp na conversa oculta do bot (histórico da IA, fora da inbox do agente). */
+export async function recordBotPhaseInboundMessage(input: {
+  tenantId: string;
+  providerMessageId: string;
+  fromWaId: string;
+  textBody: string;
+  contactName?: string;
+  timestampIso: string;
+}): Promise<{ duplicate: boolean; conversationId?: string; freshBotSession: boolean }> {
+  await ensureSchema();
+  await syncWindowClosure(input.tenantId);
+
+  const dup = await pool.query<{ conversation_id: string }>(
+    `SELECT conversation_id
+     FROM agent_messages
+     WHERE tenant_id = $1 AND provider_message_id = $2
+     LIMIT 1`,
+    [input.tenantId, input.providerMessageId]
+  );
+  if (dup.rows.length > 0) {
+    return {
+      duplicate: true,
+      conversationId: dup.rows[0].conversation_id,
+      freshBotSession: false,
+    };
+  }
+
+  const conv = await getOrCreateBotPhaseConversation({
+    tenantId: input.tenantId,
+    phone: input.fromWaId,
+    contactName: input.contactName,
+  });
+
+  try {
+    await pool.query(
+      `INSERT INTO agent_messages
+       (conversation_id, tenant_id, provider_message_id, type, direction, delivery_status, text_content, metadata, created_at)
+       VALUES ($1, $2, $3, 'text', 'in', 'read', $4, $5::jsonb, $6::timestamptz)`,
+      [
+        conv.id,
+        input.tenantId,
+        input.providerMessageId,
+        input.textBody,
+        JSON.stringify({ source: "flow_bot" }),
+        input.timestampIso,
+      ]
+    );
+  } catch (e: unknown) {
+    const err = e as { code?: string };
+    if (err.code === "23505") {
+      return { duplicate: true, conversationId: conv.id, freshBotSession: false };
+    }
+    throw e;
+  }
+
+  await touchConversationAfterInbound(
+    conv.id,
+    input.tenantId,
+    input.timestampIso,
+    input.contactName
+  );
+  return {
+    duplicate: false,
+    conversationId: conv.id,
+    freshBotSession: conv.freshBotSession,
+  };
 }
 
 /** Atualiza conversa após inbound. Encerradas não voltam para fila do agente (ficam no histórico / fluxo). */
@@ -2449,9 +2582,10 @@ export async function closeAgentConversation(input: {
   const convRow = await pool.query<{
     id: string;
     contact_name: string;
+    phone: string;
     metadata: { queue?: string } | null;
   }>(
-    `SELECT id, contact_name, metadata FROM agent_conversations
+    `SELECT id, contact_name, phone, metadata FROM agent_conversations
      WHERE id = $1::uuid AND tenant_id = $2::uuid`,
     [input.conversationId, input.tenantId]
   );
@@ -2521,6 +2655,7 @@ export async function closeAgentConversation(input: {
   } finally {
     client.release();
   }
+  await detachInboundBotFlow(input.tenantId, convRow.rows[0].phone);
   const refreshed = await listAgentConversations(input.tenantId);
   return refreshed.find((c) => c.id === input.conversationId) ?? null;
 }
@@ -2564,6 +2699,7 @@ export async function reopenAgentConversation(input: {
            status = 'em_andamento',
            closed_at = NULL,
            closed_by = NULL,
+           metadata = COALESCE(metadata, '{}'::jsonb) || '{"bot_only":false}'::jsonb,
            updated_at = now()
        WHERE id = $1 AND tenant_id = $2`,
       [input.conversationId, input.tenantId]
@@ -2647,6 +2783,7 @@ export async function applyFlowAgentHandoff(input: {
   const meta = {
     queue: queueKey,
     flowHandoff: true,
+    bot_only: false,
     flowId: input.flowId ?? null,
     handoffNodeId: input.nodeId ?? null,
     handoffAt: new Date().toISOString(),

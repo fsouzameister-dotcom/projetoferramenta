@@ -6,6 +6,7 @@ import {
   type CapturarEntradaAwaiting,
 } from "./capturar-entrada";
 import { applyFlowAgentHandoff } from "./agent-conversations";
+import { clearInboundFlowSessionForPhone } from "./inbound-flow-session";
 import {
   executeMensagemNode,
   parseMensagemNodeConfig,
@@ -941,6 +942,9 @@ export async function executeFlow(
            WHERE id = $3::uuid AND tenant_id = $4::uuid`,
           [closureStatus, tabLabel ?? null, input.conversationId, tenantId]
         );
+        if (input.phone?.trim()) {
+          await clearInboundFlowSessionForPhone(tenantId, input.phone);
+        }
       }
       trace.push({
         nodeId: currentNode.id,

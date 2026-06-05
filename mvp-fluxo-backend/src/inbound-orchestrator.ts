@@ -1,6 +1,7 @@
 import type { CapturarEntradaAwaiting } from "./capturar-entrada";
 import {
   recordBotOutboundMessage,
+  recordBotPhaseInboundMessage,
   recordInboundWhatsAppMessage,
   phoneDigitsOnly,
   shouldRouteInboundToBot,
@@ -189,7 +190,7 @@ async function deliverOutboundIfWhatsApp(input: {
         phone: input.phone,
         textBody: outbound.body,
         providerMessageId: sent.messageId,
-        botName: "Bot",
+        botName: "Cleo",
       });
     }
   }
@@ -254,23 +255,6 @@ export async function processInboundMessage(
 
   let conversationId = input.conversationId;
 
-  if (input.mirrorToAgentInbox && input.phone && input.providerMessageId) {
-    const recorded = await recordInboundWhatsAppMessage({
-      tenantId: input.tenantId,
-      providerMessageId: input.providerMessageId,
-      fromWaId: input.phone,
-      textBody: messageText,
-      contactName: input.contactName,
-      timestampIso: new Date().toISOString(),
-    });
-    if (recorded.conversationId) {
-      conversationId = recorded.conversationId;
-    }
-    if (recorded.duplicate) {
-      return { routed: false, conversationId };
-    }
-  }
-
   if (!(await claimInboundProviderMessage(input.tenantId, input.providerMessageId))) {
     return { routed: false, conversationId };
   }
@@ -280,14 +264,56 @@ export async function processInboundMessage(
     phone: input.phone,
     conversationId,
   });
+
   if (!botGate.route) {
+    if (input.mirrorToAgentInbox && input.phone && input.providerMessageId) {
+      const recorded = await recordInboundWhatsAppMessage({
+        tenantId: input.tenantId,
+        providerMessageId: input.providerMessageId,
+        fromWaId: input.phone,
+        textBody: messageText,
+        contactName: input.contactName,
+        timestampIso: new Date().toISOString(),
+      });
+      if (recorded.conversationId) {
+        conversationId = recorded.conversationId;
+      }
+      if (recorded.duplicate) {
+        return { routed: false, conversationId };
+      }
+    }
     if (input.phone?.trim()) {
       await clearInboundFlowSessionForPhone(input.tenantId, input.phone);
     }
     return { routed: false, conversationId: botGate.conversationId ?? conversationId };
   }
 
-  const existingSession = await loadSession(input.tenantId, contactKey);
+  let freshBotSession = false;
+  if (input.phone && input.providerMessageId) {
+    const recorded = await recordBotPhaseInboundMessage({
+      tenantId: input.tenantId,
+      providerMessageId: input.providerMessageId,
+      fromWaId: input.phone,
+      textBody: messageText,
+      contactName: input.contactName,
+      timestampIso: new Date().toISOString(),
+    });
+    if (recorded.duplicate) {
+      return { routed: false, conversationId: recorded.conversationId };
+    }
+    if (recorded.conversationId) {
+      conversationId = recorded.conversationId;
+    }
+    freshBotSession = recorded.freshBotSession;
+  }
+
+  if (freshBotSession && input.phone?.trim()) {
+    await clearInboundFlowSessionForPhone(input.tenantId, input.phone);
+  }
+
+  const existingSession = freshBotSession
+    ? null
+    : await loadSession(input.tenantId, contactKey);
   if (existingSession) {
     const resumeInput: ExecuteFlowInput = {
       startNodeId: existingSession.awaitingInput.nodeId,
