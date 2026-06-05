@@ -28,6 +28,10 @@ import {
   listFlowResponseEvents,
 } from "../flow-response-events";
 import {
+  buildFlowSpreadsheetReport,
+  flowSpreadsheetToCsv,
+} from "../flow-responses-spreadsheet";
+import {
   createTabulacao,
   deleteTabulacao,
   listTabulacoesByTenant,
@@ -3536,6 +3540,122 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           500,
           ERROR_CODES.reports.FLOW_RESPONSES_AGGREGATE_FAILED,
           "Erro ao agregar respostas de fluxo"
+        );
+      }
+    }
+  );
+
+  fastify.get<{
+    Querystring: {
+      flowId: string;
+      from?: string;
+      to?: string;
+      limit?: number;
+    };
+  }>(
+    "/reports/flow-responses/spreadsheet",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          additionalProperties: false,
+          required: ["flowId"],
+          properties: {
+            flowId: { type: "string" },
+            from: { type: "string" },
+            to: { type: "string" },
+            limit: { type: "number", minimum: 1, maximum: 10000 },
+          },
+        },
+        response: {
+          200: successEnvelopeSchema({ type: "object", additionalProperties: true }),
+          403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        },
+      },
+    },
+    async (request, reply) => {
+      ensureAdminAccess(request.user?.role_name);
+      const tenantId = request.tenant.id;
+      const q = request.query ?? {};
+      if (!q.flowId?.trim()) {
+        throw new ApiError(400, ERROR_CODES.common.VALIDATION_ERROR, "flowId é obrigatório");
+      }
+      try {
+        const report = await buildFlowSpreadsheetReport({
+          tenantId,
+          flowId: q.flowId.trim(),
+          from: q.from,
+          to: q.to,
+          limit: q.limit,
+        });
+        return sendSuccess(request, reply, report);
+      } catch (err) {
+        request.log.error(err);
+        throw new ApiError(
+          500,
+          ERROR_CODES.reports.FLOW_RESPONSES_SPREADSHEET_FAILED,
+          "Erro ao montar planilha de respostas"
+        );
+      }
+    }
+  );
+
+  fastify.get<{
+    Querystring: {
+      flowId: string;
+      from?: string;
+      to?: string;
+      limit?: number;
+      format?: string;
+    };
+  }>(
+    "/reports/flow-responses/export",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          additionalProperties: false,
+          required: ["flowId"],
+          properties: {
+            flowId: { type: "string" },
+            from: { type: "string" },
+            to: { type: "string" },
+            limit: { type: "number", minimum: 1, maximum: 10000 },
+            format: { type: "string", enum: ["csv", "xlsx"] },
+          },
+        },
+        response: {
+          403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        },
+      },
+    },
+    async (request, reply) => {
+      ensureAdminAccess(request.user?.role_name);
+      const tenantId = request.tenant.id;
+      const q = request.query ?? {};
+      if (!q.flowId?.trim()) {
+        throw new ApiError(400, ERROR_CODES.common.VALIDATION_ERROR, "flowId é obrigatório");
+      }
+      try {
+        const report = await buildFlowSpreadsheetReport({
+          tenantId,
+          flowId: q.flowId.trim(),
+          from: q.from,
+          to: q.to,
+          limit: q.limit,
+        });
+        const csv = flowSpreadsheetToCsv(report);
+        const format = q.format === "xlsx" ? "xlsx" : "csv";
+        const filename = `fluxo-respostas-${q.flowId.slice(0, 8)}.${format === "xlsx" ? "csv" : "csv"}`;
+        reply.header("Content-Type", "text/csv; charset=utf-8");
+        reply.header("Content-Disposition", `attachment; filename="${filename}"`);
+        return reply.send(csv);
+      } catch (err) {
+        request.log.error(err);
+        throw new ApiError(
+          500,
+          ERROR_CODES.reports.FLOW_RESPONSES_SPREADSHEET_FAILED,
+          "Erro ao exportar planilha de respostas"
         );
       }
     }

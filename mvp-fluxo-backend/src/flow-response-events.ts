@@ -214,7 +214,7 @@ export async function listFlowResponseEvents(
 
   const limit =
     typeof filter.limit === "number" && filter.limit > 0
-      ? Math.min(filter.limit, 500)
+      ? Math.min(filter.limit, 10000)
       : 100;
 
   const result = await pool.query(

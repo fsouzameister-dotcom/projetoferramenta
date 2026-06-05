@@ -92,7 +92,11 @@ export function parseCapturarEntradaConfig(
   const promptKey =
     typeof config.promptKey === "string" && config.promptKey.trim()
       ? slugify(config.promptKey)
-      : slugify(`node_${nodeId}`);
+      : typeof config.prompt_key === "string" && config.prompt_key.trim()
+        ? slugify(config.prompt_key)
+        : typeof config.variableName === "string" && config.variableName.trim()
+          ? slugify(config.variableName)
+          : slugify(`node_${nodeId}`);
   const inputModeRaw = typeof config.inputMode === "string" ? config.inputMode : "text";
   const inputMode: CaptureInputMode =
     inputModeRaw === "single_choice" || inputModeRaw === "multi_choice"

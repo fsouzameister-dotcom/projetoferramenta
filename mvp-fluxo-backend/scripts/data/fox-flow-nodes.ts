@@ -160,6 +160,7 @@ function cap(
       prompt,
       inputMode: "single_choice",
       variableName,
+      prompt_key: variableName,
       options,
       next_node_id: next,
       append_options_list: false,
