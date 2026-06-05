@@ -3,7 +3,9 @@ import {
   recordBotOutboundMessage,
   recordInboundWhatsAppMessage,
   phoneDigitsOnly,
+  shouldRouteInboundToBot,
 } from "./agent-conversations";
+import { clearInboundFlowSessionForPhone } from "./inbound-flow-session";
 import { executeFlow, type ExecuteFlowInput, type ExecuteFlowResult } from "./flow-executor";
 import {
   deliverFlowOutboundToWhatsApp,
@@ -271,6 +273,18 @@ export async function processInboundMessage(
 
   if (!(await claimInboundProviderMessage(input.tenantId, input.providerMessageId))) {
     return { routed: false, conversationId };
+  }
+
+  const botGate = await shouldRouteInboundToBot({
+    tenantId: input.tenantId,
+    phone: input.phone,
+    conversationId,
+  });
+  if (!botGate.route) {
+    if (input.phone?.trim()) {
+      await clearInboundFlowSessionForPhone(input.tenantId, input.phone);
+    }
+    return { routed: false, conversationId: botGate.conversationId ?? conversationId };
   }
 
   const existingSession = await loadSession(input.tenantId, contactKey);

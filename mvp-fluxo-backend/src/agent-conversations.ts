@@ -1,4 +1,5 @@
 import { pool } from "./db";
+import { clearInboundFlowSessionForPhone } from "./inbound-flow-session";
 import {
   getOutboundWhatsAppContext,
   WHATSAPP_PROVIDER_CLOUD,
@@ -249,6 +250,61 @@ export function normalizeWaIdToPhone(waId: string): string {
 /** Apenas dígitos (ex.: comparar conversa salva com ou sem máscara). */
 export function phoneDigitsOnly(phone: string): string {
   return phone.replace(/\D/g, "");
+}
+
+async function detachInboundBotFlow(tenantId: string, phone: string): Promise<void> {
+  await clearInboundFlowSessionForPhone(tenantId, phone);
+}
+
+/**
+ * Inbound só roteia para o bot quando a conversa não está sob controle humano.
+ * - em_andamento: agente ativo
+ * - em_espera com handoff do fluxo: fila do agente após transferência
+ */
+export async function shouldRouteInboundToBot(input: {
+  tenantId: string;
+  phone?: string;
+  conversationId?: string;
+}): Promise<{ route: boolean; conversationId?: string }> {
+  const digits = input.phone?.trim() ? phoneDigitsOnly(input.phone) : "";
+  const convId = input.conversationId?.trim();
+  if (!digits && !convId) return { route: true };
+
+  const result = await pool.query<{
+    id: string;
+    status: AgentConversationStatus;
+    metadata: { flowHandoff?: boolean } | null;
+    tags: string[] | null;
+  }>(
+    `SELECT id, status, metadata, tags
+     FROM agent_conversations
+     WHERE tenant_id = $1::uuid
+       AND lifecycle_status = 'open'
+       AND (
+         ($2::text <> '' AND regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') = $2)
+         OR ($3::uuid IS NOT NULL AND id = $3::uuid)
+       )
+     ORDER BY updated_at DESC
+     LIMIT 1`,
+    [input.tenantId, digits, convId ?? null]
+  );
+
+  const row = result.rows[0];
+  if (!row) return { route: true };
+
+  if (row.status === "em_andamento") {
+    return { route: false, conversationId: row.id };
+  }
+
+  if (row.status === "em_espera") {
+    const handoffMeta = row.metadata?.flowHandoff === true;
+    const handoffTag = Array.isArray(row.tags) && row.tags.includes("Handoff fluxo");
+    if (handoffMeta || handoffTag) {
+      return { route: false, conversationId: row.id };
+    }
+  }
+
+  return { route: true, conversationId: row.id };
 }
 
 async function ensureTenantSeed(tenantId: string) {
@@ -1229,6 +1285,7 @@ export async function appendAgentImageMessage(
       `UPDATE agent_conversations SET status = 'em_andamento', updated_at = now() WHERE id = $1 AND tenant_id = $2`,
       [conversationId, tenantId]
     );
+    await detachInboundBotFlow(tenantId, customerPhone);
   } finally {
     client.release();
   }
@@ -1686,6 +1743,7 @@ export async function appendAgentAudioMessage(
       `UPDATE agent_conversations SET status = 'em_andamento', updated_at = now() WHERE id = $1 AND tenant_id = $2`,
       [conversationId, tenantId]
     );
+    await detachInboundBotFlow(tenantId, customerPhone);
   } finally {
     client.release();
   }
@@ -1847,6 +1905,7 @@ export async function appendAgentAttachmentMessage(
       `UPDATE agent_conversations SET status = 'em_andamento', updated_at = now() WHERE id = $1 AND tenant_id = $2`,
       [conversationId, tenantId]
     );
+    await detachInboundBotFlow(tenantId, customerPhone);
   } finally {
     client.release();
   }
@@ -2221,6 +2280,7 @@ export async function appendAgentMessage(
        WHERE id = $1 AND tenant_id = $2`,
       [conversationId, tenantId]
     );
+    await detachInboundBotFlow(tenantId, customerPhone);
   } finally {
     client.release();
   }
@@ -2508,6 +2568,7 @@ export async function reopenAgentConversation(input: {
        WHERE id = $1 AND tenant_id = $2`,
       [input.conversationId, input.tenantId]
     );
+    await detachInboundBotFlow(input.tenantId, convResult.rows[0].phone);
   } finally {
     client.release();
   }
@@ -2590,6 +2651,10 @@ export async function applyFlowAgentHandoff(input: {
     handoffNodeId: input.nodeId ?? null,
     handoffAt: new Date().toISOString(),
   };
+  const phoneRow = await pool.query<{ phone: string }>(
+    `SELECT phone FROM agent_conversations WHERE id = $1 AND tenant_id = $2`,
+    [input.conversationId, input.tenantId]
+  );
   const result = await pool.query(
     `UPDATE agent_conversations
      SET status = 'em_espera',
@@ -2604,5 +2669,9 @@ export async function applyFlowAgentHandoff(input: {
      WHERE id = $2 AND tenant_id = $3`,
     [JSON.stringify(meta), input.conversationId, input.tenantId]
   );
-  return (result.rowCount ?? 0) > 0;
+  const applied = (result.rowCount ?? 0) > 0;
+  if (applied && phoneRow.rows[0]?.phone) {
+    await detachInboundBotFlow(input.tenantId, phoneRow.rows[0].phone);
+  }
+  return applied;
 }
