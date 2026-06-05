@@ -593,19 +593,12 @@ export async function recordInboundWhatsAppMessage(input: {
       throw e;
     }
 
-    await client.query(
-      `UPDATE agent_conversations
-       SET last_customer_message_at = $1::timestamptz,
-           window_expires_at = ($1::timestamptz + interval '24 hours'),
-           lifecycle_status = 'open',
-           status = CASE WHEN status = 'historico' THEN 'em_espera' ELSE status END,
-           contact_name = COALESCE($3, contact_name),
-           updated_at = now()
-       WHERE id = $2 AND tenant_id = $4`,
-      [input.timestampIso, convId, input.contactName?.trim() || null, input.tenantId]
+    await touchConversationAfterInbound(
+      convId,
+      input.tenantId,
+      input.timestampIso,
+      input.contactName?.trim() || null
     );
-
-    await ensureConversationProtocol({ tenantId: input.tenantId, conversationId: convId });
     return { duplicate: false, conversationId: convId };
   } finally {
     client.release();
@@ -802,23 +795,46 @@ function twilioMediaPublicUrl(publicUrl: string): string {
     : `https://api.clienton.com.br${publicUrl}`;
 }
 
+function isClosedLifecycle(status: string | null | undefined): boolean {
+  return status === "closed_manual" || status === "closed_window";
+}
+
+/** Atualiza conversa após inbound. Encerradas não voltam para fila do agente (ficam no histórico / fluxo). */
 async function touchConversationAfterInbound(
   convId: string,
   tenantId: string,
   timestampIso: string,
   contactName?: string | null
 ) {
-  await pool.query(
-    `UPDATE agent_conversations
-     SET last_customer_message_at = $1::timestamptz,
-         window_expires_at = ($1::timestamptz + interval '24 hours'),
-         lifecycle_status = 'open',
-         status = CASE WHEN status = 'historico' THEN 'em_espera' ELSE status END,
-         contact_name = COALESCE($3, contact_name),
-         updated_at = now()
-     WHERE id = $2 AND tenant_id = $4`,
-    [timestampIso, convId, contactName?.trim() || null, tenantId]
+  const current = await pool.query<{ lifecycle_status: string }>(
+    `SELECT lifecycle_status FROM agent_conversations WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+    [convId, tenantId]
   );
+  const lifecycle = current.rows[0]?.lifecycle_status ?? "open";
+
+  if (isClosedLifecycle(lifecycle)) {
+    await pool.query(
+      `UPDATE agent_conversations
+       SET last_customer_message_at = $1::timestamptz,
+           window_expires_at = ($1::timestamptz + interval '24 hours'),
+           contact_name = COALESCE($3, contact_name),
+           updated_at = now()
+       WHERE id = $2::uuid AND tenant_id = $4::uuid`,
+      [timestampIso, convId, contactName?.trim() || null, tenantId]
+    );
+  } else {
+    await pool.query(
+      `UPDATE agent_conversations
+       SET last_customer_message_at = $1::timestamptz,
+           window_expires_at = ($1::timestamptz + interval '24 hours'),
+           lifecycle_status = 'open',
+           status = CASE WHEN status = 'historico' THEN 'em_espera' ELSE status END,
+           contact_name = COALESCE($3, contact_name),
+           updated_at = now()
+       WHERE id = $2::uuid AND tenant_id = $4::uuid`,
+      [timestampIso, convId, contactName?.trim() || null, tenantId]
+    );
+  }
   await ensureConversationProtocol({ tenantId, conversationId: convId });
 }
 
