@@ -24,6 +24,12 @@ type MonitoringMessage = {
   createdAt: string;
 };
 
+type CloseTabulacao = {
+  id: string;
+  label: string;
+  description: string | null;
+};
+
 const STATUS_OPTIONS = [
   { value: "todas", label: "Todas" },
   { value: "em_espera", label: "Em espera" },
@@ -47,6 +53,10 @@ function sourceClass(source?: string) {
   return "bg-gray-100 text-gray-600";
 }
 
+function isConversationOpen(conv: MonitoringConversation): boolean {
+  return conv.lifecycleStatus === "open" && conv.status !== "historico";
+}
+
 export default function MonitoringAdmin() {
   const [items, setItems] = useState<MonitoringConversation[]>([]);
   const [total, setTotal] = useState(0);
@@ -57,6 +67,11 @@ export default function MonitoringAdmin() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<MonitoringMessage[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [showCloseModal, setShowCloseModal] = useState(false);
+  const [closeTabulacoes, setCloseTabulacoes] = useState<CloseTabulacao[]>([]);
+  const [selectedTabulacaoId, setSelectedTabulacaoId] = useState("");
+  const [loadingCloseTabulacoes, setLoadingCloseTabulacoes] = useState(false);
+  const [closingConversation, setClosingConversation] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -95,7 +110,49 @@ export default function MonitoringAdmin() {
     }
   };
 
+  const openCloseModal = async () => {
+    if (!selectedId) return;
+    setShowCloseModal(true);
+    setSelectedTabulacaoId("");
+    setLoadingCloseTabulacoes(true);
+    try {
+      const res = await api.get(
+        `/admin/monitoring/conversations/${selectedId}/tabulacoes-for-close`
+      );
+      const rows = unwrapApiData<CloseTabulacao[]>(res.data);
+      setCloseTabulacoes(rows);
+      if (rows.length === 1) setSelectedTabulacaoId(rows[0].id);
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Não foi possível carregar tabulações."));
+      setShowCloseModal(false);
+    } finally {
+      setLoadingCloseTabulacoes(false);
+    }
+  };
+
+  const confirmCloseConversation = async () => {
+    if (!selectedId || !selectedTabulacaoId.trim()) {
+      window.alert("Selecione uma tabulação para encerrar o contato.");
+      return;
+    }
+    setClosingConversation(true);
+    try {
+      await api.post(`/admin/monitoring/conversations/${selectedId}/close`, {
+        tabulacaoId: selectedTabulacaoId,
+      });
+      setShowCloseModal(false);
+      setSelectedId(null);
+      setMessages([]);
+      await load();
+    } catch (err) {
+      window.alert(getApiErrorMessage(err, "Não foi possível encerrar o contato."));
+    } finally {
+      setClosingConversation(false);
+    }
+  };
+
   const selected = items.find((c) => c.id === selectedId) ?? null;
+  const canCloseSelected = selected ? isConversationOpen(selected) : false;
 
   return (
     <div className="p-8 max-w-7xl">
@@ -200,11 +257,25 @@ export default function MonitoringAdmin() {
             <p className="text-sm text-gray-500">Selecione uma conversa para ver o histórico.</p>
           ) : (
             <>
-              <div className="mb-4 pb-3 border-b border-gray-100">
-                <h2 className="font-semibold text-gray-900">{selected.contactName}</h2>
-                <p className="text-sm text-gray-600">{selected.phone}</p>
-                {selected.protocolNumber ? (
-                  <p className="text-xs text-gray-500 mt-1">Protocolo: {selected.protocolNumber}</p>
+              <div className="mb-4 pb-3 border-b border-gray-100 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="font-semibold text-gray-900">{selected.contactName}</h2>
+                  <p className="text-sm text-gray-600">{selected.phone}</p>
+                  {selected.protocolNumber ? (
+                    <p className="text-xs text-gray-500 mt-1">Protocolo: {selected.protocolNumber}</p>
+                  ) : null}
+                  {!canCloseSelected ? (
+                    <p className="text-xs text-gray-500 mt-1">Contato já encerrado.</p>
+                  ) : null}
+                </div>
+                {canCloseSelected ? (
+                  <button
+                    type="button"
+                    onClick={() => void openCloseModal()}
+                    className="px-3 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-500"
+                  >
+                    Encerrar contato
+                  </button>
                 ) : null}
               </div>
               {loadingMessages ? (
@@ -235,6 +306,74 @@ export default function MonitoringAdmin() {
           )}
         </div>
       </div>
+
+      {showCloseModal ? (
+        <div className="fixed inset-0 z-[75] bg-black/45 flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white border border-gray-200 rounded-xl p-5 shadow-xl">
+            <h2 className="text-lg font-semibold text-gray-900 mb-1">Encerrar contato</h2>
+            <p className="text-sm text-gray-600 mb-4">
+              O cliente receberá a mensagem de encerramento configurada. A sessão do bot também será
+              encerrada.
+            </p>
+            {selected?.protocolNumber ? (
+              <p className="text-xs text-gray-500 font-mono mb-3">
+                Protocolo: {selected.protocolNumber}
+              </p>
+            ) : null}
+            {loadingCloseTabulacoes ? (
+              <p className="text-sm text-gray-500">Carregando tabulações…</p>
+            ) : closeTabulacoes.length === 0 ? (
+              <p className="text-sm text-amber-700">
+                Nenhuma tabulação disponível para esta fila. Configure em Operação → Tabulações.
+              </p>
+            ) : (
+              <ul className="space-y-2 max-h-64 overflow-y-auto">
+                {closeTabulacoes.map((tab) => (
+                  <li key={tab.id}>
+                    <label className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 bg-gray-50 cursor-pointer hover:border-teal-400">
+                      <input
+                        type="radio"
+                        name="monitoring-close-tabulacao"
+                        className="mt-1"
+                        checked={selectedTabulacaoId === tab.id}
+                        onChange={() => setSelectedTabulacaoId(tab.id)}
+                      />
+                      <span>
+                        <span className="text-sm font-medium text-gray-900 block">{tab.label}</span>
+                        {tab.description ? (
+                          <span className="text-xs text-gray-500 block mt-0.5">{tab.description}</span>
+                        ) : null}
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowCloseModal(false)}
+                className="px-4 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 text-sm"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={
+                  closingConversation ||
+                  loadingCloseTabulacoes ||
+                  !selectedTabulacaoId ||
+                  closeTabulacoes.length === 0
+                }
+                onClick={() => void confirmCloseConversation()}
+                className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-500 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {closingConversation ? "Encerrando…" : "Confirmar encerramento"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

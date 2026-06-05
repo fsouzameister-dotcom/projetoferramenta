@@ -2519,6 +2519,104 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
     return sendSuccess(request, reply, messages);
   });
 
+  fastify.get<{
+    Params: { conversationId: string };
+  }>("/admin/monitoring/conversations/:conversationId/tabulacoes-for-close", {
+    schema: {
+      params: conversationIdParamSchema,
+      response: {
+        200: successEnvelopeSchema({ type: "array", items: tabulacaoSchema }),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        404: errorEnvelopeSchema([ERROR_CODES.agent.AGENT_CONVERSATION_NOT_FOUND]),
+        500: errorEnvelopeSchema([ERROR_CODES.tabulacoes.TABULACOES_LIST_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    const tenantId = request.tenant.id;
+    const { conversationId } = request.params;
+    const conv = await pool.query<{ metadata: { queue?: string } | null }>(
+      `SELECT metadata FROM agent_conversations WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+      [conversationId, tenantId]
+    );
+    if (!conv.rows[0]) {
+      throw new ApiError(
+        404,
+        ERROR_CODES.agent.AGENT_CONVERSATION_NOT_FOUND,
+        "Conversa não encontrada"
+      );
+    }
+    const rawQueue =
+      typeof conv.rows[0].metadata?.queue === "string"
+        ? conv.rows[0].metadata.queue
+        : null;
+    const rows = await listTabulacoesForConversationClose({ tenantId, queueKey: rawQueue });
+    return sendSuccess(request, reply, rows);
+  });
+
+  fastify.post<{
+    Params: { conversationId: string };
+    Body: { tabulacaoId: string };
+  }>("/admin/monitoring/conversations/:conversationId/close", {
+    schema: {
+      params: conversationIdParamSchema,
+      body: {
+        type: "object",
+        additionalProperties: false,
+        required: ["tabulacaoId"],
+        properties: { tabulacaoId: { type: "string", minLength: 1 } },
+      },
+      response: {
+        200: successEnvelopeSchema({
+          type: "object",
+          additionalProperties: true,
+        }),
+        400: errorEnvelopeSchema([
+          ERROR_CODES.agent.TABULACAO_REQUIRED,
+          ERROR_CODES.agent.TABULACAO_NOT_ALLOWED,
+        ]),
+        403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        404: errorEnvelopeSchema([ERROR_CODES.agent.AGENT_CONVERSATION_NOT_FOUND]),
+        500: errorEnvelopeSchema([ERROR_CODES.agent.AGENT_CONVERSATION_CREATE_FAILED]),
+      },
+    },
+  }, async (request, reply) => {
+    ensureAdminAccess(request.user?.role_name);
+    const { conversationId } = request.params;
+    const closedByLabel = request.user?.name || request.user?.email || "admin";
+    try {
+      const updated = await closeAgentConversation({
+        tenantId: request.tenant.id,
+        conversationId,
+        closedBy: `admin:${closedByLabel}`,
+        tabulacaoId: request.body.tabulacaoId,
+      });
+      if (!updated) {
+        throw new ApiError(
+          404,
+          ERROR_CODES.agent.AGENT_CONVERSATION_NOT_FOUND,
+          "Conversa não encontrada"
+        );
+      }
+      return sendSuccess(request, reply, updated);
+    } catch (error) {
+      request.log.error(error);
+      if (error instanceof AgentConversationRuleError) {
+        const code =
+          error.code === "TABULACAO_NOT_ALLOWED"
+            ? ERROR_CODES.agent.TABULACAO_NOT_ALLOWED
+            : ERROR_CODES.agent.TABULACAO_REQUIRED;
+        throw new ApiError(400, code, error.message);
+      }
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(
+        500,
+        ERROR_CODES.agent.AGENT_CONVERSATION_CREATE_FAILED,
+        "Erro ao encerrar conversa"
+      );
+    }
+  });
+
   fastify.patch<{
     Body: { paused: boolean };
   }>("/bot-safeguard", {
