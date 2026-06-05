@@ -56,6 +56,7 @@ export type AgentMessage = {
   sender_name?: string;
   delivery?: AgentMessageDelivery;
   text?: string;
+  created_at?: string;
   createdAt: string;
   contact?: { name: string; phone: string };
   location?: { label: string; lat: number; lng: number };
@@ -206,11 +207,37 @@ async function ensureSchema() {
   }
 }
 
-function hhmm(isoDate: string) {
-  return new Date(isoDate).toLocaleTimeString("pt-BR", {
+const AGENT_DISPLAY_TZ = "America/Sao_Paulo";
+
+function formatAgentMessageTime(isoDate: string | Date): string {
+  const d = isoDate instanceof Date ? isoDate : new Date(isoDate);
+  if (Number.isNaN(d.getTime())) return "";
+  const now = new Date();
+  const timePart = d.toLocaleTimeString("pt-BR", {
+    timeZone: AGENT_DISPLAY_TZ,
     hour: "2-digit",
     minute: "2-digit",
   });
+  const sameDay =
+    d.toLocaleDateString("pt-BR", {
+      timeZone: AGENT_DISPLAY_TZ,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }) ===
+    now.toLocaleDateString("pt-BR", {
+      timeZone: AGENT_DISPLAY_TZ,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+  if (sameDay) return timePart;
+  const datePart = d.toLocaleDateString("pt-BR", {
+    timeZone: AGENT_DISPLAY_TZ,
+    day: "2-digit",
+    month: "2-digit",
+  });
+  return `${datePart} ${timePart}`;
 }
 
 /** wa_id da Meta → mesmo formato amigável (+ e dígitos). */
@@ -354,7 +381,8 @@ export async function listAgentConversations(tenantId: string): Promise<AgentCon
         sender_name: msg.sender_name ?? undefined,
         delivery: msg.delivery_status ?? undefined,
         text: msg.text_content ?? undefined,
-        createdAt: hhmm(msg.created_at),
+        created_at: new Date(msg.created_at).toISOString(),
+        createdAt: formatAgentMessageTime(msg.created_at),
         contact: msg.contact_payload ?? undefined,
         location: msg.location_payload ?? undefined,
         image: msg.image_payload ?? undefined,

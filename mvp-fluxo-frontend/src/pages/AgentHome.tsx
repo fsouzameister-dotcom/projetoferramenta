@@ -15,6 +15,11 @@ function googleMapsUrl(lat: number, lng: number): string {
   return `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lng}`)}`;
 }
 import logoClienton from "../../logo-clienton.png";
+import {
+  displayMessageTime,
+  formatMessageTime,
+  messageTimestampNow,
+} from "../lib/agent-datetime";
 import { clearSession } from "../lib/session";
 
 type ConversationStatus = "em_espera" | "em_andamento" | "historico";
@@ -30,6 +35,7 @@ type ChatMessage = {
   sender_name?: string;
   delivery?: MessageDelivery;
   text?: string;
+  created_at?: string;
   createdAt: string;
   contact?: { name: string; phone: string };
   location?: { label: string; lat: number; lng: number };
@@ -475,6 +481,14 @@ export default function AgentHome() {
   };
 
   const pushLocalMessage = (conversationId: string, message: ChatMessage) => {
+    const normalized: ChatMessage = message.created_at
+      ? {
+          ...message,
+          createdAt: formatMessageTime(message.created_at),
+        }
+      : message.createdAt
+        ? message
+        : { ...message, ...messageTimestampNow() };
     if (resolvedMode === "api") {
       /* mídia em modo API usa POST dedicado; não acumular pending */
     } else if (["attachment", "audio", "image"].includes(message.type)) {
@@ -486,7 +500,7 @@ export default function AgentHome() {
     updateConversation(conversationId, (conv) => ({
       ...conv,
       status: "em_andamento",
-      messages: [...conv.messages, message],
+      messages: [...conv.messages, normalized],
     }));
   };
 
@@ -649,10 +663,7 @@ export default function AgentHome() {
       direction: "out",
       sender_name: userName,
       text: payload,
-      createdAt: new Date().toLocaleTimeString("pt-BR", {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
+      ...messageTimestampNow(),
       delivery: "sent",
     });
   };
@@ -776,10 +787,7 @@ export default function AgentHome() {
       direction: "in",
       sender_name: activeConversation.contactName || "Cliente",
       text: "Mensagem simulada do cliente para validar o layout do atendimento.",
-      createdAt: new Date().toLocaleTimeString("pt-BR", {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
+      ...messageTimestampNow(),
       delivery: "read",
     });
   };
@@ -818,10 +826,7 @@ export default function AgentHome() {
       type: "contact",
       direction: "out",
       sender_name: userName,
-      createdAt: new Date().toLocaleTimeString("pt-BR", {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
+      ...messageTimestampNow(),
       delivery: "sent",
       contact,
     });
@@ -863,10 +868,7 @@ export default function AgentHome() {
       type: "location",
       direction: "out",
       sender_name: userName,
-      createdAt: new Date().toLocaleTimeString("pt-BR", {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
+      ...messageTimestampNow(),
       delivery: "sent",
       location,
     });
@@ -918,10 +920,7 @@ export default function AgentHome() {
       type: "attachment",
       direction: "out",
       sender_name: userName,
-      createdAt: new Date().toLocaleTimeString("pt-BR", {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
+      ...messageTimestampNow(),
       delivery: "sent",
       attachment: {
         fileName: file.name,
@@ -962,10 +961,7 @@ export default function AgentHome() {
       type: "image",
       direction: "out",
       sender_name: userName,
-      createdAt: new Date().toLocaleTimeString("pt-BR", {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
+      ...messageTimestampNow(),
       delivery: "sent",
       image: {
         fileName: file.name,
@@ -1043,10 +1039,7 @@ export default function AgentHome() {
       type: "audio",
       direction: "out",
       sender_name: userName,
-      createdAt: new Date().toLocaleTimeString("pt-BR", {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
+      ...messageTimestampNow(),
       delivery: "sent",
       audio: { url: recordedAudioUrl, durationSec },
       text: "Áudio enviado",
@@ -1109,10 +1102,7 @@ export default function AgentHome() {
         text: `Template "${selected.friendlyName}" enviado${
           selected.contentSid ? ` (${selected.contentSid})` : ""
         }`,
-        createdAt: new Date().toLocaleTimeString("pt-BR", {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
+        ...messageTimestampNow(),
         delivery: "sent",
       });
     }
@@ -1467,7 +1457,7 @@ export default function AgentHome() {
                         </div>
                       ) : null}
                       <p className="text-[11px] text-gray-300 mt-1">
-                        {msg.createdAt}
+                        {displayMessageTime(msg)}
                         {msg.direction === "out" ? " • " : ""}
                         {msg.direction === "out" ? (
                           <span
