@@ -51,6 +51,10 @@ async function ensureSchema() {
       CREATE UNIQUE INDEX IF NOT EXISTS uq_inbound_route_tenant_source
       ON inbound_entry_routes (tenant_id, source_type, source_key)
     `);
+    await client.query(`
+      ALTER TABLE inbound_entry_routes
+      ADD COLUMN IF NOT EXISTS metadata jsonb NOT NULL DEFAULT '{}'::jsonb
+    `);
     schemaReady = true;
   } finally {
     client.release();
