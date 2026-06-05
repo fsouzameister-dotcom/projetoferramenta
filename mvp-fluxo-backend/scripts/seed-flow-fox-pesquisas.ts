@@ -17,8 +17,9 @@ const TENANT_ID =
   process.env.DEFAULT_LOGIN_TENANT_ID?.trim() ||
   "00000000-0000-4000-8000-000000000001";
 const FLOW_NAME = process.env.SEED_FOX_FLOW_NAME?.trim() || "Fluxo Fox Pesquisas";
+/** Chave dedicada (única no índice); match_any_source_key liga ao número Twilio real. */
 const TWILIO_SOURCE_KEY =
-  process.env.FOX_INBOUND_SOURCE_KEY?.trim() || "551150284949";
+  process.env.FOX_INBOUND_SOURCE_KEY?.trim() || "_trigger:fox-cadastrar-se";
 
 async function fetchFoxHidFormulario(): Promise<string> {
   const env = process.env.FOX_HID_FORMULARIO?.trim();
