@@ -14,6 +14,7 @@ import ReactFlow, {
 import "reactflow/dist/style.css";
 import api, { getApiErrorMessage, unwrapApiData } from "../api/client"; // Importa o cliente axios configurado
 import FlowAiSettingsPanel from "../components/FlowAiSettingsPanel";
+import PersonaSelect from "../components/PersonaSelect";
 import { nodeTypes } from "../components/flownodes"; // Seus tipos de nós personalizados
 
 // REMOVA ESTA LINHA: const tenantId = "1be433d5-f15b-4764-9a85-e88f3bc88732";
@@ -91,38 +92,6 @@ const paletteItems: PaletteItem[] = [
   ...productionPaletteItems,
   ...comingSoonPaletteItems,
 ];
-
-function ConversaPersonaSelect(props: {
-  value: string;
-  onChange: (personaId: string) => void;
-}) {
-  const [personas, setPersonas] = useState<Array<{ id: string; name: string }>>([]);
-  useEffect(() => {
-    api
-      .get("/ai/personas")
-      .then((res) => setPersonas(unwrapApiData(res.data)))
-      .catch(() => setPersonas([]));
-  }, []);
-  return (
-    <div className="mb-4">
-      <label className="block text-sm font-medium text-gray-700 mb-1">
-        Persona (opcional — usa a do fluxo)
-      </label>
-      <select
-        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900"
-        value={props.value}
-        onChange={(e) => props.onChange(e.target.value)}
-      >
-        <option value="">Padrão do fluxo</option>
-        {personas.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.name}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
 
 const FLOW_EDITOR_TOUR_STORAGE_KEY = "flow_editor_tour_completed_v1";
 const FLOW_EDITOR_TOUR_STEPS = [
@@ -1828,7 +1797,9 @@ export default function FlowEditor() {
                     placeholder="Instruções para a IA nesta etapa…"
                   />
                 </div>
-                <ConversaPersonaSelect
+                <PersonaSelect
+                  label="Persona (opcional — usa a do fluxo)"
+                  emptyLabel="Padrão do fluxo"
                   value={editNodeConfig.personaId || ""}
                   onChange={(personaId) =>
                     setEditNodeConfig({ ...editNodeConfig, personaId: personaId || undefined })
@@ -3066,20 +3037,15 @@ export default function FlowEditor() {
 
                 {(editNodeConfig.decisionMode || "simple") === "ai" && (
                   <>
-                    <div className="mb-4">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Persona IA (ID)
-                      </label>
-                      <input
-                        type="text"
-                        value={editNodeConfig.aiPersonaId || ""}
-                        onChange={(e) =>
-                          setEditNodeConfig({ ...editNodeConfig, aiPersonaId: e.target.value })
-                        }
-                        placeholder="id da persona configurada"
-                        className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
-                      />
-                    </div>
+                    <PersonaSelect
+                      label="Persona IA"
+                      emptyLabel="Selecione uma persona"
+                      required
+                      value={editNodeConfig.aiPersonaId || ""}
+                      onChange={(personaId) =>
+                        setEditNodeConfig({ ...editNodeConfig, aiPersonaId: personaId })
+                      }
+                    />
                     <div className="mb-4">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Prompt da decisão IA
