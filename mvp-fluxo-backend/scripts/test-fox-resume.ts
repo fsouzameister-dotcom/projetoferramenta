@@ -4,18 +4,22 @@
 import "dotenv/config";
 import { pool } from "../src/db";
 import { processInboundMessage } from "../src/inbound-orchestrator";
-import { whatsAppTwilioSourceKey } from "../src/inbound-routes";
+import { resolveInboundRoute } from "../src/inbound-routes";
 import { loadInboundFlowSession } from "../src/inbound-flow-session";
 
 const TENANT = process.env.DEFAULT_LOGIN_TENANT_ID?.trim() || "00000000-0000-4000-8000-000000000001";
-const ACCOUNT_SID = process.env.TEST_TWILIO_ACCOUNT_SID?.trim();
-const TO = process.env.TEST_TWILIO_TO?.trim() || "551150284949";
 const PHONE = process.env.TEST_PHONE?.trim() || "+5511992007226";
+
 async function main() {
-  if (!ACCOUNT_SID) {
-    throw new Error("Defina TEST_TWILIO_ACCOUNT_SID no ambiente");
+  const defaultRoute = await resolveInboundRoute({
+    tenantId: TENANT,
+    sourceType: "twilio_whatsapp",
+    sourceKey: process.env.TEST_TWILIO_SOURCE_KEY?.trim() || "551150284949",
+  });
+  if (!defaultRoute?.source_key) {
+    throw new Error("Rota Twilio padrão não encontrada");
   }
-  const sourceKey = whatsAppTwilioSourceKey(ACCOUNT_SID, TO);
+  const sourceKey = defaultRoute.source_key;
   const ts = Date.now();
   const r1 = await processInboundMessage({
     tenantId: TENANT,

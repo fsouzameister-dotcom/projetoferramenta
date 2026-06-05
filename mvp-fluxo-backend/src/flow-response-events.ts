@@ -69,7 +69,7 @@ async function ensureSchema() {
         node_id uuid NOT NULL,
         conversation_id uuid,
         phone text,
-        session_id uuid,
+        session_id text,
         question_key text NOT NULL,
         prompt_text text,
         answer_type text NOT NULL,
@@ -148,7 +148,7 @@ export async function recordFlowResponseEvent(
       question_key, prompt_text, answer_type, variable_name,
       selected_options, raw_value, metadata
     ) VALUES (
-      $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6::uuid,
+      $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6,
       $7, $8, $9, $10,
       $11::jsonb, $12, $13::jsonb
     )
