@@ -112,17 +112,32 @@ function buildWhatsAppSendContext(
   return null;
 }
 
+function buildOutboundQueue(input: {
+  outboundMessages?: FlowOutboundMessage[];
+  messages?: string[];
+}): FlowOutboundMessage[] {
+  const queue = [...(input.outboundMessages ?? [])];
+  if (queue.length) return queue;
+  for (const raw of input.messages ?? []) {
+    const body = raw.trim();
+    if (body) queue.push({ kind: "text", body });
+  }
+  return queue;
+}
+
 async function deliverOutboundIfWhatsApp(input: {
   tenantId: string;
   phone?: string;
   outboundMessages?: FlowOutboundMessage[];
+  messages?: string[];
 }): Promise<void> {
-  if (!input.phone?.trim() || !input.outboundMessages?.length) return;
+  const queue = buildOutboundQueue(input);
+  if (!input.phone?.trim() || !queue.length) return;
   const waCtx = await getOutboundWhatsAppContext(input.tenantId);
   const sendCtx = buildWhatsAppSendContext(waCtx);
   if (!sendCtx) return;
   const toDigits = phoneDigitsOnly(input.phone);
-  for (const outbound of input.outboundMessages) {
+  for (const outbound of queue) {
     await deliverFlowOutboundToWhatsApp({
       ctx: sendCtx,
       toDigits,
@@ -235,22 +250,31 @@ export async function processInboundMessage(
       resumed: true,
     });
 
-    if (result.status === "awaiting_input" && result.awaitingInput) {
-      await saveSession({
-        ...existingSession,
-        variables: result.variables,
-        awaitingInput: result.awaitingInput,
-        conversationId: conversationId ?? existingSession.conversationId,
-      });
-    } else {
-      await clearSession(input.tenantId, contactKey);
-    }
-
     await deliverOutboundIfWhatsApp({
       tenantId: input.tenantId,
       phone: input.phone,
       outboundMessages: result.outboundMessages,
+      messages: result.messages,
     });
+
+    if (result.status === "awaiting_input" && result.awaitingInput) {
+      try {
+        await saveSession({
+          ...existingSession,
+          variables: result.variables,
+          awaitingInput: result.awaitingInput,
+          conversationId: conversationId ?? existingSession.conversationId,
+        });
+      } catch {
+        /* sessão Redis opcional — não bloqueia envio ao WhatsApp */
+      }
+    } else {
+      try {
+        await clearSession(input.tenantId, contactKey);
+      } catch {
+        /* ignore */
+      }
+    }
 
     return {
       routed: true,
@@ -285,26 +309,31 @@ export async function processInboundMessage(
     contactKey,
   });
 
-  if (result.status === "awaiting_input" && result.awaitingInput) {
-    await saveSession({
-      flowId: route.flow_id,
-      tenantId: input.tenantId,
-      contactKey,
-      phone: input.phone,
-      conversationId,
-      sessionId: `${input.sourceType}:${input.sourceKey}:${contactKey}`,
-      variables: result.variables,
-      awaitingInput: result.awaitingInput,
-      sourceType: input.sourceType,
-      sourceKey: input.sourceKey,
-    });
-  }
-
   await deliverOutboundIfWhatsApp({
     tenantId: input.tenantId,
     phone: input.phone,
     outboundMessages: result.outboundMessages,
+    messages: result.messages,
   });
+
+  if (result.status === "awaiting_input" && result.awaitingInput) {
+    try {
+      await saveSession({
+        flowId: route.flow_id,
+        tenantId: input.tenantId,
+        contactKey,
+        phone: input.phone,
+        conversationId,
+        sessionId: `${input.sourceType}:${input.sourceKey}:${contactKey}`,
+        variables: result.variables,
+        awaitingInput: result.awaitingInput,
+        sourceType: input.sourceType,
+        sourceKey: input.sourceKey,
+      });
+    } catch {
+      /* sessão Redis opcional — não bloqueia envio ao WhatsApp */
+    }
+  }
 
   return {
     routed: true,

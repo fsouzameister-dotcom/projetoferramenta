@@ -982,6 +982,7 @@ export async function executeFlow(
       });
       if (conversaResult.message) {
         messages.push(conversaResult.message);
+        outboundMessages.push({ kind: "text", body: conversaResult.message });
       }
       if (conversaResult.awaitingInput) {
         trace.push({
