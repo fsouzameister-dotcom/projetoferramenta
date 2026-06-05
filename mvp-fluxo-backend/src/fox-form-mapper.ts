@@ -138,6 +138,17 @@ export function buildFoxCadastroFormBody(
   if (vars.segmento_texto) {
     extraNotes.push(`Segmento declarado: ${String(vars.segmento_texto)}`);
   }
+  if (Array.isArray(vars.filhos_list) && vars.filhos_list.length > 0) {
+    const resumo = (vars.filhos_list as Array<Record<string, unknown>>)
+      .map((filho, idx) => {
+        const nome = String(filho.nome ?? "").trim();
+        const nasc = String(filho.nascimento ?? "").trim();
+        const sexo = String(filho.sexo ?? "").trim();
+        return `${idx + 1}) ${nome} — ${nasc} — sexo ${sexo}`;
+      })
+      .join(" | ");
+    extraNotes.push(`Filhos cadastrados: ${resumo}`);
+  }
   if (pixTipo === "2") {
     extraNotes.push(`PIX CNPJ informado: ${pixValor}`);
   }

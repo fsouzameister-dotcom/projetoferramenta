@@ -19,6 +19,16 @@ describe("flow-field-validators", () => {
     assert.strictEqual(r.ok, false);
   });
 
+  test("rejeita CPF só com dígitos sem máscara", () => {
+    const r = validateFlowField("cpf", "39053344705");
+    assert.strictEqual(r.ok, false);
+  });
+
+  test("rejeita telefone sem máscara", () => {
+    const r = validateFlowField("phone_br", "119992007226");
+    assert.strictEqual(r.ok, false);
+  });
+
   test("matchesInboundTrigger cadastrar-se", () => {
     assert.strictEqual(
       matchesInboundTrigger("Cadastrar-se", ["cadastrar-se"]),

@@ -80,6 +80,9 @@ export function parseCapturarEntradaConfig(
   validationType?: FlowFieldValidationType;
   validationOptions?: FlowFieldValidationOptions;
   invalidPrompt?: string;
+  appendOptionsList: boolean;
+  snapshotToArray?: string;
+  snapshotFields?: Record<string, string>;
 } {
   const config = asObject(raw);
   const prompt =
@@ -145,6 +148,25 @@ export function parseCapturarEntradaConfig(
       : config.validation_options && typeof config.validation_options === "object"
         ? (config.validation_options as FlowFieldValidationOptions)
         : undefined;
+  const appendOptionsList =
+    config.append_options_list === false || config.appendOptionsList === false
+      ? false
+      : true;
+  const snapshotToArray =
+    typeof config.snapshot_to_array === "string" && config.snapshot_to_array.trim()
+      ? config.snapshot_to_array.trim()
+      : typeof config.snapshotToArray === "string" && config.snapshotToArray.trim()
+        ? config.snapshotToArray.trim()
+        : undefined;
+  const snapshotFieldsRaw = config.snapshot_fields ?? config.snapshotFields;
+  const snapshotFields: Record<string, string> | undefined =
+    snapshotFieldsRaw && typeof snapshotFieldsRaw === "object" && !Array.isArray(snapshotFieldsRaw)
+      ? Object.fromEntries(
+          Object.entries(snapshotFieldsRaw as Record<string, unknown>)
+            .filter(([, v]) => typeof v === "string" && v.trim())
+            .map(([k, v]) => [k, String(v).trim()])
+        )
+      : undefined;
 
   return {
     ...config,
@@ -158,6 +180,9 @@ export function parseCapturarEntradaConfig(
     validationType,
     validationOptions,
     invalidPrompt,
+    appendOptionsList,
+    snapshotToArray,
+    snapshotFields,
     next_node_id:
       typeof config.next_node_id === "string" ? config.next_node_id : undefined,
   };
@@ -299,7 +324,10 @@ export function formatCapturarEntradaPrompt(
   config: ReturnType<typeof parseCapturarEntradaConfig>
 ): string {
   const lines = [config.prompt];
-  if (config.inputMode === "single_choice" || config.inputMode === "multi_choice") {
+  if (
+    config.appendOptionsList &&
+    (config.inputMode === "single_choice" || config.inputMode === "multi_choice")
+  ) {
     if (config.inputMode === "multi_choice") {
       lines.push(
         `(Escolha de ${config.minSelections} a ${config.maxSelections} opções)`

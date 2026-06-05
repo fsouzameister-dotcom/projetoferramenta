@@ -1,5 +1,6 @@
 export type ContadorPassagensConfig = {
   limitePassagens: number;
+  limiteVariable?: string;
   variableName: string;
   increment: number;
   nextNodeIdWithin: string | null;
@@ -36,6 +37,12 @@ export function parseContadorPassagensConfig(
         ? raw.variable_name.trim()
         : `contador_${nodeId.slice(0, 8)}`;
   const increment = readPositiveInt(raw, ["increment", "incremento"], 1) || 1;
+  const limiteVariable =
+    typeof raw.limite_variable === "string" && raw.limite_variable.trim()
+      ? raw.limite_variable.trim()
+      : typeof raw.limiteVariable === "string" && raw.limiteVariable.trim()
+        ? raw.limiteVariable.trim()
+        : undefined;
 
   const nextWithin =
     typeof raw.next_node_id_within === "string" && raw.next_node_id_within.trim()
@@ -52,6 +59,7 @@ export function parseContadorPassagensConfig(
 
   return {
     limitePassagens,
+    limiteVariable,
     variableName,
     increment,
     nextNodeIdWithin: nextWithin,
@@ -71,7 +79,14 @@ export function executeContadorPassagensNode(input: {
   const previous = Number(input.variables[parsed.variableName] ?? 0);
   const count = previous + parsed.increment;
   input.variables[parsed.variableName] = count;
-  const exceeded = count > parsed.limitePassagens;
+  const limiteFromVar = parsed.limiteVariable
+    ? Number(input.variables[parsed.limiteVariable])
+    : NaN;
+  const limite =
+    Number.isFinite(limiteFromVar) && limiteFromVar > 0
+      ? Math.floor(limiteFromVar)
+      : parsed.limitePassagens;
+  const exceeded = count > limite;
   input.variables[`${parsed.variableName}_ultrapassou`] = exceeded;
   input.variables.contador_ultrapassou = exceeded;
 
@@ -86,7 +101,8 @@ export function executeContadorPassagensNode(input: {
       previousCount: previous,
       count,
       increment: parsed.increment,
-      limitePassagens: parsed.limitePassagens,
+      limitePassagens: limite,
+      limiteVariable: parsed.limiteVariable ?? null,
       exceeded,
       branch: exceeded ? "exceeded" : "within",
     },

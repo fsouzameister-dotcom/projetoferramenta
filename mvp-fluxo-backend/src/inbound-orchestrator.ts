@@ -3,8 +3,10 @@ import {
   recordBotPhaseInboundMessage,
   recordInboundWhatsAppMessage,
   phoneDigitsOnly,
+  sendTenantClosureMessage,
   shouldRouteInboundToBot,
 } from "./agent-conversations";
+import { pool } from "./db";
 import {
   clearInboundFlowSession,
   clearInboundFlowSessionForPhone,
@@ -107,6 +109,26 @@ function buildOutboundQueue(input: {
     if (body) queue.push({ kind: "text", body });
   }
   return queue;
+}
+
+async function finalizeDeferredConversationClosure(input: {
+  tenantId: string;
+  defer?: ExecuteFlowResult["deferConversationClosure"];
+}): Promise<void> {
+  const defer = input.defer;
+  if (!defer?.conversationId) return;
+  const closureStatus = await sendTenantClosureMessage({
+    tenantId: input.tenantId,
+    conversationId: defer.conversationId,
+    tabulacaoLabel: defer.tabulacaoLabel,
+  });
+  await pool.query(
+    `UPDATE agent_conversations
+     SET closure_message_status = $1,
+         updated_at = now()
+     WHERE id = $2::uuid AND tenant_id = $3::uuid`,
+    [closureStatus, defer.conversationId, input.tenantId]
+  );
 }
 
 async function deliverOutboundIfWhatsApp(input: {
@@ -325,6 +347,10 @@ export async function processInboundMessage(
       outboundMessages: result.outboundMessages,
       messages: result.messages,
     });
+    await finalizeDeferredConversationClosure({
+      tenantId: input.tenantId,
+      defer: result.deferConversationClosure,
+    });
 
     if (result.status === "awaiting_input" && result.awaitingInput) {
       await saveInboundFlowSession({
@@ -384,6 +410,10 @@ export async function processInboundMessage(
     conversationId,
     outboundMessages: result.outboundMessages,
     messages: result.messages,
+  });
+  await finalizeDeferredConversationClosure({
+    tenantId: input.tenantId,
+    defer: result.deferConversationClosure,
   });
 
   if (result.status === "awaiting_input" && result.awaitingInput) {

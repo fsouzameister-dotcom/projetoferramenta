@@ -14,7 +14,6 @@ import {
 } from "./mensagem-outbound";
 import { executeContadorPassagensNode } from "./contador-passagens";
 import { executeEncerramentoNode } from "./encerramento";
-import { sendTenantClosureMessage } from "./agent-conversations";
 import { ensureConversationProtocol } from "./conversation-protocol";
 import { pool } from "./db";
 import {
@@ -92,6 +91,11 @@ export type ExecuteFlowResult = {
   trace: ExecutionTraceEntry[];
   awaitingInput?: CapturarEntradaAwaiting;
   lastResponseEventId?: string;
+  /** Protocolo de encerramento deve ser enviado após outbound do fluxo */
+  deferConversationClosure?: {
+    conversationId: string;
+    tabulacaoLabel?: string;
+  };
 };
 
 function asObject(value: unknown): FlowConfig {
@@ -532,7 +536,11 @@ async function executeCapturarEntradaNode(
 }> {
   const parsed = parseCapturarEntradaConfig(config, node.id);
   const waitTimeout = parseFlowWaitTimeoutConfig(config);
-  const promptMessage = formatCapturarEntradaPrompt(parsed);
+  const rendered = {
+    ...parsed,
+    prompt: resolveTemplate(parsed.prompt, variables),
+  };
+  const promptMessage = formatCapturarEntradaPrompt(rendered);
   const hasInput = input.userInput !== undefined && input.userInput !== null;
   const forceTimeout = input.resumeReason === "timeout";
   const elapsedTimeout =
@@ -575,7 +583,7 @@ async function executeCapturarEntradaNode(
   }
 
   if (!hasInput) {
-    const awaiting = buildCapturarEntradaAwaiting(node.id, parsed);
+    const awaiting = buildCapturarEntradaAwaiting(node.id, rendered);
     const awaitingStartedAt = new Date().toISOString();
     const timeoutAt =
       waitTimeout.waitTimeoutSeconds > 0
@@ -625,9 +633,9 @@ async function executeCapturarEntradaNode(
       const retryPrompt = [
         parsed.invalidPrompt ||
           "Não entendi. Por favor, digite apenas o número correspondente à sua resposta.",
-        formatCapturarEntradaPrompt(parsed),
+        formatCapturarEntradaPrompt(rendered),
       ].join("\n\n");
-      const awaiting = buildCapturarEntradaAwaiting(node.id, parsed);
+      const awaiting = buildCapturarEntradaAwaiting(node.id, rendered);
       return {
         nextNodeId: null,
         awaitingInput: {
@@ -654,9 +662,9 @@ async function executeCapturarEntradaNode(
     if (!validated.ok) {
       const retryPrompt = [
         parsed.invalidPrompt || validated.reason,
-        parsed.prompt,
+        rendered.prompt,
       ].join("\n\n");
-      const awaiting = buildCapturarEntradaAwaiting(node.id, parsed);
+      const awaiting = buildCapturarEntradaAwaiting(node.id, rendered);
       return {
         nextNodeId: null,
         awaitingInput: {
@@ -681,6 +689,27 @@ async function executeCapturarEntradaNode(
   }
   variables[`${resolved.variableName}_labels`] = resolved.selectedOptions.map((o) => o.label);
   variables[`${resolved.variableName}_options`] = resolved.selectedOptions;
+
+  if (parsed.snapshotToArray) {
+    const fields = parsed.snapshotFields ?? {
+      nome: "filho_nome",
+      nascimento: "filho_nascimento",
+      sexo: "filho_sexo",
+    };
+    const entry: Record<string, unknown> = {};
+    for (const [key, varName] of Object.entries(fields)) {
+      entry[key] = variables[varName];
+    }
+    const current = Array.isArray(variables[parsed.snapshotToArray])
+      ? (variables[parsed.snapshotToArray] as unknown[])
+      : [];
+    variables[parsed.snapshotToArray] = [...current, entry];
+    if (current.length === 0) {
+      variables.filho_nome = variables[fields.nome ?? "filho_nome"];
+      variables.filho_nascimento = variables[fields.nascimento ?? "filho_nascimento"];
+      variables.filho_sexo = variables[fields.sexo ?? "filho_sexo"];
+    }
+  }
 
   let lastResponseEventId: string | undefined;
   const shouldPersist = input.persistResponses !== false;
@@ -764,6 +793,7 @@ export async function executeFlow(
 
   let steps = 0;
   let lastResponseEventId: string | undefined;
+  let deferConversationClosure: ExecuteFlowResult["deferConversationClosure"];
   let captureInputConsumed = false;
   let flowUserInput: string | string[] | undefined = input.userInput;
   const allNodesLite = nodes.map((n) => ({
@@ -1021,22 +1051,20 @@ export async function executeFlow(
           tenantId,
           conversationId: input.conversationId,
         });
-        const closureStatus = await sendTenantClosureMessage({
-          tenantId,
+        deferConversationClosure = {
           conversationId: input.conversationId,
           tabulacaoLabel: tabLabel,
-        });
+        };
         await pool.query(
           `UPDATE agent_conversations
            SET lifecycle_status = 'closed_manual',
                status = 'historico',
                closed_at = now(),
                closed_by = 'flow:encerramento',
-               closure_message_status = $1,
-               tabulacao_label = COALESCE($2, tabulacao_label),
+               tabulacao_label = COALESCE($1, tabulacao_label),
                updated_at = now()
-           WHERE id = $3::uuid AND tenant_id = $4::uuid`,
-          [closureStatus, tabLabel ?? null, input.conversationId, tenantId]
+           WHERE id = $2::uuid AND tenant_id = $3::uuid`,
+          [tabLabel ?? null, input.conversationId, tenantId]
         );
         if (input.phone?.trim()) {
           await clearInboundFlowSessionForPhone(tenantId, input.phone);
@@ -1059,6 +1087,7 @@ export async function executeFlow(
         outboundMessages,
         variables,
         trace,
+        ...(deferConversationClosure ? { deferConversationClosure } : {}),
         ...(lastResponseEventId ? { lastResponseEventId } : {}),
       };
     } else if (currentNode.type === "conversa") {

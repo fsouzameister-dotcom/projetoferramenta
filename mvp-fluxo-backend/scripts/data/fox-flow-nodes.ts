@@ -71,6 +71,8 @@ export const FOX_IDS = {
   msg_linkedin: "b2000054-0001-4054-8001-000000000054",
   msg_bancos: "b2000055-0001-4055-8001-000000000055",
   msg_pix_valor: "b2000056-0001-4056-8001-000000000056",
+  cap_qtd_filhos: "b2000057-0001-4057-8001-000000000057",
+  contador_filho: "b2000058-0001-4058-8001-000000000058",
 } as const;
 
 function pos(x: number, y: number) {
@@ -160,9 +162,37 @@ function cap(
       variableName,
       options,
       next_node_id: next,
+      append_options_list: false,
       invalid_prompt:
         invalidPrompt ||
         "Não entendi. Por favor, digite apenas o número correspondente à sua resposta.",
+    },
+  };
+}
+
+function contador(
+  id: string,
+  name: string,
+  variableName: string,
+  limiteVariable: string,
+  nextWithin: string,
+  nextExceeded: string,
+  x: number,
+  y: number
+) {
+  return {
+    id,
+    type: "contador",
+    name,
+    is_start: false,
+    config: {
+      ...pos(x, y),
+      variableName,
+      limite_variable: limiteVariable,
+      limite_passagens: 5,
+      increment: 1,
+      next_node_id_within: nextWithin,
+      next_node_id_exceeded: nextExceeded,
     },
   };
 }
@@ -420,15 +450,41 @@ export function buildFoxFlowNodes(foxHidFormulario: string) {
       40,
       1440
     ),
-    dec(I.dec_filhos, "Tem filhos?", "tem_filhos", "1", I.msg_filho_nome, I.cap_carro, 40, 1520),
+    dec(I.dec_filhos, "Tem filhos?", "tem_filhos", "1", I.cap_qtd_filhos, I.cap_carro, 40, 1520),
+    cap(
+      I.cap_qtd_filhos,
+      "Qtd filhos",
+      "Quantos filhos você tem?\n(Digite o número)\n\n1️⃣ 1 filho\n2️⃣ 2 filhos\n3️⃣ 3 filhos\n4️⃣ 4 filhos\n5️⃣ 5 filhos",
+      "qtd_filhos",
+      [
+        { id: "1", label: "1 filho" },
+        { id: "2", label: "2 filhos" },
+        { id: "3", label: "3 filhos" },
+        { id: "4", label: "4 filhos" },
+        { id: "5", label: "5 filhos" },
+      ],
+      I.contador_filho,
+      280,
+      1520
+    ),
+    contador(
+      I.contador_filho,
+      "Loop filhos",
+      "filho_indice",
+      "qtd_filhos",
+      I.msg_filho_nome,
+      I.cap_carro,
+      280,
+      1600
+    ),
     ...ask(
       I.msg_filho_nome,
       I.recv_filho_nome,
       "Nome filho(a)",
-      "Qual o nome do(a) filho(a)?",
+      "Qual o nome do(a) filho(a) {{filho_indice}}?",
       "filho_nome",
       I.msg_filho_nasc,
-      280,
+      480,
       1520,
       { validation_type: "full_name" }
     ),
@@ -436,26 +492,38 @@ export function buildFoxFlowNodes(foxHidFormulario: string) {
       I.msg_filho_nasc,
       I.recv_filho_nasc,
       "Nasc. filho(a)",
-      "Qual a data de nascimento do(s) seu(s) filho(s)?\nFormato: DD/MM/AAAA",
+      "Qual a data de nascimento do(a) filho(a) {{filho_indice}}?\nFormato: DD/MM/AAAA",
       "filho_nascimento",
       I.cap_filho_sexo,
-      280,
+      480,
       1600,
       { validation_type: "date_br", invalid_prompt: "Use DD/MM/AAAA." }
     ),
-    cap(
-      I.cap_filho_sexo,
-      "Sexo filho(a)",
-      "Qual o sexo do(s) filho(s)?\n1️⃣ Masculino\n2️⃣ Feminino",
-      "filho_sexo",
-      [
-        { id: "1", label: "Masculino" },
-        { id: "2", label: "Feminino" },
-      ],
-      I.cap_carro,
-      280,
-      1600
-    ),
+    {
+      id: I.cap_filho_sexo,
+      type: "capturar_entrada",
+      name: "Sexo filho(a)",
+      is_start: false,
+      config: {
+        ...pos(480, 1680),
+        prompt:
+          "Qual o sexo do(a) filho(a) {{filho_indice}}?\n1️⃣ Masculino\n2️⃣ Feminino",
+        inputMode: "single_choice",
+        variableName: "filho_sexo",
+        options: [
+          { id: "1", label: "Masculino" },
+          { id: "2", label: "Feminino" },
+        ],
+        next_node_id: I.contador_filho,
+        append_options_list: false,
+        snapshot_to_array: "filhos_list",
+        snapshot_fields: {
+          nome: "filho_nome",
+          nascimento: "filho_nascimento",
+          sexo: "filho_sexo",
+        },
+      },
+    },
     cap(
       I.cap_carro,
       "Carro",

@@ -132,6 +132,12 @@ export function validateFlowField(
     }
 
     case "cpf": {
+      if (!/^\d{3}\.\d{3}\.\d{3}-\d{2}$/.test(trimmed)) {
+        return {
+          ok: false,
+          reason: "CPF inválido. Informe no formato XXX.XXX.XXX-XX.",
+        };
+      }
       const digits = onlyDigits(trimmed);
       if (!isValidCpfDigits(digits)) {
         return {
@@ -160,6 +166,12 @@ export function validateFlowField(
     }
 
     case "phone_br": {
+      if (!/^\(\d{2}\) \d{4,5}-\d{4}$/.test(trimmed)) {
+        return {
+          ok: false,
+          reason: "Telefone inválido. Use o formato (XX) XXXXX-XXXX com DDD.",
+        };
+      }
       const digits = onlyDigits(trimmed);
       if (digits.length < 10 || digits.length > 11) {
         return {
@@ -171,6 +183,12 @@ export function validateFlowField(
     }
 
     case "cep": {
+      if (!/^\d{5}-\d{3}$/.test(trimmed)) {
+        return {
+          ok: false,
+          reason: "CEP inválido. Use o formato XXXXX-XXX.",
+        };
+      }
       const digits = onlyDigits(trimmed);
       if (digits.length !== 8) {
         return {
@@ -193,15 +211,18 @@ export function validateFlowField(
     }
 
     case "money_br": {
-      const digits = onlyDigits(trimmed);
-      if (!digits) {
+      const moneyMatch = trimmed.match(
+        /^R\$\s*(\d{1,3}(?:\.\d{3})*|\d+)(?:,(\d{2}))?$/i
+      );
+      if (!moneyMatch) {
         return {
           ok: false,
-          reason: "Valor inválido. Exemplo: R$ 3500,00 ou 3500.",
+          reason: "Valor inválido. Use o formato R$ 3.500,00 ou R$ 3500,00.",
         };
       }
-      const cents = Number(digits);
-      const formatted = `R$ ${(cents / 100).toFixed(2).replace(".", ",")}`;
+      const whole = moneyMatch[1].replace(/\./g, "");
+      const cents = moneyMatch[2] ?? "00";
+      const formatted = `R$ ${Number(whole).toLocaleString("pt-BR")},${cents.padStart(2, "0")}`;
       return { ok: true, normalized: formatted };
     }
 
