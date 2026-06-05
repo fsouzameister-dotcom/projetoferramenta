@@ -125,17 +125,9 @@ async function main() {
     await client.query(
       `UPDATE flows
        SET is_active = true,
-           channel = 'whatsapp',
-           metadata = COALESCE(metadata, '{}'::jsonb) || $1::jsonb
-       WHERE id = $2::uuid AND tenant_id = $3::uuid`,
-      [
-        JSON.stringify({
-          fox_hid_chave: FOX_HID_CHAVE,
-          fox_hid_formulario: foxHidFormulario,
-        }),
-        flowId,
-        TENANT_ID,
-      ]
+           channel = 'whatsapp'
+       WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+      [flowId, TENANT_ID]
     );
 
     await client.query("COMMIT");
