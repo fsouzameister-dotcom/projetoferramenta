@@ -184,6 +184,11 @@ async function ensureSchema() {
       WHERE provider_message_id LIKE 'wamid.%'
     `);
     await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_msg_tenant_provider
+      ON agent_messages (tenant_id, provider_message_id)
+      WHERE provider_message_id IS NOT NULL AND btrim(provider_message_id) <> ''
+    `);
+    await client.query(`
       ALTER TABLE agent_messages
       ADD COLUMN IF NOT EXISTS image_payload jsonb
     `);
@@ -578,6 +583,17 @@ export async function recordInboundWhatsAppMessage(input: {
       convId = created.rows[0].id;
     }
 
+    const dup = await client.query<{ conversation_id: string }>(
+      `SELECT conversation_id
+       FROM agent_messages
+       WHERE tenant_id = $1 AND provider_message_id = $2
+       LIMIT 1`,
+      [input.tenantId, input.providerMessageId]
+    );
+    if (dup.rows.length > 0) {
+      return { duplicate: true, conversationId: dup.rows[0].conversation_id };
+    }
+
     try {
       await client.query(
         `INSERT INTO agent_messages
@@ -588,7 +604,7 @@ export async function recordInboundWhatsAppMessage(input: {
     } catch (e: unknown) {
       const err = e as { code?: string };
       if (err.code === "23505") {
-        return { duplicate: true };
+        return { duplicate: true, conversationId: convId };
       }
       throw e;
     }

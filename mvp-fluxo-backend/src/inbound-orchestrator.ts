@@ -14,7 +14,9 @@ import { getOutboundWhatsAppContext, WHATSAPP_PROVIDER_CLOUD, WHATSAPP_PROVIDER_
 import { redis } from "./redis";
 
 const SESSION_PREFIX = "inbound:flow:session:";
+const CLAIM_PREFIX = "inbound:flow:claim:";
 const SESSION_TTL_SEC = 60 * 60 * 24; // 24h
+const CLAIM_TTL_SEC = 60 * 60 * 24; // 24h
 
 export type InboundProcessInput = {
   tenantId: string;
@@ -88,6 +90,22 @@ async function saveSession(session: StoredInboundSession): Promise<void> {
 
 async function clearSession(tenantId: string, contactKey: string): Promise<void> {
   await redis.del(sessionRedisKey(tenantId, contactKey));
+}
+
+/** Evita reprocessar o mesmo webhook (retries Twilio/Meta) em paralelo. */
+async function claimInboundProviderMessage(
+  tenantId: string,
+  providerMessageId: string | undefined
+): Promise<boolean> {
+  const id = providerMessageId?.trim();
+  if (!id) return true;
+  try {
+    const key = `${CLAIM_PREFIX}${tenantId}:${id}`;
+    const result = await redis.set(key, "1", "EX", CLAIM_TTL_SEC, "NX");
+    return result === "OK";
+  } catch {
+    return true;
+  }
 }
 
 function buildWhatsAppSendContext(
@@ -220,6 +238,10 @@ export async function processInboundMessage(
     if (recorded.duplicate) {
       return { routed: false, conversationId };
     }
+  }
+
+  if (!(await claimInboundProviderMessage(input.tenantId, input.providerMessageId))) {
+    return { routed: false, conversationId };
   }
 
   const existingSession = await loadSession(input.tenantId, contactKey);

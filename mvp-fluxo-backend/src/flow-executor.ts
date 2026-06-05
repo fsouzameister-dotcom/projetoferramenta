@@ -983,6 +983,27 @@ export async function executeFlow(
       if (conversaResult.message) {
         messages.push(conversaResult.message);
         outboundMessages.push({ kind: "text", body: conversaResult.message });
+        trace.push({
+          nodeId: currentNode.id,
+          nodeType: currentNode.type,
+          nodeName: currentNode.name,
+          nextNodeId: null,
+          details: conversaResult.details,
+        });
+        return {
+          flowId,
+          status: "awaiting_input",
+          visitedNodeIds,
+          currentNodeId: currentNode.id,
+          messages,
+          outboundMessages,
+          variables,
+          trace,
+          awaitingInput: buildConversaAwaiting({
+            nodeId: currentNode.id,
+            prompt: conversaResult.message,
+          }),
+        };
       }
       if (conversaResult.awaitingInput) {
         trace.push({
@@ -1003,7 +1024,7 @@ export async function executeFlow(
           trace,
           awaitingInput: buildConversaAwaiting({
             nodeId: currentNode.id,
-            prompt: conversaResult.message || "Aguardando resposta do cliente.",
+            prompt: "Aguardando resposta do cliente.",
           }),
         };
       }
