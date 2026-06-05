@@ -11,7 +11,9 @@ export function parseEncerramentoConfig(
       ? config.end_message.trim()
       : typeof config.endMessage === "string"
         ? config.endMessage.trim()
-        : "";
+        : typeof config.message === "string"
+          ? config.message.trim()
+          : "";
   const reasonKey =
     typeof config.reason_key === "string" && config.reason_key.trim()
       ? config.reason_key.trim()

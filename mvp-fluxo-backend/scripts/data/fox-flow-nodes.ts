@@ -60,7 +60,7 @@ function msg(id: string, name: string, text: string, next: string, x: number, y:
     type: "mensagem",
     name,
     is_start: false,
-    config: { ...pos(x, y), message: text, next_node_id: next },
+    config: { ...pos(x, y), content: text, next_node_id: next },
   };
 }
 
@@ -192,7 +192,7 @@ export function buildFoxFlowNodes(foxHidFormulario: string) {
       type: "encerramento",
       name: "Encerramento sem cadastro",
       is_start: false,
-      config: { ...pos(280, 380), message: "Até breve!" },
+      config: { ...pos(280, 380), end_message: "Até breve!" },
     },
     recv(
       I.recv_nome,
@@ -590,7 +590,7 @@ export function buildFoxFlowNodes(foxHidFormulario: string) {
       type: "encerramento",
       name: "Fim cadastro Fox",
       is_start: false,
-      config: { ...pos(40, 3040), message: "Cadastro Fox concluído." },
+      config: { ...pos(40, 3040), end_message: "Cadastro Fox concluído." },
     },
   ];
 }

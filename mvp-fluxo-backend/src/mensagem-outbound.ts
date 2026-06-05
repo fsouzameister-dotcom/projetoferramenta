@@ -116,7 +116,9 @@ export function parseMensagemNodeConfig(
       ? raw.content
       : typeof raw.text === "string"
         ? raw.text
-        : "";
+        : typeof raw.message === "string"
+          ? raw.message
+          : "";
   const sendDelaySeconds =
     typeof raw.send_delay_seconds === "number" && raw.send_delay_seconds > 0
       ? Math.min(Math.floor(raw.send_delay_seconds), 300)

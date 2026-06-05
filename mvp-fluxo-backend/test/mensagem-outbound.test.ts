@@ -62,6 +62,11 @@ describe("mensagem-outbound", () => {
     assert.deepEqual(result.outboundMessages[0], { kind: "text", body: "Oi" });
   });
 
+  it("parseMensagemNodeConfig aceita campo legado message", () => {
+    const parsed = parseMensagemNodeConfig({ message: "Cadastrar-se" });
+    assert.equal(parsed.content, "Cadastrar-se");
+  });
+
   it("executeMensagemNode retorna interactive_list", () => {
     const result = executeMensagemNode({
       config: {
