@@ -83,7 +83,7 @@ export function parseCapturarEntradaConfig(
 } {
   const config = asObject(raw);
   const prompt =
-    typeof config.prompt === "string" && config.prompt.trim()
+    typeof config.prompt === "string"
       ? config.prompt.trim()
       : "Informe sua resposta:";
   const promptKey =

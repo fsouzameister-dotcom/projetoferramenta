@@ -48,6 +48,29 @@ export const FOX_IDS = {
   api_fox: "b2000033-0001-4033-8001-000000000033",
   msg_fim: "b2000034-0001-4034-8001-000000000034",
   enc_fim: "b2000035-0001-4035-8001-000000000035",
+  msg_nome: "b2000040-0001-4040-8001-000000000040",
+  msg_nasc: "b2000041-0001-4041-8001-000000000041",
+  msg_cpf: "b2000042-0001-4042-8001-000000000042",
+  msg_celular: "b2000043-0001-4043-8001-000000000043",
+  msg_email: "b2000044-0001-4044-8001-000000000044",
+  msg_email_com: "b2000045-0001-4045-8001-000000000045",
+  msg_cep: "b2000046-0001-4046-8001-000000000046",
+  msg_numero: "b2000047-0001-4047-8001-000000000047",
+  msg_cidade: "b2000048-0001-4048-8001-000000000048",
+  msg_uf: "b2000049-0001-4049-8001-000000000049",
+  msg_filho_nome: "b200004a-0001-404a-8001-00000000004a",
+  msg_filho_nasc: "b200004b-0001-404b-8001-00000000004b",
+  msg_marca_outros: "b200004c-0001-404c-8001-00000000004c",
+  msg_modelo: "b200004d-0001-404d-8001-00000000004d",
+  msg_empresa: "b200004e-0001-404e-8001-00000000004e",
+  msg_segmento: "b200004f-0001-404f-8001-00000000004f",
+  msg_cargo: "b2000050-0001-4050-8001-000000000050",
+  msg_renda: "b2000051-0001-4051-8001-000000000051",
+  msg_facebook: "b2000052-0001-4052-8001-000000000052",
+  msg_instagram: "b2000053-0001-4053-8001-000000000053",
+  msg_linkedin: "b2000054-0001-4054-8001-000000000054",
+  msg_bancos: "b2000055-0001-4055-8001-000000000055",
+  msg_pix_valor: "b2000056-0001-4056-8001-000000000056",
 } as const;
 
 function pos(x: number, y: number) {
@@ -88,6 +111,30 @@ function recv(
       ...extra,
     },
   };
+}
+
+/** Mensagem explícita + receber resposta (evita pergunta só no wait_hint). */
+function ask(
+  msgId: string,
+  recvId: string,
+  name: string,
+  question: string,
+  variableName: string,
+  nextAfterAnswer: string,
+  x: number,
+  y: number,
+  extra?: Record<string, unknown>
+) {
+  const retry =
+    (typeof extra?.invalid_prompt === "string" && extra.invalid_prompt) ||
+    `Não entendi. ${question.split("\n")[0]}`;
+  return [
+    msg(msgId, name, question, recvId, x, y),
+    recv(recvId, `${name} — resposta`, "", variableName, nextAfterAnswer, x, y + 72, {
+      ...extra,
+      invalid_prompt: retry,
+    }),
+  ];
 }
 
 function cap(
@@ -178,7 +225,7 @@ export function buildFoxFlowNodes(foxHidFormulario: string) {
       40,
       220
     ),
-    dec(I.dec_cadastrar_sim, "Cadastrar?", "quer_cadastrar", "1", I.recv_nome, I.msg_nao, 40, 300),
+    dec(I.dec_cadastrar_sim, "Cadastrar?", "quer_cadastrar", "1", I.msg_nome, I.msg_nao, 40, 300),
     msg(
       I.msg_nao,
       "Não cadastrar",
@@ -194,22 +241,24 @@ export function buildFoxFlowNodes(foxHidFormulario: string) {
       is_start: false,
       config: { ...pos(280, 380), end_message: "Até breve!" },
     },
-    recv(
+    ...ask(
+      I.msg_nome,
       I.recv_nome,
       "Nome completo",
       "Perfeito! Qual é o seu nome completo?",
       "nome_completo",
-      I.recv_nasc,
+      I.msg_nasc,
       40,
       400,
       { validation_type: "full_name", invalid_prompt: "Informe nome e sobrenome (nome completo)." }
     ),
-    recv(
+    ...ask(
+      I.msg_nasc,
       I.recv_nasc,
       "Data nascimento",
       "Qual a sua data de nascimento?\nInforme no formato: DD/MM/AAAA.",
       "data_nascimento",
-      I.recv_cpf,
+      I.msg_cpf,
       40,
       480,
       {
@@ -217,7 +266,8 @@ export function buildFoxFlowNodes(foxHidFormulario: string) {
         invalid_prompt: "Data inválida. Use DD/MM/AAAA (ex.: 15/03/1990).",
       }
     ),
-    recv(
+    ...ask(
+      I.msg_cpf,
       I.recv_cpf,
       "CPF",
       "Informe seu CPF.\nUsamos para evitar cadastros duplicados e, em pesquisas remuneradas, emissão de comprovantes.\nFormato: XXX.XXX.XXX-XX",
@@ -270,16 +320,17 @@ export function buildFoxFlowNodes(foxHidFormulario: string) {
         { id: "5", label: "Pós-graduação" },
         { id: "6", label: "Mestrado/Doutorado" },
       ],
-      I.recv_celular,
+      I.msg_celular,
       40,
       800
     ),
-    recv(
+    ...ask(
+      I.msg_celular,
       I.recv_celular,
       "Celular",
       "Qual é o seu celular (WhatsApp) principal, com DDD?\nFormato: (XX) XXXXX-XXXX",
       "celular",
-      I.recv_email,
+      I.msg_email,
       40,
       880,
       {
@@ -287,22 +338,24 @@ export function buildFoxFlowNodes(foxHidFormulario: string) {
         invalid_prompt: "Telefone inválido. Ex.: (11) 99999-8888",
       }
     ),
-    recv(
+    ...ask(
+      I.msg_email,
       I.recv_email,
       "E-mail pessoal",
       "Informe o seu e-mail pessoal.\nEx.: seuemail@email.com.br",
       "email_pessoal",
-      I.recv_email_com,
+      I.msg_email_com,
       40,
       960,
       { validation_type: "email", invalid_prompt: "E-mail inválido. Ex.: seuemail@email.com.br" }
     ),
-    recv(
+    ...ask(
+      I.msg_email_com,
       I.recv_email_com,
       "E-mail comercial",
       "Você possui e-mail comercial?\nSe sim, envie aqui.\nSe não tiver, escreva: *não tenho*",
       "email_comercial",
-      I.recv_cep,
+      I.msg_cep,
       40,
       1040,
       {
@@ -310,28 +363,40 @@ export function buildFoxFlowNodes(foxHidFormulario: string) {
         invalid_prompt: "Envie um e-mail válido ou escreva: não tenho",
       }
     ),
-    recv(
+    ...ask(
+      I.msg_cep,
       I.recv_cep,
       "CEP",
       "Qual é o seu CEP?\nEx.: XXXXX-XXX",
       "cep",
-      I.recv_numero,
+      I.msg_numero,
       40,
       1120,
       { validation_type: "cep", invalid_prompt: "CEP inválido. Use XXXXX-XXX." }
     ),
-    recv(
+    ...ask(
+      I.msg_numero,
       I.recv_numero,
       "Número",
       "Qual é o número do endereço?\nSe não tiver, digite: *não tenho*",
       "numero",
-      I.recv_cidade,
+      I.msg_cidade,
       40,
       1200,
       { validation_type: "skip_or_text" }
     ),
-    recv(I.recv_cidade, "Cidade", "Informe a cidade onde você mora:", "cidade", I.recv_uf, 40, 1280),
-    recv(
+    ...ask(
+      I.msg_cidade,
+      I.recv_cidade,
+      "Cidade",
+      "Informe a cidade onde você mora:",
+      "cidade",
+      I.msg_uf,
+      40,
+      1280
+    ),
+    ...ask(
+      I.msg_uf,
       I.recv_uf,
       "UF",
       "Informe o estado (UF), por exemplo: SP, RJ, MG.",
@@ -355,25 +420,27 @@ export function buildFoxFlowNodes(foxHidFormulario: string) {
       40,
       1440
     ),
-    dec(I.dec_filhos, "Tem filhos?", "tem_filhos", "1", I.recv_filho_nome, I.cap_carro, 40, 1520),
-    recv(
+    dec(I.dec_filhos, "Tem filhos?", "tem_filhos", "1", I.msg_filho_nome, I.cap_carro, 40, 1520),
+    ...ask(
+      I.msg_filho_nome,
       I.recv_filho_nome,
       "Nome filho(a)",
       "Qual o nome do(a) filho(a)?",
       "filho_nome",
-      I.recv_filho_nasc,
+      I.msg_filho_nasc,
       280,
       1520,
       { validation_type: "full_name" }
     ),
-    recv(
+    ...ask(
+      I.msg_filho_nasc,
       I.recv_filho_nasc,
       "Nasc. filho(a)",
       "Qual a data de nascimento do(s) seu(s) filho(s)?\nFormato: DD/MM/AAAA",
       "filho_nascimento",
       I.cap_filho_sexo,
       280,
-      1520,
+      1600,
       { validation_type: "date_br", invalid_prompt: "Use DD/MM/AAAA." }
     ),
     cap(
@@ -402,7 +469,7 @@ export function buildFoxFlowNodes(foxHidFormulario: string) {
       40,
       1680
     ),
-    dec(I.dec_carro, "Tem carro?", "tem_carro", "1", I.cap_marca, I.recv_empresa, 40, 1760),
+    dec(I.dec_carro, "Tem carro?", "tem_carro", "1", I.cap_marca, I.msg_empresa, 40, 1760),
     cap(
       I.cap_marca,
       "Marca carro",
@@ -431,89 +498,107 @@ export function buildFoxFlowNodes(foxHidFormulario: string) {
       "Marca outros?",
       "carro_marca",
       "12",
-      I.recv_marca_outros,
-      I.recv_modelo,
+      I.msg_marca_outros,
+      I.msg_modelo,
       280,
       1840
     ),
-    recv(
+    ...ask(
+      I.msg_marca_outros,
       I.recv_marca_outros,
       "Marca (outros)",
       "Qual a marca do seu carro?",
       "carro_marca_outros",
-      I.recv_modelo,
+      I.msg_modelo,
       480,
       1840
     ),
-    recv(
+    ...ask(
+      I.msg_modelo,
       I.recv_modelo,
       "Modelo carro",
       "Qual o modelo do seu carro?",
       "carro_modelo",
-      I.recv_empresa,
+      I.msg_empresa,
       280,
       1920
     ),
-    recv(
+    ...ask(
+      I.msg_empresa,
       I.recv_empresa,
       "Empresa",
       "Em qual empresa você atua atualmente?\nSe for autônomo(a), pode escrever isso.",
       "empresa",
-      I.recv_segmento,
+      I.msg_segmento,
       40,
       2000
     ),
-    recv(
+    ...ask(
+      I.msg_segmento,
       I.recv_segmento,
       "Segmento",
       "Qual é o segmento da empresa?\nEx.: tecnologia, varejo, educação, saúde…",
       "segmento_texto",
-      I.recv_cargo,
+      I.msg_cargo,
       40,
       2080
     ),
-    recv(I.recv_cargo, "Cargo", "Qual é o seu cargo ou função atual?", "cargo", I.recv_renda, 40, 2160),
-    recv(
+    ...ask(
+      I.msg_cargo,
+      I.recv_cargo,
+      "Cargo",
+      "Qual é o seu cargo ou função atual?",
+      "cargo",
+      I.msg_renda,
+      40,
+      2160
+    ),
+    ...ask(
+      I.msg_renda,
       I.recv_renda,
       "Renda",
       "Qual é a sua renda familiar aproximada?\nEx.: R$ 5000,00 ou 5000",
       "renda_familiar",
-      I.recv_facebook,
+      I.msg_facebook,
       40,
       2240,
       { validation_type: "money_br" }
     ),
-    recv(
+    ...ask(
+      I.msg_facebook,
       I.recv_facebook,
       "Facebook",
       "Possui Facebook? Se sim, informe @usuario ou link. Se não, escreva: *não tenho*",
       "facebook",
-      I.recv_instagram,
+      I.msg_instagram,
       40,
       2320,
       { validation_type: "skip_or_text" }
     ),
-    recv(
+    ...ask(
+      I.msg_instagram,
       I.recv_instagram,
       "Instagram",
       "Possui Instagram? Se sim, informe @usuario. Se não: *não tenho*",
       "instagram",
-      I.recv_linkedin,
+      I.msg_linkedin,
       40,
       2400,
       { validation_type: "skip_or_text" }
     ),
-    recv(
+    ...ask(
+      I.msg_linkedin,
       I.recv_linkedin,
       "LinkedIn",
       "Possui LinkedIn? Se sim, envie o link. Se não: *não tenho*",
       "linkedin",
-      I.recv_bancos,
+      I.msg_bancos,
       40,
       2480,
       { validation_type: "skip_or_text" }
     ),
-    recv(
+    ...ask(
+      I.msg_bancos,
       I.recv_bancos,
       "Bancos",
       "Quais bancos você possui conta?\nEx.: Nubank, Itaú, Caixa…\nOu escreva: *pular*",
@@ -549,11 +634,12 @@ export function buildFoxFlowNodes(foxHidFormulario: string) {
         { id: "4", label: "E-mail" },
         { id: "5", label: "Chave Aleatória" },
       ],
-      I.recv_pix_valor,
+      I.msg_pix_valor,
       280,
       2720
     ),
-    recv(
+    ...ask(
+      I.msg_pix_valor,
       I.recv_pix_valor,
       "Valor PIX",
       "Informe a chave Pix conforme o tipo escolhido:",

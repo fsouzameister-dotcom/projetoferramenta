@@ -84,7 +84,7 @@ export function toCapturarEntradaConfigFromReceber(
   parsed: ReceberMensagemConfig
 ): Record<string, unknown> {
   return {
-    prompt: parsed.waitHint || "Aguardando sua mensagem…",
+    prompt: parsed.waitHint,
     promptKey: parsed.promptKey,
     inputMode: "text",
     variableName: parsed.variableName,
