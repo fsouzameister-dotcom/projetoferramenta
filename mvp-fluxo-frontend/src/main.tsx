@@ -22,6 +22,7 @@ import WhatsAppAdmin from "./pages/WhatsAppAdmin";
 import InboundAdmin from "./pages/InboundAdmin";
 import OperationsAdmin from "./pages/OperationsAdmin";
 import Reports from "./pages/Reports";
+import CampaignsAdmin from "./pages/CampaignsAdmin";
 import PlatformTenants from "./pages/PlatformTenants";
 import Faq from "./pages/Faq";
 import Sidebar from "./components/Sidebar";
@@ -179,6 +180,7 @@ const router = createBrowserRouter([
                   { path: "admin/ai", element: <AiAdmin /> },
                   { path: "admin/whatsapp", element: <WhatsAppAdmin /> },
                   { path: "admin/inbound", element: <InboundAdmin /> },
+                  { path: "admin/campaigns", element: <CampaignsAdmin /> },
                   { path: "admin/monitoring", element: <MonitoringAdmin /> },
                   { path: "admin/operations", element: <OperationsAdmin /> },
                   {

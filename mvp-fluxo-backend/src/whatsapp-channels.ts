@@ -375,6 +375,76 @@ export async function getOutboundWhatsAppContext(
   }
 }
 
+/** Contexto de envio para um canal WhatsApp específico do tenant. */
+export async function getOutboundWhatsAppContextForChannel(
+  tenantId: string,
+  channelAccountId: string
+): Promise<(OutboundWhatsAppContext & { channelAccountId: string; channelLabel: string }) | null> {
+  await ensureSchema();
+  const client = await pool.connect();
+  try {
+    const row = await client.query<{
+      channel_id: string;
+      label: string;
+      provider: string;
+      phone_number_id: string;
+      display_phone_number: string | null;
+      access_token_encrypted: string | null;
+      twilio_account_sid: string | null;
+      twilio_auth_token_encrypted: string | null;
+    }>(
+      `SELECT wca.id AS channel_id,
+              wca.label,
+              wca.provider,
+              wpn.phone_number_id,
+              wpn.display_phone_number,
+              ws.access_token_encrypted,
+              ws.twilio_account_sid,
+              ws.twilio_auth_token_encrypted
+       FROM whatsapp_channel_accounts wca
+       JOIN whatsapp_phone_numbers wpn ON wpn.channel_account_id = wca.id
+       JOIN whatsapp_channel_secrets ws ON ws.channel_account_id = wca.id
+       WHERE wca.tenant_id = $1 AND wca.id = $2::uuid
+       ORDER BY wpn.created_at ASC
+       LIMIT 1`,
+      [tenantId, channelAccountId]
+    );
+    if (row.rows.length === 0) return null;
+    const r = row.rows[0];
+    if (r.provider === WHATSAPP_PROVIDER_CLOUD) {
+      if (!r.access_token_encrypted || !r.phone_number_id) return null;
+      return {
+        channelAccountId: r.channel_id,
+        channelLabel: r.label,
+        provider: WHATSAPP_PROVIDER_CLOUD,
+        phoneNumberId: r.phone_number_id,
+        accessToken: decryptSecret(r.access_token_encrypted),
+      };
+    }
+    if (r.provider === WHATSAPP_PROVIDER_TWILIO) {
+      if (!r.twilio_account_sid || !r.twilio_auth_token_encrypted) return null;
+      const disp = (r.display_phone_number ?? "").trim();
+      const fromE164 =
+        disp.length > 0
+          ? disp.startsWith("+")
+            ? disp
+            : `+${digitsOnly(disp)}`
+          : `+${digitsOnly(r.phone_number_id.replace(/^twilio:/i, ""))}`;
+      return {
+        channelAccountId: r.channel_id,
+        channelLabel: r.label,
+        provider: WHATSAPP_PROVIDER_TWILIO,
+        accountSid: r.twilio_account_sid,
+        authToken: decryptSecret(r.twilio_auth_token_encrypted),
+        fromE164,
+      };
+    }
+    return null;
+  } finally {
+    client.release();
+  }
+}
+
 export type TwilioWebhookResolution = {
   tenantId: string;
   channelAccountId: string;
@@ -428,6 +498,7 @@ export type TwilioContentTemplateDto = {
   friendlyName: string;
   language: string | null;
   variables: string[];
+  bodyPreview: string;
 };
 
 /** Usa o primeiro canal Twilio do tenant (Account SID + Auth Token) para listar Content na API da Twilio. */

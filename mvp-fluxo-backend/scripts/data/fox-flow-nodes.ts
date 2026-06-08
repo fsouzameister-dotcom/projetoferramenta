@@ -287,14 +287,14 @@ export function buildFoxFlowNodes(foxHidFormulario: string) {
       I.msg_nasc,
       I.recv_nasc,
       "Data nascimento",
-      "Qual a sua data de nascimento?\nInforme no formato: DD/MM/AAAA.",
+      "Qual a sua data de nascimento?\nEx.: 15/03/1990, 15031990 ou 1990-03-15",
       "data_nascimento",
       I.msg_cpf,
       40,
       480,
       {
         validation_type: "date_br",
-        invalid_prompt: "Data inválida. Use DD/MM/AAAA (ex.: 15/03/1990).",
+        invalid_prompt: "Data inválida. Ex.: 15/03/1990, 15031990 ou 1990-03-15.",
       }
     ),
     ...ask(
@@ -306,7 +306,10 @@ export function buildFoxFlowNodes(foxHidFormulario: string) {
       I.cap_sexo,
       40,
       560,
-      { validation_type: "cpf", invalid_prompt: "CPF inválido. Use o formato XXX.XXX.XXX-XX." }
+      {
+        validation_type: "cpf",
+        invalid_prompt: "CPF inválido. Ex.: 390.533.447-05 ou 39053344705",
+      }
     ),
     cap(
       I.cap_sexo,
@@ -359,14 +362,14 @@ export function buildFoxFlowNodes(foxHidFormulario: string) {
       I.msg_celular,
       I.recv_celular,
       "Celular",
-      "Qual é o seu celular (WhatsApp) principal, com DDD?\nFormato: (XX) XXXXX-XXXX",
+      "Qual é o seu celular (WhatsApp) principal, com DDD?\nEx.: (11) 99999-8888 ou 11999998888",
       "celular",
       I.msg_email,
       40,
       880,
       {
         validation_type: "phone_br",
-        invalid_prompt: "Telefone inválido. Ex.: (11) 99999-8888",
+        invalid_prompt: "Telefone inválido. Ex.: (11) 99999-8888 ou 11999998888",
       }
     ),
     ...ask(
@@ -493,12 +496,12 @@ export function buildFoxFlowNodes(foxHidFormulario: string) {
       I.msg_filho_nasc,
       I.recv_filho_nasc,
       "Nasc. filho(a)",
-      "Qual a data de nascimento do(a) filho(a) {{filho_indice}}?\nFormato: DD/MM/AAAA",
+      "Qual a data de nascimento do(a) filho(a) {{filho_indice}}?\nEx.: 15/03/1990 ou 15031990",
       "filho_nascimento",
       I.cap_filho_sexo,
       480,
       1600,
-      { validation_type: "date_br", invalid_prompt: "Use DD/MM/AAAA." }
+      { validation_type: "date_br", invalid_prompt: "Data inválida. Ex.: 15/03/1990 ou 15031990." }
     ),
     {
       id: I.cap_filho_sexo,

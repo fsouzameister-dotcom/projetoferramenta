@@ -21,6 +21,10 @@ import {
 import type { FlowOutboundMessage } from "./mensagem-outbound";
 import { checkAndRecordBotOutbound } from "./bot-outbound-safeguard";
 import { resolveInboundRoute, resolveInboundRouteByFirstMessage } from "./inbound-routes";
+import {
+  markCampaignRecipientResponded,
+  resolveCampaignInboundRoute,
+} from "./campaign-inbound";
 import { getOutboundWhatsAppContext, WHATSAPP_PROVIDER_CLOUD, WHATSAPP_PROVIDER_TWILIO } from "./whatsapp-channels";
 import { redis } from "./redis";
 
@@ -288,14 +292,34 @@ export async function processInboundMessage(
     freshBotSession = recorded.freshBotSession;
   }
 
-  const messageRouteEarly = await resolveInboundRouteByFirstMessage({
+  const campaignRoute = await resolveCampaignInboundRoute({
     tenantId: input.tenantId,
-    sourceType: input.sourceType,
-    sourceKey: input.sourceKey,
-    messageText,
+    phone: input.phone,
   });
 
-  if ((freshBotSession || messageRouteEarly) && input.phone?.trim()) {
+  if (campaignRoute && input.phone) {
+    await markCampaignRecipientResponded({
+      tenantId: input.tenantId,
+      phone: input.phone,
+      recipientId: campaignRoute.recipientId,
+      messageText,
+      timestampIso: new Date().toISOString(),
+    });
+    if (campaignRoute.conversationId) {
+      conversationId = campaignRoute.conversationId;
+    }
+  }
+
+  const messageRouteEarly = campaignRoute
+    ? null
+    : await resolveInboundRouteByFirstMessage({
+        tenantId: input.tenantId,
+        sourceType: input.sourceType,
+        sourceKey: input.sourceKey,
+        messageText,
+      });
+
+  if ((freshBotSession || messageRouteEarly) && input.phone?.trim() && !campaignRoute) {
     await clearInboundFlowSession({
       tenantId: input.tenantId,
       contactKey,
@@ -304,7 +328,7 @@ export async function processInboundMessage(
     });
   }
 
-  const existingSession =
+  let existingSession =
     freshBotSession || messageRouteEarly
       ? null
       : await loadInboundFlowSession({
@@ -313,6 +337,18 @@ export async function processInboundMessage(
           phone: input.phone,
           conversationId,
         });
+
+  if (campaignRoute) {
+    if (existingSession && existingSession.flowId !== campaignRoute.flowId) {
+      await clearInboundFlowSession({
+        tenantId: input.tenantId,
+        contactKey,
+        phone: input.phone,
+        conversationId,
+      });
+      existingSession = null;
+    }
+  }
   if (existingSession) {
     const resumeInput: ExecuteFlowInput = {
       startNodeId: existingSession.awaitingInput.nodeId,
@@ -379,15 +415,16 @@ export async function processInboundMessage(
     };
   }
 
-  const route =
-    messageRouteEarly ??
-    (await resolveInboundRoute({
-      tenantId: input.tenantId,
-      sourceType: input.sourceType,
-      sourceKey: input.sourceKey,
-    }));
+  const route = campaignRoute
+    ? { flow_id: campaignRoute.flowId, source_type: input.sourceType, source_key: input.sourceKey }
+    : messageRouteEarly ??
+      (await resolveInboundRoute({
+        tenantId: input.tenantId,
+        sourceType: input.sourceType,
+        sourceKey: input.sourceKey,
+      }));
 
-  if (!route) {
+  if (!route?.flow_id) {
     return { routed: false, conversationId };
   }
 

@@ -15,6 +15,7 @@ export type TwilioContentTemplateItem = {
   language: string | null;
   /** Chaves alinhadas ao JSON `ContentVariables` da Twilio (ex.: `"1"`, `"2"`). */
   variables: string[];
+  bodyPreview: string;
 };
 
 function collectTwilioPlaceholderIndices(value: unknown, acc: Set<string>): void {
@@ -39,6 +40,25 @@ function extractVariablesFromContentTypes(types: unknown): string[] {
   const acc = new Set<string>();
   collectTwilioPlaceholderIndices(types, acc);
   return [...acc].sort((a, b) => Number(a) - Number(b));
+}
+
+function extractBodyFromContentTypes(types: unknown): string {
+  if (typeof types === "string") return types;
+  if (!types || typeof types !== "object") return "";
+  if (Array.isArray(types)) {
+    for (const item of types) {
+      const body = extractBodyFromContentTypes(item);
+      if (body) return body;
+    }
+    return "";
+  }
+  const obj = types as Record<string, unknown>;
+  if (typeof obj.body === "string" && obj.body.trim()) return obj.body.trim();
+  for (const value of Object.values(obj)) {
+    const body = extractBodyFromContentTypes(value);
+    if (body) return body;
+  }
+  return "";
 }
 
 type TwilioContentListMeta = {
@@ -86,6 +106,7 @@ export async function fetchTwilioContentTemplates(input: {
         friendlyName: friendly,
         language: lang,
         variables: vars,
+        bodyPreview: extractBodyFromContentTypes(raw.types),
       });
     }
 

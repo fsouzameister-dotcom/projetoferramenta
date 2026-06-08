@@ -2761,13 +2761,20 @@ export async function updateAgentMessageStatusByProvider(input: {
     client.release();
   }
   if (!messageId) return null;
-  return updateAgentMessageStatus({
+  const updated = await updateAgentMessageStatus({
     tenantId: input.tenantId,
     messageId,
     deliveryStatus: input.deliveryStatus,
     errorCode: input.errorCode,
     errorDescription: input.errorDescription,
   });
+  const { syncCampaignRecipientDeliveryStatus } = await import("./campaign-inbound.js");
+  await syncCampaignRecipientDeliveryStatus({
+    tenantId: input.tenantId,
+    providerMessageId: input.providerMessageId,
+    deliveryStatus: input.deliveryStatus,
+  });
+  return updated;
 }
 
 /** Handoff disparado pelo executor de fluxo (node transferir_agente). */

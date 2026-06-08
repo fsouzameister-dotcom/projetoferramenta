@@ -405,6 +405,80 @@ export async function sendWhatsAppDocumentMessage(input: {
   return { ok: true, messageId };
 }
 
+export type MetaMessageTemplateItem = {
+  templateName: string;
+  language: string;
+  variables: string[];
+  bodyPreview: string;
+};
+
+function extractMetaPlaceholderSlots(text: string): string[] {
+  const slots = new Set<string>();
+  for (const m of text.matchAll(/\{\{(\d+)\}\}/g)) slots.add(m[1]!);
+  for (const m of text.matchAll(/\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}/g)) {
+    if (!/^\d+$/.test(m[1]!)) slots.add(m[1]!);
+  }
+  return [...slots].sort((a, b) => {
+    const na = Number(a);
+    const nb = Number(b);
+    if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+    return a.localeCompare(b);
+  });
+}
+
+function extractMetaBodyText(components: unknown): string {
+  if (!Array.isArray(components)) return "";
+  for (const raw of components) {
+    if (!raw || typeof raw !== "object") continue;
+    const comp = raw as Record<string, unknown>;
+    if (String(comp.type).toUpperCase() === "BODY" && typeof comp.text === "string") {
+      return comp.text.trim();
+    }
+  }
+  return "";
+}
+
+/** Lista templates aprovados na WABA (Meta Cloud API). */
+export async function fetchMetaMessageTemplates(input: {
+  wabaId: string;
+  accessToken: string;
+}): Promise<MetaMessageTemplateItem[]> {
+  const out: MetaMessageTemplateItem[] = [];
+  let url: string | null =
+    `${GRAPH_BASE}/${encodeURIComponent(input.wabaId.trim())}/message_templates` +
+    `?fields=name,language,status,components&limit=100`;
+
+  while (url) {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${input.accessToken.trim()}` },
+    });
+    const json = (await res.json()) as Record<string, unknown>;
+    if (!res.ok) {
+      const err = json?.error as { message?: string } | undefined;
+      throw new Error(err?.message ?? `Meta templates ${res.status}`);
+    }
+    const data = json.data as Record<string, unknown>[] | undefined;
+    for (const raw of data ?? []) {
+      const status = String(raw.status ?? "").toUpperCase();
+      if (status !== "APPROVED") continue;
+      const name = typeof raw.name === "string" ? raw.name.trim() : "";
+      const language = typeof raw.language === "string" ? raw.language.trim() : "pt_BR";
+      if (!name) continue;
+      const bodyPreview = extractMetaBodyText(raw.components);
+      out.push({
+        templateName: name,
+        language,
+        variables: extractMetaPlaceholderSlots(bodyPreview),
+        bodyPreview,
+      });
+    }
+    const paging = json.paging as { next?: string } | undefined;
+    url = typeof paging?.next === "string" ? paging.next : null;
+  }
+
+  return out;
+}
+
 /** Envia template aprovado na Meta (fora da janela de 24h). */
 export async function sendWhatsAppTemplateMessage(input: {
   phoneNumberId: string;

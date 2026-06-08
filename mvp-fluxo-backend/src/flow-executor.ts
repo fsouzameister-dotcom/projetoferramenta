@@ -41,6 +41,10 @@ import {
 } from "./flow-wait-scheduler";
 import { validateFlowField } from "./flow-field-validators";
 import { buildFoxCadastroFormBody } from "./fox-form-mapper";
+import {
+  buildCaptureRetryPrompt,
+  resolveFlowTemplate as resolveTemplate,
+} from "./flow-template";
 
 type FlowNode = {
   id: string;
@@ -117,12 +121,6 @@ function pickPath(source: unknown, path: string): unknown {
   return cursor;
 }
 
-function resolveTemplate(text: string, variables: Record<string, unknown>): string {
-  return text.replace(/\{\{(\w+)\}\}/g, (_, varName: string) => {
-    const v = variables[varName];
-    return v === undefined || v === null ? `{{${varName}}}` : String(v);
-  });
-}
 
 function unwrapVariableRef(raw: string): string {
   const match = raw.trim().match(/^\{\{(\w+)\}\}$/);
@@ -630,11 +628,12 @@ async function executeCapturarEntradaNode(
       error.statusCode === 400 &&
       (parsed.inputMode === "single_choice" || parsed.inputMode === "multi_choice")
     ) {
-      const retryPrompt = [
+      const retryPrompt = buildCaptureRetryPrompt(
+        variables,
         parsed.invalidPrompt ||
           "Não entendi. Por favor, digite apenas o número correspondente à sua resposta.",
-        formatCapturarEntradaPrompt(rendered),
-      ].join("\n\n");
+        formatCapturarEntradaPrompt(rendered)
+      );
       const awaiting = buildCapturarEntradaAwaiting(node.id, rendered);
       return {
         nextNodeId: null,
@@ -660,10 +659,11 @@ async function executeCapturarEntradaNode(
       parsed.validationOptions ?? {}
     );
     if (!validated.ok) {
-      const retryPrompt = [
+      const retryPrompt = buildCaptureRetryPrompt(
+        variables,
         parsed.invalidPrompt || validated.reason,
-        rendered.prompt,
-      ].join("\n\n");
+        rendered.prompt
+      );
       const awaiting = buildCapturarEntradaAwaiting(node.id, rendered);
       return {
         nextNodeId: null,

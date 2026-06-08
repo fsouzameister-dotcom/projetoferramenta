@@ -6,7 +6,25 @@ interface Flow {
   name: string;
 }
 
-type ReportView = "todas" | "tabulacoes" | "capturas" | "planilha";
+type ReportView = "todas" | "tabulacoes" | "capturas" | "planilha" | "campanhas";
+
+type CampaignReportRow = {
+  campaignId: string;
+  campaignName: string;
+  flowId: string | null;
+  dispatchedAt: string | null;
+  phone: string;
+  channelLabel: string | null;
+  provider: string | null;
+  deliveryStatus: string;
+  firstReply: string | null;
+  firstReplyAt: string | null;
+  attendanceStatus: string;
+  transferQueue: string | null;
+  transferAt: string | null;
+  protocolNumber: string | null;
+  tabulacaoLabel: string | null;
+};
 
 type AggregateRow = {
   flowId: string;
@@ -75,6 +93,11 @@ const VIEW_META: Record<
     subtitle:
       "Uma linha por telefone, colunas na ordem do fluxo — exportável em CSV/Excel",
   },
+  campanhas: {
+    title: "Relatório de campanhas",
+    subtitle:
+      "Status dos disparos de template: entrega, resposta, encerramento e transferência",
+  },
 };
 
 function labelForQuestion(
@@ -95,6 +118,9 @@ export default function Reports() {
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [campaignRows, setCampaignRows] = useState<CampaignReportRow[]>([]);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const meta = VIEW_META[view];
 
@@ -152,9 +178,33 @@ export default function Reports() {
       .finally(() => setLoading(false));
   };
 
+  const loadCampaignReport = () => {
+    setLoading(true);
+    setError(null);
+    const params: Record<string, string> = {};
+    if (flowId) params.flowId = flowId;
+    if (dateFrom) params.from = new Date(dateFrom).toISOString();
+    if (dateTo) params.to = new Date(`${dateTo}T23:59:59`).toISOString();
+    api
+      .get("/reports/campaigns", { params })
+      .then((res) => {
+        const data = unwrapApiData<{ rows: CampaignReportRow[] }>(res.data);
+        setCampaignRows(data.rows ?? []);
+      })
+      .catch((err) => {
+        setError(getApiErrorMessage(err, "Não foi possível carregar campanhas."));
+        setCampaignRows([]);
+      })
+      .finally(() => setLoading(false));
+  };
+
   const loadReports = () => {
     if (view === "planilha") {
       loadSpreadsheet();
+      return;
+    }
+    if (view === "campanhas") {
+      loadCampaignReport();
       return;
     }
 
@@ -193,6 +243,32 @@ export default function Reports() {
   useEffect(() => {
     loadReports();
   }, [flowId, view]);
+
+  const downloadCampaignExport = async () => {
+    setExporting(true);
+    setError(null);
+    try {
+      const params: Record<string, string> = { format: "csv" };
+      if (flowId) params.flowId = flowId;
+      if (dateFrom) params.from = new Date(dateFrom).toISOString();
+      if (dateTo) params.to = new Date(`${dateTo}T23:59:59`).toISOString();
+      const res = await api.get("/reports/campaigns", {
+        params,
+        responseType: "blob",
+      });
+      const blob = new Blob([res.data], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "campanhas-relatorio.csv";
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Não foi possível exportar campanhas."));
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const downloadExport = async (format: "csv" | "xlsx") => {
     if (!flowId) {
@@ -254,7 +330,9 @@ export default function Reports() {
                 ? "Tabulações"
                 : key === "capturas"
                   ? "Capturas"
-                  : "Planilha"}
+                  : key === "campanhas"
+                    ? "Campanhas"
+                    : "Planilha"}
           </button>
         ))}
       </div>
@@ -279,6 +357,28 @@ export default function Reports() {
             ))}
           </select>
         </div>
+        {view === "campanhas" && (
+          <>
+            <div>
+              <label className="block text-sm text-gray-300 mb-1">De</label>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="px-3 py-2 rounded-lg bg-[#1a2332] border border-gray-600 text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-sm text-gray-300 mb-1">Até</label>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="px-3 py-2 rounded-lg bg-[#1a2332] border border-gray-600 text-white"
+              />
+            </div>
+          </>
+        )}
         <button
           type="button"
           onClick={loadReports}
@@ -287,6 +387,16 @@ export default function Reports() {
         >
           {loading ? "Carregando..." : "Atualizar"}
         </button>
+        {view === "campanhas" && (
+          <button
+            type="button"
+            onClick={() => void downloadCampaignExport()}
+            disabled={exporting}
+            className="px-4 py-2 rounded-lg bg-[#1a2332] border border-gray-600 text-white hover:border-teal-500 disabled:opacity-50"
+          >
+            {exporting ? "Exportando..." : "Exportar CSV"}
+          </button>
+        )}
         {view === "planilha" && (
           <>
             <button
@@ -375,7 +485,56 @@ export default function Reports() {
         </section>
       )}
 
-      {view !== "planilha" && (
+      {view === "campanhas" && (
+        <section className="mb-10">
+          {campaignRows.length === 0 ? (
+            <p className="text-gray-400 text-sm">
+              {loading ? "Carregando…" : "Nenhum disparo de campanha no período."}
+            </p>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-gray-700">
+              <table className="w-full text-sm text-left min-w-max">
+                <thead className="bg-[#1a2332] text-gray-300">
+                  <tr>
+                    <th className="px-3 py-2">Campanha</th>
+                    <th className="px-3 py-2">Telefone</th>
+                    <th className="px-3 py-2">Canal</th>
+                    <th className="px-3 py-2">Entrega</th>
+                    <th className="px-3 py-2">1ª resposta</th>
+                    <th className="px-3 py-2">Atendimento</th>
+                    <th className="px-3 py-2">Fila transfer.</th>
+                    <th className="px-3 py-2">Protocolo</th>
+                  </tr>
+                </thead>
+                <tbody className="text-gray-200 divide-y divide-gray-700">
+                  {campaignRows.map((row, i) => (
+                    <tr key={`${row.campaignId}-${row.phone}-${i}`} className="bg-[#0f1419]">
+                      <td className="px-3 py-2">{row.campaignName}</td>
+                      <td className="px-3 py-2 text-teal-300">{row.phone}</td>
+                      <td className="px-3 py-2">{row.channelLabel || row.provider || "—"}</td>
+                      <td className="px-3 py-2">{row.deliveryStatus}</td>
+                      <td className="px-3 py-2 max-w-xs truncate">
+                        {row.firstReply
+                          ? `${row.firstReply}${row.firstReplyAt ? ` (${new Date(row.firstReplyAt).toLocaleString("pt-BR")})` : ""}`
+                          : "—"}
+                      </td>
+                      <td className="px-3 py-2">{row.attendanceStatus}</td>
+                      <td className="px-3 py-2">
+                        {row.transferQueue
+                          ? `${row.transferQueue}${row.transferAt ? ` · ${new Date(row.transferAt).toLocaleString("pt-BR")}` : ""}`
+                          : "—"}
+                      </td>
+                      <td className="px-3 py-2">{row.protocolNumber || row.tabulacaoLabel || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+
+      {view !== "planilha" && view !== "campanhas" && (
         <>
           <section className="mb-10">
             <h2 className="text-lg font-semibold text-white mb-3">

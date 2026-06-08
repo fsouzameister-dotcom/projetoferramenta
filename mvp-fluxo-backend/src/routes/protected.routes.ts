@@ -20,6 +20,7 @@ import { authMiddleware } from "../middlewares/auth.middleware";
 // Você precisará garantir que listFlowsByTenant, createFlow, etc.,
 // aceitem esses parâmetros ou que você crie wrappers para eles.
 import { aiFlowRoutes } from "./ai-flow.routes";
+import campaignRoutes from "./campaign.routes.js";
 import { listFlowsByTenant, createFlow, updateFlow } from "../flows";
 import { listNodesByFlow, createNode, updateNode, deleteNode } from "../nodes";
 import { executeFlow } from "../flow-executor";
@@ -4822,6 +4823,8 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
   );
 
   await fastify.register(aiFlowRoutes);
+
+  await fastify.register(campaignRoutes);
 };
 
 export default protectedRoutes;

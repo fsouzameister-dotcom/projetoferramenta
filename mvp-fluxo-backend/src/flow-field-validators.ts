@@ -83,15 +83,60 @@ export function formatCep(digits: string): string {
   return `${d.slice(0, 5)}-${d.slice(5)}`;
 }
 
+function isValidCalendarDate(year: number, month: number, day: number): boolean {
+  const date = new Date(year, month - 1, day);
+  return (
+    date.getFullYear() === year &&
+    date.getMonth() === month - 1 &&
+    date.getDate() === day
+  );
+}
+
+function toIsoDate(year: number, month: number, day: number): string {
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
 export function parseDateBrToIso(raw: string): string | null {
   const trimmed = raw.trim();
-  const br = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (br) {
-    const [, dd, mm, yyyy] = br;
-    return `${yyyy}-${mm}-${dd}`;
+
+  const iso = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (iso) {
+    const year = Number(iso[1]);
+    const month = Number(iso[2]);
+    const day = Number(iso[3]);
+    if (!isValidCalendarDate(year, month, day)) return null;
+    return toIsoDate(year, month, day);
   }
-  const iso = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (iso) return trimmed;
+
+  const br = trimmed.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
+  if (br) {
+    const day = Number(br[1]);
+    const month = Number(br[2]);
+    const year = Number(br[3]);
+    if (!isValidCalendarDate(year, month, day)) return null;
+    return toIsoDate(year, month, day);
+  }
+
+  const compact = trimmed.match(/^(\d{2})(\d{2})(\d{4})$/);
+  if (compact) {
+    const day = Number(compact[1]);
+    const month = Number(compact[2]);
+    const year = Number(compact[3]);
+    if (!isValidCalendarDate(year, month, day)) return null;
+    return toIsoDate(year, month, day);
+  }
+
+  return null;
+}
+
+export function parsePhoneBrDigits(raw: string): string | null {
+  let digits = onlyDigits(raw);
+  if (digits.startsWith("55") && (digits.length === 12 || digits.length === 13)) {
+    digits = digits.slice(2);
+  }
+  if (digits.length === 10 || digits.length === 11) {
+    return digits;
+  }
   return null;
 }
 
@@ -125,27 +170,29 @@ export function validateFlowField(
       if (!iso) {
         return {
           ok: false,
-          reason: "Data inválida. Use o formato DD/MM/AAAA (ex.: 15/03/1990).",
+          reason:
+            "Data inválida. Ex.: 15/03/1990, 15-03-1990, 15031990 ou 1990-03-15.",
         };
       }
       return { ok: true, normalized: iso, rawAccepted: trimmed };
     }
 
     case "cpf": {
-      if (!/^\d{3}\.\d{3}\.\d{3}-\d{2}$/.test(trimmed)) {
+      const digits = onlyDigits(trimmed);
+      if (digits.length !== 11) {
         return {
           ok: false,
-          reason: "CPF inválido. Informe no formato XXX.XXX.XXX-XX.",
+          reason:
+            "CPF inválido. Informe 11 dígitos ou use o formato XXX.XXX.XXX-XX.",
         };
       }
-      const digits = onlyDigits(trimmed);
       if (!isValidCpfDigits(digits)) {
         return {
           ok: false,
-          reason: "CPF inválido. Informe no formato XXX.XXX.XXX-XX.",
+          reason: "CPF inválido. Verifique os números informados.",
         };
       }
-      return { ok: true, normalized: formatCpf(digits) };
+      return { ok: true, normalized: formatCpf(digits), rawAccepted: trimmed };
     }
 
     case "email": {
@@ -166,20 +213,15 @@ export function validateFlowField(
     }
 
     case "phone_br": {
-      if (!/^\(\d{2}\) \d{4,5}-\d{4}$/.test(trimmed)) {
+      const digits = parsePhoneBrDigits(trimmed);
+      if (!digits) {
         return {
           ok: false,
-          reason: "Telefone inválido. Use o formato (XX) XXXXX-XXXX com DDD.",
+          reason:
+            "Telefone inválido. Ex.: (11) 99999-8888, 11999998888 ou +55 11 99999-8888.",
         };
       }
-      const digits = onlyDigits(trimmed);
-      if (digits.length < 10 || digits.length > 11) {
-        return {
-          ok: false,
-          reason: "Telefone inválido. Use o formato (XX) XXXXX-XXXX com DDD.",
-        };
-      }
-      return { ok: true, normalized: formatPhoneBr(digits) };
+      return { ok: true, normalized: formatPhoneBr(digits), rawAccepted: trimmed };
     }
 
     case "cep": {
@@ -211,18 +253,43 @@ export function validateFlowField(
     }
 
     case "money_br": {
-      const moneyMatch = trimmed.match(
-        /^R\$\s*(\d{1,3}(?:\.\d{3})*|\d+)(?:,(\d{2}))?$/i
-      );
-      if (!moneyMatch) {
+      let amount = trimmed;
+      if (/^R\$/i.test(amount)) {
+        amount = amount.replace(/^R\$\s*/i, "").trim();
+      } else if (!/^\d/.test(amount)) {
         return {
           ok: false,
-          reason: "Valor inválido. Use o formato R$ 3.500,00 ou R$ 3500,00.",
+          reason:
+            "Valor inválido. Use o formato R$ 3.500,00, R$ 7000,00 ou apenas 5000.",
         };
       }
-      const whole = moneyMatch[1].replace(/\./g, "");
-      const cents = moneyMatch[2] ?? "00";
-      const formatted = `R$ ${Number(whole).toLocaleString("pt-BR")},${cents.padStart(2, "0")}`;
+
+      const commaIdx = amount.lastIndexOf(",");
+      let wholePart: string;
+      let centPart = "00";
+      if (commaIdx >= 0) {
+        wholePart = amount.slice(0, commaIdx).replace(/\./g, "").trim();
+        centPart = amount.slice(commaIdx + 1).replace(/\D/g, "");
+      } else {
+        wholePart = amount.replace(/\./g, "").trim();
+      }
+
+      if (!/^\d+$/.test(wholePart) || wholePart.length === 0) {
+        return {
+          ok: false,
+          reason:
+            "Valor inválido. Use o formato R$ 3.500,00, R$ 7000,00 ou apenas 5000.",
+        };
+      }
+      if (centPart.length > 0 && centPart.length !== 2) {
+        return {
+          ok: false,
+          reason:
+            "Valor inválido. Use o formato R$ 3.500,00, R$ 7000,00 ou apenas 5000.",
+        };
+      }
+
+      const formatted = `R$ ${Number(wholePart).toLocaleString("pt-BR")},${centPart.padStart(2, "0")}`;
       return { ok: true, normalized: formatted };
     }
 
