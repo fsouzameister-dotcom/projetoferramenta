@@ -12,9 +12,14 @@ import {
   parseSpreadsheetBuffer,
 } from "../campaign-spreadsheet";
 import {
+  cancelCampaign,
   createCampaign,
   getCampaign,
+  listCampaignRecipients,
   listCampaigns,
+  pauseCampaign,
+  resumeCampaign,
+  retryFailedRecipients,
   startCampaignDispatch,
 } from "../campaigns";
 import type { CampaignTemplateOption } from "../campaign-templates";
@@ -23,6 +28,23 @@ import {
   WHATSAPP_PROVIDER_CLOUD,
   WHATSAPP_PROVIDER_TWILIO,
 } from "../whatsapp-channels";
+
+function mapCampaignError(err: unknown): never {
+  const code = err instanceof Error ? err.message : "";
+  if (code === "CAMPAIGN_CANCELLED") {
+    throw new ApiError(409, ERROR_CODES.campaigns.CAMPAIGN_CANCELLED, "Campanha cancelada");
+  }
+  if (code === "CAMPAIGN_INVALID_STATUS") {
+    throw new ApiError(409, ERROR_CODES.campaigns.CAMPAIGN_INVALID_STATUS, "Status da campanha não permite esta ação");
+  }
+  if (code === "CAMPAIGN_NO_PENDING") {
+    throw new ApiError(409, ERROR_CODES.campaigns.CAMPAIGN_NO_PENDING, "Não há destinatários pendentes para disparar");
+  }
+  if (code === "CAMPAIGN_NOT_FOUND") {
+    throw new ApiError(404, ERROR_CODES.campaigns.CAMPAIGN_NOT_FOUND, "Campanha não encontrada");
+  }
+  throw err;
+}
 
 const campaignRoutes: FastifyPluginAsync = async (fastify) => {
   const ensureAdmin = (role?: string) => {
@@ -168,14 +190,97 @@ const campaignRoutes: FastifyPluginAsync = async (fastify) => {
     return sendSuccess(request, reply, created, 201);
   });
 
+  fastify.get("/admin/campaigns/:campaignId/recipients", async (request, reply) => {
+    ensureAdmin(request.user?.role_name);
+    const { campaignId } = request.params as { campaignId: string };
+    const q = request.query as { status?: string; page?: string; limit?: string };
+    try {
+      const result = await listCampaignRecipients({
+        tenantId: request.tenant.id,
+        campaignId,
+        status: q.status,
+        page: q.page ? Number(q.page) : undefined,
+        limit: q.limit ? Number(q.limit) : undefined,
+      });
+      return sendSuccess(request, reply, result);
+    } catch (err) {
+      mapCampaignError(err);
+    }
+  });
+
   fastify.post("/admin/campaigns/:campaignId/dispatch", async (request, reply) => {
     ensureAdmin(request.user?.role_name);
     const { campaignId } = request.params as { campaignId: string };
-    const updated = await startCampaignDispatch(request.tenant.id, campaignId);
-    if (!updated) {
-      throw new ApiError(404, ERROR_CODES.campaigns.CAMPAIGN_NOT_FOUND, "Campanha não encontrada");
+    try {
+      const updated = await startCampaignDispatch(request.tenant.id, campaignId);
+      if (!updated) {
+        throw new ApiError(404, ERROR_CODES.campaigns.CAMPAIGN_NOT_FOUND, "Campanha não encontrada");
+      }
+      return sendSuccess(request, reply, updated);
+    } catch (err) {
+      mapCampaignError(err);
     }
-    return sendSuccess(request, reply, updated);
+  });
+
+  fastify.post("/admin/campaigns/:campaignId/pause", async (request, reply) => {
+    ensureAdmin(request.user?.role_name);
+    const { campaignId } = request.params as { campaignId: string };
+    try {
+      const updated = await pauseCampaign(request.tenant.id, campaignId);
+      if (!updated) {
+        throw new ApiError(404, ERROR_CODES.campaigns.CAMPAIGN_NOT_FOUND, "Campanha não encontrada");
+      }
+      return sendSuccess(request, reply, updated);
+    } catch (err) {
+      mapCampaignError(err);
+    }
+  });
+
+  fastify.post("/admin/campaigns/:campaignId/resume", async (request, reply) => {
+    ensureAdmin(request.user?.role_name);
+    const { campaignId } = request.params as { campaignId: string };
+    try {
+      const updated = await resumeCampaign(request.tenant.id, campaignId);
+      if (!updated) {
+        throw new ApiError(404, ERROR_CODES.campaigns.CAMPAIGN_NOT_FOUND, "Campanha não encontrada");
+      }
+      return sendSuccess(request, reply, updated);
+    } catch (err) {
+      mapCampaignError(err);
+    }
+  });
+
+  fastify.post("/admin/campaigns/:campaignId/cancel", async (request, reply) => {
+    ensureAdmin(request.user?.role_name);
+    const { campaignId } = request.params as { campaignId: string };
+    try {
+      const updated = await cancelCampaign(request.tenant.id, campaignId);
+      if (!updated) {
+        throw new ApiError(404, ERROR_CODES.campaigns.CAMPAIGN_NOT_FOUND, "Campanha não encontrada");
+      }
+      return sendSuccess(request, reply, updated);
+    } catch (err) {
+      mapCampaignError(err);
+    }
+  });
+
+  fastify.post("/admin/campaigns/:campaignId/retry-failed", async (request, reply) => {
+    ensureAdmin(request.user?.role_name);
+    const { campaignId } = request.params as { campaignId: string };
+    const body = (request.body ?? {}) as { recipientIds?: string[] };
+    try {
+      const result = await retryFailedRecipients(
+        request.tenant.id,
+        campaignId,
+        body.recipientIds
+      );
+      if (!result.campaign) {
+        throw new ApiError(404, ERROR_CODES.campaigns.CAMPAIGN_NOT_FOUND, "Campanha não encontrada");
+      }
+      return sendSuccess(request, reply, result);
+    } catch (err) {
+      mapCampaignError(err);
+    }
   });
 
   fastify.get("/reports/campaigns", async (request, reply) => {

@@ -6,6 +6,7 @@ import {
 } from "./whatsapp-channels";
 import { fetchMetaMessageTemplates } from "./whatsapp-cloud-api";
 import { fetchTwilioContentTemplates } from "./whatsapp-twilio-api";
+export { renderTemplatePreview } from "./campaign-utils";
 
 export type CampaignTemplateOption = {
   provider: typeof WHATSAPP_PROVIDER_TWILIO | typeof WHATSAPP_PROVIDER_CLOUD;
@@ -79,15 +80,3 @@ export async function listCampaignTemplatesForChannel(
   return [];
 }
 
-export function renderTemplatePreview(
-  bodyPreview: string,
-  columnMapping: Record<string, string>,
-  sampleRow: Record<string, string>
-): string {
-  return bodyPreview.replace(/\{\{(\w+)\}\}/g, (_, slot: string) => {
-    const column = columnMapping[slot];
-    if (!column) return `{{${slot}}}`;
-    const value = sampleRow[column];
-    return value != null && String(value).trim() ? String(value).trim() : `{{${slot}}}`;
-  });
-}

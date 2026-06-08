@@ -10,6 +10,17 @@ import { ensureConversationProtocol } from "./conversation-protocol";
 import { normalizeCampaignPhoneE164, phoneDigitsOnly } from "./campaign-phone";
 import { setCampaignInboundRoute } from "./campaign-inbound";
 import type { CampaignTemplateOption } from "./campaign-templates";
+import {
+  buildTemplateParams,
+  nextStatusAfterStaleSending,
+  STALE_SENDING_MINUTES,
+} from "./campaign-utils";
+
+export {
+  buildTemplateParams,
+  nextStatusAfterStaleSending,
+  STALE_SENDING_MINUTES,
+} from "./campaign-utils";
 
 export type CampaignTemplateConfig = {
   provider: string;
@@ -123,16 +134,20 @@ function parseMetadata(raw: unknown): CampaignMetadata {
   };
 }
 
-function buildTemplateParams(
-  columnMapping: Record<string, string>,
-  row: Record<string, string>
-): Record<string, string> {
-  const params: Record<string, string> = {};
-  for (const [slot, column] of Object.entries(columnMapping)) {
-    params[slot] = String(row[column] ?? "").trim();
-  }
-  return params;
-}
+export type CampaignRecipientRow = {
+  id: string;
+  phone_e164: string;
+  status: string;
+  provider_message_id: string | null;
+  error_code: string | null;
+  error_description: string | null;
+  sent_at: string | null;
+  first_reply_at: string | null;
+  first_reply_text: string | null;
+  conversation_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
 
 async function attachStats(tenantId: string, campaigns: CampaignRow[]): Promise<CampaignRow[]> {
   if (!campaigns.length) return campaigns;
@@ -282,6 +297,8 @@ export async function createCampaign(input: {
   }
 }
 
+const DISPATCHABLE_STATUSES = new Set(["draft", "paused", "sending", "completed"]);
+
 export async function startCampaignDispatch(
   tenantId: string,
   campaignId: string
@@ -291,14 +308,241 @@ export async function startCampaignDispatch(
   if (!campaign) return null;
   if (!campaign.flow_id) throw new Error("FLOW_REQUIRED");
   if (!campaign.metadata.channelAccountId) throw new Error("CHANNEL_REQUIRED");
+  if (campaign.status === "cancelled") throw new Error("CAMPAIGN_CANCELLED");
+  if (!DISPATCHABLE_STATUSES.has(campaign.status)) {
+    throw new Error("CAMPAIGN_INVALID_STATUS");
+  }
+
+  if (campaign.status === "completed") {
+    const pending = await pool.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM mailing_recipients
+       WHERE tenant_id = $1::uuid AND mailing_id = $2::uuid AND status = 'pending'`,
+      [tenantId, campaignId]
+    );
+    if (Number(pending.rows[0]?.n ?? 0) === 0) {
+      throw new Error("CAMPAIGN_NO_PENDING");
+    }
+  }
 
   await pool.query(
     `UPDATE mailings
-     SET status = 'sending', updated_at = now()
+     SET status = 'sending',
+         metadata = metadata || jsonb_build_object('lastDispatchAt', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')),
+         updated_at = now()
      WHERE id = $1::uuid AND tenant_id = $2::uuid`,
     [campaignId, tenantId]
   );
   return getCampaign(tenantId, campaignId);
+}
+
+export async function pauseCampaign(
+  tenantId: string,
+  campaignId: string
+): Promise<CampaignRow | null> {
+  await ensureCampaignSchema();
+  const result = await pool.query(
+    `UPDATE mailings
+     SET status = 'paused', updated_at = now()
+     WHERE id = $1::uuid AND tenant_id = $2::uuid AND status = 'sending'
+     RETURNING id`,
+    [campaignId, tenantId]
+  );
+  if (!result.rowCount) {
+    const existing = await getCampaign(tenantId, campaignId);
+    if (!existing) return null;
+    throw new Error("CAMPAIGN_INVALID_STATUS");
+  }
+  return getCampaign(tenantId, campaignId);
+}
+
+export async function resumeCampaign(
+  tenantId: string,
+  campaignId: string
+): Promise<CampaignRow | null> {
+  await ensureCampaignSchema();
+  const campaign = await getCampaign(tenantId, campaignId);
+  if (!campaign) return null;
+  if (campaign.status !== "paused") throw new Error("CAMPAIGN_INVALID_STATUS");
+  return startCampaignDispatch(tenantId, campaignId);
+}
+
+export async function cancelCampaign(
+  tenantId: string,
+  campaignId: string
+): Promise<CampaignRow | null> {
+  await ensureCampaignSchema();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const updated = await client.query(
+      `UPDATE mailings
+       SET status = 'cancelled', updated_at = now()
+       WHERE id = $1::uuid AND tenant_id = $2::uuid
+         AND status IN ('draft', 'sending', 'paused')
+       RETURNING id`,
+      [campaignId, tenantId]
+    );
+    if (!updated.rowCount) {
+      await client.query("ROLLBACK");
+      const existing = await getCampaign(tenantId, campaignId);
+      if (!existing) return null;
+      throw new Error("CAMPAIGN_INVALID_STATUS");
+    }
+    await client.query(
+      `UPDATE mailing_recipients
+       SET status = 'skipped', updated_at = now()
+       WHERE tenant_id = $1::uuid AND mailing_id = $2::uuid
+         AND status IN ('pending', 'sending')`,
+      [tenantId, campaignId]
+    );
+    await client.query("COMMIT");
+    return getCampaign(tenantId, campaignId);
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+export async function retryFailedRecipients(
+  tenantId: string,
+  campaignId: string,
+  recipientIds?: string[]
+): Promise<{ reset: number; campaign: CampaignRow | null }> {
+  await ensureCampaignSchema();
+  const campaign = await getCampaign(tenantId, campaignId);
+  if (!campaign) return { reset: 0, campaign: null };
+  if (campaign.status === "cancelled") throw new Error("CAMPAIGN_CANCELLED");
+
+  const params: unknown[] = [tenantId, campaignId];
+  let filterByIds = "";
+  if (recipientIds?.length) {
+    filterByIds = ` AND id = ANY($3::uuid[])`;
+    params.push(recipientIds);
+  }
+
+  const result = await pool.query(
+    `UPDATE mailing_recipients
+     SET status = 'pending',
+         error_code = NULL,
+         error_description = NULL,
+         updated_at = now()
+     WHERE tenant_id = $1::uuid AND mailing_id = $2::uuid AND status = 'failed'${filterByIds}`,
+    params
+  );
+  const reset = result.rowCount ?? 0;
+
+  if (reset > 0 && ["completed", "paused"].includes(campaign.status)) {
+    await pool.query(
+      `UPDATE mailings
+       SET status = 'sending',
+           metadata = metadata || jsonb_build_object('lastDispatchAt', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')),
+           updated_at = now()
+       WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+      [campaignId, tenantId]
+    );
+  }
+
+  return { reset, campaign: await getCampaign(tenantId, campaignId) };
+}
+
+export async function recoverStaleSendingRecipients(): Promise<number> {
+  await ensureCampaignSchema();
+  const stale = await pool.query<{
+    id: string;
+    stale_recoveries: number;
+  }>(
+    `SELECT id::text,
+            COALESCE((metadata->>'staleRecoveries')::int, 0) AS stale_recoveries
+     FROM mailing_recipients
+     WHERE status = 'sending'
+       AND updated_at < now() - ($1::int * interval '1 minute')`,
+    [STALE_SENDING_MINUTES]
+  );
+
+  let recovered = 0;
+  for (const row of stale.rows) {
+    const next = nextStatusAfterStaleSending(row.stale_recoveries);
+    await pool.query(
+      `UPDATE mailing_recipients
+       SET status = $2,
+           error_description = COALESCE($3, error_description),
+           metadata = metadata || jsonb_build_object(
+             'staleRecoveries', COALESCE((metadata->>'staleRecoveries')::int, 0) + 1
+           ),
+           updated_at = now()
+       WHERE id = $1::uuid`,
+      [row.id, next.status, next.errorDescription ?? null]
+    );
+    recovered += 1;
+  }
+  return recovered;
+}
+
+export async function listCampaignRecipients(input: {
+  tenantId: string;
+  campaignId: string;
+  status?: string;
+  page?: number;
+  limit?: number;
+}): Promise<{
+  items: CampaignRecipientRow[];
+  total: number;
+  page: number;
+  limit: number;
+}> {
+  await ensureCampaignSchema();
+  const campaign = await getCampaign(input.tenantId, input.campaignId);
+  if (!campaign) {
+    throw new Error("CAMPAIGN_NOT_FOUND");
+  }
+
+  const page = Math.max(1, input.page ?? 1);
+  const limit = Math.min(200, Math.max(1, input.limit ?? 50));
+  const offset = (page - 1) * limit;
+
+  const params: unknown[] = [input.tenantId, input.campaignId];
+  let statusClause = "";
+  if (input.status?.trim()) {
+    statusClause = ` AND status = $${params.length + 1}`;
+    params.push(input.status.trim());
+  }
+
+  const countResult = await pool.query<{ total: string }>(
+    `SELECT count(*)::text AS total
+     FROM mailing_recipients
+     WHERE tenant_id = $1::uuid AND mailing_id = $2::uuid${statusClause}`,
+    params
+  );
+
+  const listParams = [...params, limit, offset];
+  const result = await pool.query<CampaignRecipientRow>(
+    `SELECT id::text,
+            phone_e164,
+            status,
+            provider_message_id,
+            error_code,
+            error_description,
+            sent_at::text,
+            first_reply_at::text,
+            first_reply_text,
+            conversation_id::text,
+            created_at::text,
+            updated_at::text
+     FROM mailing_recipients
+     WHERE tenant_id = $1::uuid AND mailing_id = $2::uuid${statusClause}
+     ORDER BY created_at ASC
+     LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
+    listParams
+  );
+
+  return {
+    items: result.rows,
+    total: Number(countResult.rows[0]?.total ?? 0),
+    page,
+    limit,
+  };
 }
 
 async function getOrCreateCampaignConversation(input: {

@@ -3,6 +3,7 @@ import {
   getCampaign,
   listActiveSendingCampaigns,
   pickNextPendingRecipient,
+  recoverStaleSendingRecipients,
   sendCampaignRecipient,
 } from "./campaigns";
 
@@ -13,6 +14,7 @@ function campaignThrottleKey(tenantId: string, campaignId: string): string {
 }
 
 export async function processCampaignDispatchTick(): Promise<void> {
+  await recoverStaleSendingRecipients();
   const active = await listActiveSendingCampaigns();
   const now = Date.now();
 

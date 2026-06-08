@@ -49,8 +49,33 @@ type CampaignRow = {
   };
 };
 
+type RecipientRow = {
+  id: string;
+  phone_e164: string;
+  status: string;
+  error_description: string | null;
+  sent_at: string | null;
+  first_reply_text: string | null;
+  first_reply_at: string | null;
+};
+
 const providerLabel = (p: string) =>
   p === "whatsapp_cloud_api" ? "Meta" : p === "twilio_whatsapp" ? "Twilio" : p;
+
+const statusLabel: Record<string, string> = {
+  draft: "Rascunho",
+  sending: "Enviando",
+  paused: "Pausada",
+  completed: "Concluída",
+  cancelled: "Cancelada",
+  pending: "Pendente",
+  sent: "Enviado",
+  delivered: "Entregue",
+  read: "Lido",
+  failed: "Falhou",
+  responded: "Respondido",
+  skipped: "Ignorado",
+};
 
 export default function CampaignsAdmin() {
   const [flows, setFlows] = useState<FlowRow[]>([]);
@@ -70,6 +95,10 @@ export default function CampaignsAdmin() {
   const [sheet, setSheet] = useState<ParsedSheet | null>(null);
   const [columnMapping, setColumnMapping] = useState<Record<string, string>>({});
   const [phoneColumn, setPhoneColumn] = useState("Telefone");
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
+  const [recipients, setRecipients] = useState<RecipientRow[]>([]);
+  const [recipientStatusFilter, setRecipientStatusFilter] = useState("");
+  const [recipientsLoading, setRecipientsLoading] = useState(false);
 
   const selectedTemplate = useMemo(
     () => templates.find((t) => t.templateId === templateId) ?? null,
@@ -203,17 +232,52 @@ export default function CampaignsAdmin() {
     }
   };
 
-  const handleDispatch = async (campaignId: string) => {
+  const loadRecipients = useCallback(
+    async (campaignId: string, status = recipientStatusFilter) => {
+      setRecipientsLoading(true);
+      try {
+        const res = await api.get(`/admin/campaigns/${campaignId}/recipients`, {
+          params: {
+            ...(status ? { status } : {}),
+            limit: 100,
+          },
+        });
+        const data = unwrapApiData<{ items: RecipientRow[] }>(res.data);
+        setRecipients(data.items ?? []);
+      } catch (e) {
+        setError(getApiErrorMessage(e, "Erro ao carregar destinatários"));
+        setRecipients([]);
+      } finally {
+        setRecipientsLoading(false);
+      }
+    },
+    [recipientStatusFilter]
+  );
+
+  const runCampaignAction = async (
+    campaignId: string,
+    action: "dispatch" | "pause" | "resume" | "cancel" | "retry-failed",
+    successMsg: string
+  ) => {
     setSaving(true);
+    setError(null);
     try {
-      await api.post(`/admin/campaigns/${campaignId}/dispatch`);
-      setNotice("Disparo retomado.");
+      await api.post(`/admin/campaigns/${campaignId}/${action}`);
+      setNotice(successMsg);
       await loadBase();
+      if (selectedCampaignId === campaignId) {
+        await loadRecipients(campaignId);
+      }
     } catch (e) {
-      setError(getApiErrorMessage(e, "Erro ao disparar"));
+      setError(getApiErrorMessage(e, "Erro na operação da campanha"));
     } finally {
       setSaving(false);
     }
+  };
+
+  const openRecipients = async (campaignId: string) => {
+    setSelectedCampaignId(campaignId);
+    await loadRecipients(campaignId);
   };
 
   return (
@@ -393,23 +457,88 @@ export default function CampaignsAdmin() {
                 {campaigns.map((c) => (
                   <tr key={c.id} className="border-b border-zinc-800">
                     <td className="py-2 pr-3">{c.name}</td>
-                    <td className="py-2 pr-3">{c.status}</td>
+                    <td className="py-2 pr-3">{statusLabel[c.status] ?? c.status}</td>
                     <td className="py-2 pr-3">{c.stats?.total ?? 0}</td>
                     <td className="py-2 pr-3">{c.stats?.sent ?? 0}</td>
                     <td className="py-2 pr-3">{c.stats?.failed ?? 0}</td>
                     <td className="py-2 pr-3">{c.stats?.responded ?? 0}</td>
                     <td className="py-2">
-                      {c.status === "draft" || c.stats?.pending ? (
+                      <div className="flex flex-wrap gap-2 text-xs">
                         <button
                           type="button"
-                          className="text-cyan-400 hover:underline"
-                          onClick={() => void handleDispatch(c.id)}
+                          className="text-cyan-400 hover:underline disabled:opacity-40"
+                          disabled={saving}
+                          onClick={() => void openRecipients(c.id)}
                         >
-                          Disparar
+                          Destinatários
                         </button>
-                      ) : (
-                        "—"
-                      )}
+                        {(c.status === "draft" || (c.stats?.pending ?? 0) > 0) &&
+                        c.status !== "cancelled" &&
+                        c.status !== "sending" ? (
+                          <button
+                            type="button"
+                            className="text-cyan-400 hover:underline disabled:opacity-40"
+                            disabled={saving}
+                            onClick={() =>
+                              void runCampaignAction(c.id, "dispatch", "Disparo iniciado.")
+                            }
+                          >
+                            Disparar
+                          </button>
+                        ) : null}
+                        {c.status === "sending" ? (
+                          <button
+                            type="button"
+                            className="text-amber-400 hover:underline disabled:opacity-40"
+                            disabled={saving}
+                            onClick={() =>
+                              void runCampaignAction(c.id, "pause", "Campanha pausada.")
+                            }
+                          >
+                            Pausar
+                          </button>
+                        ) : null}
+                        {c.status === "paused" ? (
+                          <button
+                            type="button"
+                            className="text-cyan-400 hover:underline disabled:opacity-40"
+                            disabled={saving}
+                            onClick={() =>
+                              void runCampaignAction(c.id, "resume", "Campanha retomada.")
+                            }
+                          >
+                            Retomar
+                          </button>
+                        ) : null}
+                        {(c.stats?.failed ?? 0) > 0 && c.status !== "cancelled" ? (
+                          <button
+                            type="button"
+                            className="text-emerald-400 hover:underline disabled:opacity-40"
+                            disabled={saving}
+                            onClick={() =>
+                              void runCampaignAction(
+                                c.id,
+                                "retry-failed",
+                                "Falhas reenfileiradas para reenvio."
+                              )
+                            }
+                          >
+                            Retry falhas
+                          </button>
+                        ) : null}
+                        {["draft", "sending", "paused"].includes(c.status) ? (
+                          <button
+                            type="button"
+                            className="text-red-400 hover:underline disabled:opacity-40"
+                            disabled={saving}
+                            onClick={() =>
+                              void runCampaignAction(c.id, "cancel", "Campanha cancelada.")
+                            }
+                          >
+                            Cancelar
+                          </button>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -418,6 +547,78 @@ export default function CampaignsAdmin() {
           </div>
         )}
       </section>
+
+      {selectedCampaignId ? (
+        <section className="rounded-xl border border-zinc-700 bg-zinc-900/80 p-5 mt-6">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <h2 className="text-lg font-medium text-white">Destinatários</h2>
+            <div className="flex items-center gap-2">
+              <select
+                className="rounded-lg bg-zinc-800 border border-zinc-600 px-3 py-1.5 text-sm"
+                value={recipientStatusFilter}
+                onChange={(e) => {
+                  setRecipientStatusFilter(e.target.value);
+                  void loadRecipients(selectedCampaignId, e.target.value);
+                }}
+              >
+                <option value="">Todos os status</option>
+                {Object.entries(statusLabel).map(([key, label]) =>
+                  ["pending", "sending", "sent", "delivered", "read", "failed", "responded", "skipped"].includes(
+                    key
+                  ) ? (
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
+                  ) : null
+                )}
+              </select>
+              <button
+                type="button"
+                className="text-sm text-gray-400 hover:text-white"
+                onClick={() => setSelectedCampaignId(null)}
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+          {recipientsLoading ? (
+            <p className="text-gray-400 text-sm">Carregando destinatários…</p>
+          ) : recipients.length === 0 ? (
+            <p className="text-gray-400 text-sm">Nenhum destinatário encontrado.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-gray-400 border-b border-zinc-700">
+                    <th className="py-2 pr-3">Telefone</th>
+                    <th className="py-2 pr-3">Status</th>
+                    <th className="py-2 pr-3">Enviado em</th>
+                    <th className="py-2 pr-3">1ª resposta</th>
+                    <th className="py-2">Erro</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recipients.map((r) => (
+                    <tr key={r.id} className="border-b border-zinc-800">
+                      <td className="py-2 pr-3 text-cyan-300">{r.phone_e164}</td>
+                      <td className="py-2 pr-3">{statusLabel[r.status] ?? r.status}</td>
+                      <td className="py-2 pr-3">
+                        {r.sent_at ? new Date(r.sent_at).toLocaleString("pt-BR") : "—"}
+                      </td>
+                      <td className="py-2 pr-3 max-w-xs truncate">
+                        {r.first_reply_text
+                          ? `${r.first_reply_text}${r.first_reply_at ? ` (${new Date(r.first_reply_at).toLocaleString("pt-BR")})` : ""}`
+                          : "—"}
+                      </td>
+                      <td className="py-2 text-red-300 text-xs">{r.error_description ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      ) : null}
     </div>
   );
 }
