@@ -7,6 +7,8 @@ export const FOX_IDS = {
   msg_abertura: "b2000002-0001-4002-8001-000000000002",
   cap_cadastrar: "b2000003-0001-4003-8001-000000000003",
   dec_cadastrar_sim: "b2000006-0001-4006-8001-000000000006",
+  dec_inbound_cadastrar: "b2000007-0001-4007-8001-000000000007",
+  dec_inbound_agora: "b2000008-0001-4008-8001-000000000008",
   msg_nao: "b2000004-0001-4004-8001-000000000004",
   enc_nao: "b2000005-0001-4005-8001-000000000005",
   recv_nome: "b2000010-0001-4010-8001-000000000010",
@@ -233,8 +235,28 @@ export function buildFoxFlowNodes(foxHidFormulario: string) {
       type: "inicio",
       name: "Início",
       is_start: true,
-      config: { ...pos(40, 40), next_node_id: I.msg_abertura },
+      config: { ...pos(40, 40), next_node_id: I.dec_inbound_cadastrar },
     },
+    dec(
+      I.dec_inbound_cadastrar,
+      "Entrada: cadastrar-se?",
+      "inbound_message",
+      "cadastrar-se",
+      I.msg_nome,
+      I.dec_inbound_agora,
+      40,
+      80
+    ),
+    dec(
+      I.dec_inbound_agora,
+      "Entrada: agora não?",
+      "inbound_message",
+      "agora-nao",
+      I.msg_nao,
+      I.msg_abertura,
+      40,
+      100
+    ),
     msg(
       I.msg_abertura,
       "Abertura",

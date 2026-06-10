@@ -5,6 +5,7 @@ import {
   formatCpf,
   matchesInboundTrigger,
   validateFlowField,
+  valuesMatchForFlowDecision,
 } from "../src/flow-field-validators";
 
 describe("flow-field-validators", () => {
@@ -100,5 +101,14 @@ describe("flow-field-validators", () => {
       true
     );
     assert.strictEqual(matchesInboundTrigger("oi", ["cadastrar-se"]), false);
+  });
+
+  test("valuesMatchForFlowDecision Fox entrada", () => {
+    assert.strictEqual(valuesMatchForFlowDecision("Cadastrar-se", "cadastrar-se"), true);
+    assert.strictEqual(valuesMatchForFlowDecision("cadastrar", "cadastrar-se"), true);
+    assert.strictEqual(valuesMatchForFlowDecision("Agora não", "agora-nao"), true);
+    assert.strictEqual(valuesMatchForFlowDecision("agora nao", "agora-nao"), true);
+    assert.strictEqual(valuesMatchForFlowDecision("oi", "cadastrar-se"), false);
+    assert.strictEqual(valuesMatchForFlowDecision("oi", "agora-nao"), false);
   });
 });

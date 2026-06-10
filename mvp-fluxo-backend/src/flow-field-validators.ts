@@ -313,6 +313,31 @@ function compactTriggerToken(text: string): string {
   return normalizeInboundTrigger(text).replace(/[-\s]+/g, "");
 }
 
+const CADASTRO_POSITIVE_COMPACT = new Set(["cadastrar", "cadastrarse"]);
+
+export function valuesMatchForFlowDecision(left: unknown, right: unknown): boolean {
+  const leftStr = String(left ?? "");
+  const rightStr = String(right ?? "");
+  if (leftStr === rightStr) return true;
+
+  const normL = normalizeInboundTrigger(leftStr);
+  const normR = normalizeInboundTrigger(rightStr);
+  if (normL === normR) return true;
+
+  const compactL = compactTriggerToken(leftStr);
+  const compactR = compactTriggerToken(rightStr);
+  if (compactL === compactR) return true;
+
+  if (rightStr === "cadastrar-se") {
+    return CADASTRO_POSITIVE_COMPACT.has(compactL) || compactL.includes("cadastrar");
+  }
+  if (rightStr === "agora-nao") {
+    return compactL === "agoranao" || normL === "agora nao" || normL.startsWith("agora nao ");
+  }
+
+  return compactL.includes(compactR) || compactR.includes(compactL);
+}
+
 export function matchesInboundTrigger(messageText: string, triggers: string[]): boolean {
   const norm = normalizeInboundTrigger(messageText);
   const compact = compactTriggerToken(messageText);

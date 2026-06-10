@@ -39,7 +39,7 @@ import {
   cancelFlowWaitSchedule,
   scheduleFlowWaitTimeout,
 } from "./flow-wait-scheduler";
-import { validateFlowField } from "./flow-field-validators";
+import { validateFlowField, valuesMatchForFlowDecision } from "./flow-field-validators";
 import { buildFoxCadastroFormBody } from "./fox-form-mapper";
 import {
   buildCaptureRetryPrompt,
@@ -179,6 +179,8 @@ type DecisionRule = {
   comparisonValue?: unknown;
 };
 
+const FLEXIBLE_DECISION_VARIABLES = new Set(["inbound_message", "quer_cadastrar"]);
+
 type DecisionRouteRule = DecisionRule & {
   label?: string;
   next_node_id?: string;
@@ -203,7 +205,14 @@ function evaluateDecisionRule(
       ? rule.comparisonValue
       : "";
   const leftValue = variables[variableName];
-  const result = compareValues(leftValue, operator, comparisonValue);
+  let result = compareValues(leftValue, operator, comparisonValue);
+  if (
+    !result &&
+    operator === "igual_a" &&
+    FLEXIBLE_DECISION_VARIABLES.has(variableName)
+  ) {
+    result = valuesMatchForFlowDecision(leftValue, comparisonValue);
+  }
   return { result, variableName, leftValue, operator, comparisonValue };
 }
 
@@ -843,6 +852,20 @@ export async function executeFlow(
       const decisionResult = await executeDecisionNode(config, variables, tenantId);
       nextNodeId = decisionResult.nextNodeId;
       details = decisionResult.details;
+      if (
+        flowUserInput !== undefined &&
+        details?.result === true &&
+        Array.isArray(details.rules) &&
+        details.rules.some(
+          (rule) =>
+            rule.result === true &&
+            typeof rule.variableName === "string" &&
+            FLEXIBLE_DECISION_VARIABLES.has(rule.variableName)
+        )
+      ) {
+        captureInputConsumed = true;
+        flowUserInput = undefined;
+      }
     } else if (currentNode.type === "receber_mensagem") {
       const parsedReceber = parseReceberMensagemConfig(config, currentNode.id);
       const capturarConfig = toCapturarEntradaConfigFromReceber(parsedReceber);
