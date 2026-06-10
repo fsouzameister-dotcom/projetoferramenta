@@ -273,7 +273,7 @@ export async function shouldRouteInboundToBot(input: {
   const result = await pool.query<{
     id: string;
     status: AgentConversationStatus;
-    metadata: { flowHandoff?: boolean } | null;
+    metadata: { flowHandoff?: boolean; bot_only?: boolean } | null;
     tags: string[] | null;
   }>(
     `SELECT id, status, metadata, tags
@@ -291,6 +291,12 @@ export async function shouldRouteInboundToBot(input: {
 
   const row = result.rows[0];
   if (!row) return { route: true };
+
+  if (!isBotOnlyConversation(row.metadata)) {
+    // Conversa visível na Central do Agente (ex.: contato criado pelo humano com template).
+    // Respostas do cliente devem ir para a inbox, não para o fluxo bot/Fox.
+    return { route: false, conversationId: row.id };
+  }
 
   if (row.status === "em_andamento") {
     return { route: false, conversationId: row.id };
@@ -654,7 +660,10 @@ export async function recordInboundWhatsAppMessage(input: {
       `SELECT id FROM agent_conversations
        WHERE tenant_id = $1
          AND regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') = $2
-       ORDER BY updated_at DESC
+       ORDER BY
+         CASE WHEN lifecycle_status = 'open' THEN 0 ELSE 1 END,
+         CASE WHEN COALESCE(metadata->>'bot_only', 'false') = 'true' THEN 1 ELSE 0 END,
+         updated_at DESC
        LIMIT 1`,
       [input.tenantId, digits]
     );
@@ -952,7 +961,10 @@ async function findOrCreateConversationForInbound(input: {
     `SELECT id FROM agent_conversations
      WHERE tenant_id = $1
        AND regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') = $2
-     ORDER BY updated_at DESC
+     ORDER BY
+       CASE WHEN lifecycle_status = 'open' THEN 0 ELSE 1 END,
+       CASE WHEN COALESCE(metadata->>'bot_only', 'false') = 'true' THEN 1 ELSE 0 END,
+       updated_at DESC
      LIMIT 1`,
     [input.tenantId, digits]
   );

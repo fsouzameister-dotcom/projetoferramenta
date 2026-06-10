@@ -3,7 +3,7 @@
 > Fonte viva de itens **fora do escopo 0–30 / 31–60** ou **polish pós go-live**.  
 > Escopo ativo e prioridades de release: **[DEVLOG.md → Escopo vigente — maio/2026](DEVLOG.md#escopo-vigente--maio2026)**.
 
-**Última atualização:** 2026-06-05 (alerta bot pausado)
+**Última atualização:** 2026-06-08 (Instagram + bug template agente)
 
 ---
 
@@ -28,7 +28,9 @@
 
 | P | Épico | Janela | Status | Detalhe |
 |---|-------|--------|--------|---------|
+| **P1** | [Instagram / Meta — integração](#épico-instagram--meta-integração) | 0–90d | 💬 | DM, Lead Ads nativo, CTWA; ver diagnóstico DEVLOG 2026-06-08 |
 | **P1** | [Operação atendimento — fase 2 (pós-MVP filas/tabulações)](#épico-operação-atendimento--fase-2-pós-mvp-filastabulações) | 0–30d | 📋 | Retorno cliente, protocolo/reabertura, UX filas no agente, relatórios encerramento |
+| **P1** | [Campanhas — fase 2 (produto bulk)](#épico-campanhas--fase-2-produto-bulk) | pós-piloto | 📋 | Agendamento, header Meta, cadastro mestre, throttle distribuído |
 | P2 | [Tutoriais interativos in-app (product tours)](#épico-tutoriais-interativos-in-app) | 61–90d | 📋 | Driver.js / Joyride; tours por role |
 | P2 | [Checklist configuração mínima do tenant](#épico-checklist-configuração-mínima-do-tenant) | 61–90d | 📋 | Onboarding self-service (% WhatsApp, fluxo, agente) |
 | P2 | [NPS / CSAT pós-interação](#épico-nps--csat-pós-interação) | 61–90d | 📋 | Node ou pesquisa pós-fluxo; correlacionar relatórios |
@@ -45,6 +47,63 @@
 | — | Identity graph / CDP enterprise | — | ❌ | |
 | — | IoT field service proativo | — | ❌ | |
 | — | RCS / SMS | — | ❌ SMS fora de escopo |
+
+---
+
+## Épico: Instagram / Meta — integração
+
+**Contexto:** sessão 2026-06-08 — diagnóstico completo do que existe vs o que falta para conectar ClientOn ao Instagram. Ver [DEVLOG — checkpoint 2026-06-08](DEVLOG.md#checkpoint-de-sessão-2026-06-08--campanhas-instagram-e-bugs).
+
+**Estado hoje:** **não há Instagram DM**. Existe apenas captação de `@usuario` em fluxos (Fox), opção cosmética `flows.channel = instagram`, e tipo inbound `instagram_lead` (Lead Ads via POST manual em `/webhooks/inbound`). Infra Meta reutilizável (~70%): Graph API, webhook verify, assinatura, segredos, orchestrator, inbox — tudo implementado para **WhatsApp Cloud API**.
+
+### Três caminhos (escopos distintos)
+
+| Caminho | O que é | Escopo estimado | Prioridade sugerida |
+|---------|---------|-----------------|---------------------|
+| **A — Lead Ads + CTWA** | Captação via anúncio FB/IG (nome/telefone → fluxo WA) | 1–2 semanas | Alinhado ao DEVLOG 0–30d (já comprometido) |
+| **B — Instagram DM** | Inbox + bot/agente respondendo pelo Direct | 4–6 semanas | Médio prazo |
+| **C — Omnichannel** | A + B + inbox unificado com badge de canal | 6–8 semanas | Após MVP B |
+
+### Gaps técnicos (Instagram DM)
+
+| # | Item | Notas |
+|---|------|--------|
+| 1 | Webhook Page (`object: "page"`) | Hoje `parseWhatsAppWebhookPayload` só aceita `whatsapp_business_account` |
+| 2 | Canal IG por tenant | `page_id`, `instagram_business_account_id`, Page token cifrado |
+| 3 | `source_type` `instagram_dm` | Novo tipo em `inbound_entry_routes` + UI Entrada |
+| 4 | Identidade IGSID | `agent_conversations.phone NOT NULL` — IG usa IGSID, não E.164 |
+| 5 | Outbound IG | `deliverOutboundIfWhatsApp` → ramificar por canal |
+| 6 | UI admin | Aba/canal Meta além de `/admin/whatsapp` |
+| 7 | Lead Ads nativo | Webhook field `leadgen` na Page |
+| 8 | CTWA | Parse `referral` no webhook WhatsApp existente |
+
+### Pré-requisitos Meta (lado cliente)
+
+- Instagram Business/Creator vinculado a Facebook Page  
+- Meta App com `instagram_manage_messages`, `pages_messaging` (App Review)  
+- Webhook na Page: fields `messages`, `messaging_postbacks`  
+- Page Access Token long-lived por tenant  
+
+### Decisões em aberto
+
+1. Escopo primeiro: Lead Ads/CTWA vs Instagram DM vs ambos em sequência  
+2. Inbox unificado vs canal separado na UI  
+3. Aceitar Messenger no mesmo webhook Page ou só IG no MVP  
+4. Um app Meta por plataforma vs por tenant  
+
+---
+
+## Épico: Campanhas — fase 2 (produto bulk)
+
+**Contexto:** MVP de campanhas entregue (disparo template, throttle, inbound por campanha, relatório, controles P1: pausa/retry/destinatários/recovery). Piloto Cleo validado em produção (2026-06-08).
+
+| # | Item | Prioridade |
+|---|------|------------|
+| 1 | Agendamento (`scheduled_at`) | P2 |
+| 2 | Variáveis de header Meta | P2 |
+| 3 | Vínculo `client_id` na importação | P2 |
+| 4 | Migration formal colunas tracking | P2 |
+| 5 | Throttle distribuído (Redis) | P2 |
 
 ---
 

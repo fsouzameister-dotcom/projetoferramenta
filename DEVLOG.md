@@ -2,9 +2,10 @@
 
 ## Checkpoint atual
 
-- Data: 2026-06-03
+- Data: 2026-06-08
 - Escopo vigente: **[Escopo vigente — maio/2026](#escopo-vigente--maio2026)** (prioridades atuais)
-- Retomada rápida: **[Checkpoint sessão 2026-06-03 — Motor IA no fluxo](#checkpoint-de-sessão-2026-06-03--motor-ia-no-fluxo)**
+- Retomada rápida: **[Checkpoint sessão 2026-06-08 — Campanhas, Instagram e bugs](#checkpoint-de-sessão-2026-06-08--campanhas-instagram-e-bugs)**
+- Sessão anterior: **[Checkpoint sessão 2026-06-03 — Motor IA no fluxo](#checkpoint-de-sessão-2026-06-03--motor-ia-no-fluxo)**
 - Sessão anterior: **[Checkpoint sessão 2026-05-28 — Operação (filas, tabulações, encerramento)](#checkpoint-de-sessão-2026-05-28--operação-filas-tabulações-encerramento)**
 - Sessão anterior: **[Checkpoint sessão 2026-05-22 — alinhamento produto](#checkpoint-de-sessão-2026-05-22--alinhamento-produto)**
 - Telefonia (discussão pausada): **[Discussão telefonia — a retomar](#discussão-telefonia--a-retomar-2026-05-22)**
@@ -19,6 +20,59 @@
 - ✅ Validação inicial concluída em produção: node `mensagem` com interativos (`buttons` e `list`) e novo fluxo relacionado.
 - ✅ Sessão 2026-05-27 concluída: tabulações + migrations + cadastro mestre API inicial em produção.
 - ✅ Sessão 2026-05-28 concluída (código no repo): **Operação** admin (`/admin/operations`) — filas, tabulações × filas, configurações de serviço, protocolo, encerramento obrigatório no agente.
+- ✅ Sessão 2026-06-08: **Campanhas** MVP + P1 operacional em produção; piloto Cleo (template) validado; diagnóstico Instagram documentado no backlog.
+
+### Atualização rápida (2026-06-08)
+
+- **Campanhas (produção):**
+  - Disparo em massa de templates WhatsApp (Twilio + Meta), planilha CSV/Excel, mapeamento de variáveis, relatório CSV;
+  - Controles P1: pausar/retomar/cancelar, retry falhas, listagem de destinatários, recovery de `sending` órfão;
+  - Commits: `d23b5b7`, `4046237`; deploy VPS OK.
+- **Piloto validado:** template enviado via campanha no **fluxo Cleo** — disparo OK (aguardando template Meta Fox para segundo piloto).
+- **Instagram — diagnóstico (não implementado):**
+  - **Não existe** Instagram DM hoje; webhook Meta só parseia `whatsapp_business_account`;
+  - Reutilizável: Graph API, assinatura webhook, segredos, orchestrator, inbox (~70%);
+  - Três caminhos: **A)** Lead Ads + CTWA (1–2 sem, alinhado 0–30d); **B)** Instagram DM (4–6 sem); **C)** omnichannel (6–8 sem);
+  - Detalhe completo: **[BACKLOG — Instagram / Meta](BACKLOG.md#épico-instagram--meta-integração)**.
+- **Bug corrigido (template agente → Fox):** ver seção de checkpoint abaixo; fix em `shouldRouteInboundToBot` — conversa `agent_created` / não-`bot_only` não deve rotear para fluxo bot.
+
+### Checkpoint de sessão 2026-06-08 — Campanhas, Instagram e bugs
+
+#### Entregas
+
+| Área | Status |
+|------|--------|
+| Campanhas MVP | ✅ Produção |
+| Campanhas P1 (pausa, retry, destinatários, recovery, testes) | ✅ Produção (`4046237`) |
+| Piloto Cleo (campanha + template) | ✅ Disparo validado pelo cliente |
+| Instagram DM | 📋 Diagnóstico → BACKLOG |
+| Bug template agente → Fox | 🔧 Fix local (pendente deploy) |
+
+#### Bug: template da Central do Agente acionava Fluxo Fox
+
+**Sintoma:** agente envia template pelo painel; cliente responde **sem** escrever "Cadastrar-se"; mensagem entra no **Fluxo Fox** (bot).
+
+**Causa raiz:** `shouldRouteInboundToBot()` em `agent-conversations.ts` só bloqueava roteamento bot quando:
+- conversa `em_andamento` (agente ativo), ou
+- `em_espera` **com handoff** do fluxo.
+
+Contato criado pelo agente com template fica em `em_espera`, `bot_only: false`, `agent_created: true` — mas ainda recebia `route: true` → `processInboundMessage` executava Fox via rota inbound padrão ou sessão Redis.
+
+**Comportamento esperado:** resposta após template **humano** vai só para a **Central do Agente**; fluxo Fox só quando o cliente inicia com gatilho (ex.: "Cadastrar-se") ou campanha com rota dedicada.
+
+**Correção:** se existe conversa aberta **não** `bot_only`, retornar `route: false` (inbox do agente). Ajuste auxiliar: `recordInboundWhatsAppMessage` / `findOrCreateConversationForInbound` priorizam conversa aberta não-bot sobre `bot_only`.
+
+**Causas secundárias a monitorar:**
+- Rota inbound **padrão** (sem `message_triggers`) apontando para Fox — qualquer mensagem no canal cai no fluxo;
+- Rota de **campanha** Redis/DB ainda ativa (30 dias) para o telefone;
+- Sessão de fluxo **Redis** antiga não limpa.
+
+#### Próximos passos sugeridos
+
+1. Deploy do fix template agente  
+2. Decidir escopo Instagram: Lead Ads/CTWA primeiro vs DM  
+3. Piloto Fox quando template Meta aprovado  
+4. P2 campanhas (agendamento, header Meta) conforme BACKLOG  
 
 ### Atualização rápida (2026-05-28)
 
