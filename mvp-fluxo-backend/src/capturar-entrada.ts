@@ -1,5 +1,6 @@
 import { ApiError, ERROR_CODES } from "./http";
 import {
+  normalizeInboundTrigger,
   validateFlowField,
   type FlowFieldValidationOptions,
   type FlowFieldValidationType,
@@ -267,6 +268,8 @@ export function resolveCapturarEntradaInput(
   const optionByLabel = new Map(
     config.options.map((opt) => [opt.label.trim().toLowerCase(), opt])
   );
+  const compactToken = (value: string) =>
+    normalizeInboundTrigger(value).replace(/[-\s]+/g, "");
 
   const selected: CaptureOption[] = [];
   for (const token of tokens) {
@@ -278,6 +281,15 @@ export function resolveCapturarEntradaInput(
     const byLabel = optionByLabel.get(token.toLowerCase());
     if (byLabel) {
       if (!selected.some((s) => s.id === byLabel.id)) selected.push(byLabel);
+      continue;
+    }
+    const tokenCompact = compactToken(token);
+    const byCompact = config.options.find(
+      (opt) =>
+        compactToken(opt.label) === tokenCompact || compactToken(opt.id) === tokenCompact
+    );
+    if (byCompact) {
+      if (!selected.some((s) => s.id === byCompact.id)) selected.push(byCompact);
       continue;
     }
     throw new ApiError(

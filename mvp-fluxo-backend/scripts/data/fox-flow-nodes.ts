@@ -238,7 +238,7 @@ export function buildFoxFlowNodes(foxHidFormulario: string) {
     msg(
       I.msg_abertura,
       "Abertura",
-      `Olá!\nSou o assistente da Fox Pesquisas. Estamos montando um banco de participantes para pesquisas de mercado, algumas remuneradas e outras não remuneradas.\nCom seu cadastro, poderemos te convidar para participar de pesquisas que combinem com o seu perfil.\n\nAntes de começar:\n• Seus dados serão usados apenas para convites de pesquisa.\n\nVocê gostaria de se cadastrar?\n1️⃣ Sim, quero me cadastrar\n2️⃣ Não, agora não`,
+      `Olá!\nSou o assistente da Fox Pesquisas. Estamos montando um banco de participantes para pesquisas de mercado, algumas remuneradas e outras não remuneradas.\nCom seu cadastro, poderemos te convidar para participar de pesquisas que combinem com o seu perfil.\n\nAntes de começar:\n• Seus dados serão usados apenas para convites de pesquisa.\n\nComo deseja seguir?\nResponda *Cadastrar-se* para iniciar o cadastro ou *Agora não* se preferir deixar para outra hora.`,
       I.cap_cadastrar,
       40,
       120
@@ -246,21 +246,31 @@ export function buildFoxFlowNodes(foxHidFormulario: string) {
     cap(
       I.cap_cadastrar,
       "Quer cadastrar?",
-      "Digite 1 para Sim ou 2 para Não:",
+      "Responda *Cadastrar-se* ou *Agora não*:",
       "quer_cadastrar",
       [
-        { id: "1", label: "Sim, quero me cadastrar" },
-        { id: "2", label: "Não, agora não" },
+        { id: "cadastrar-se", label: "Cadastrar-se" },
+        { id: "agora-nao", label: "Agora não" },
       ],
       I.dec_cadastrar_sim,
       40,
-      220
+      220,
+      'Não entendi. Responda *Cadastrar-se* para se cadastrar ou *Agora não* para encerrar.'
     ),
-    dec(I.dec_cadastrar_sim, "Cadastrar?", "quer_cadastrar", "1", I.msg_nome, I.msg_nao, 40, 300),
+    dec(
+      I.dec_cadastrar_sim,
+      "Cadastrar?",
+      "quer_cadastrar",
+      "cadastrar-se",
+      I.msg_nome,
+      I.msg_nao,
+      40,
+      300
+    ),
     msg(
       I.msg_nao,
       "Não cadastrar",
-      "Sem problemas! Quando quiser participar, envie *Cadastrar-se* por aqui. Obrigado!",
+      "Sem problemas. Se mudar de ideia, é só me chamar por aqui. 😊",
       I.enc_nao,
       280,
       300
@@ -270,7 +280,7 @@ export function buildFoxFlowNodes(foxHidFormulario: string) {
       type: "encerramento",
       name: "Encerramento sem cadastro",
       is_start: false,
-      config: { ...pos(280, 380), end_message: "Até breve!" },
+      config: { ...pos(280, 380), end_message: "", reason_key: "recusou_cadastro" },
     },
     ...ask(
       I.msg_nome,

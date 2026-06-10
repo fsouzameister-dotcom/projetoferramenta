@@ -79,4 +79,23 @@ describe("capturar_entrada", () => {
     const resolved = resolveCapturarEntradaInput(parsed, "Seguro");
     assert.strictEqual(resolved.value, "seg");
   });
+
+  test("single_choice aceita variação sem hífen (Fox Cadastrar-se)", () => {
+    const parsed = parseCapturarEntradaConfig(
+      {
+        prompt: "Responda Cadastrar-se ou Agora não",
+        inputMode: "single_choice",
+        variableName: "quer_cadastrar",
+        options: [
+          { id: "cadastrar-se", label: "Cadastrar-se" },
+          { id: "agora-nao", label: "Agora não" },
+        ],
+      },
+      "node-fox"
+    );
+    const sim = resolveCapturarEntradaInput(parsed, "cadastrar se");
+    assert.strictEqual(sim.value, "cadastrar-se");
+    const nao = resolveCapturarEntradaInput(parsed, "agora nao");
+    assert.strictEqual(nao.value, "agora-nao");
+  });
 });
