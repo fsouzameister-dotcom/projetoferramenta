@@ -2,30 +2,42 @@ import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import logoClienton from "../../logo-clienton.png";
 import { isPlatformAdmin } from "~lib/session";
+import { hasPermission, type AppPermission } from "~lib/permissions";
 
-const baseNavItems = [
-  { label: "Painel", path: "/dashboard", icon: "⊞" },
-  { label: "Fluxos", path: "/flows", icon: "⬡" },
-  { label: "Usuários", path: "/admin/users", icon: "👤" },
-  { label: "IA", path: "/admin/ai", icon: "🤖" },
-  { label: "WhatsApp", path: "/admin/whatsapp", icon: "💬" },
-  { label: "Entrada", path: "/admin/inbound", icon: "📥" },
-  { label: "Campanhas", path: "/admin/campaigns", icon: "📣" },
-  { label: "Monitoramento", path: "/admin/monitoring", icon: "📡" },
-  { label: "Operação", path: "/admin/operations", icon: "⚙️" },
-  { label: "Relatórios", path: "/reports", icon: "📊" },
-  { label: "FAQ", path: "/faq", icon: "❓" },
+type NavItem = {
+  label: string;
+  path: string;
+  icon: string;
+  permission?: AppPermission;
+};
+
+const baseNavItems: NavItem[] = [
+  { label: "Painel", path: "/dashboard", icon: "⊞", permission: "dashboard" },
+  { label: "Fluxos", path: "/flows", icon: "⬡", permission: "flows" },
+  { label: "Usuários", path: "/admin/users", icon: "👤", permission: "users" },
+  { label: "Perfis", path: "/admin/roles", icon: "🛡️", permission: "roles" },
+  { label: "IA", path: "/admin/ai", icon: "🤖", permission: "ai" },
+  { label: "WhatsApp", path: "/admin/whatsapp", icon: "💬", permission: "whatsapp" },
+  { label: "Entrada", path: "/admin/inbound", icon: "📥", permission: "inbound" },
+  { label: "Campanhas", path: "/admin/campaigns", icon: "📣", permission: "campaigns" },
+  { label: "Monitoramento", path: "/admin/monitoring", icon: "📡", permission: "monitoring" },
+  { label: "Operação", path: "/admin/operations", icon: "⚙️", permission: "operations" },
+  { label: "Relatórios", path: "/reports", icon: "📊", permission: "reports" },
+  { label: "FAQ", path: "/faq", icon: "❓", permission: "dashboard" },
 ];
 
 export default function Sidebar() {
   const location = useLocation();
   const [logoFailed, setLogoFailed] = useState(false);
-  const navItems = isPlatformAdmin()
-    ? [
-        { label: "Clientes", path: "/admin/platform/tenants", icon: "🏢" },
-        ...baseNavItems,
-      ]
-    : baseNavItems;
+
+  const platformItems: NavItem[] = isPlatformAdmin()
+    ? [{ label: "Clientes", path: "/admin/platform/tenants", icon: "🏢", permission: "platform_tenants" }]
+    : [];
+
+  const navItems = [...platformItems, ...baseNavItems].filter((item) => {
+    if (!item.permission) return true;
+    return hasPermission(item.permission);
+  });
 
   return (
     <aside className="w-60 bg-gradient-to-b from-zinc-800 to-zinc-900 min-h-screen flex flex-col border-r border-zinc-700/80 shadow-2xl">

@@ -63,6 +63,7 @@ export function persistLoginSession(payload: {
   name?: string;
   tenant_type?: string;
   is_platform_admin?: boolean;
+  permissions?: string[];
 }) {
   localStorage.setItem("jwt_token", payload.token);
   localStorage.setItem("tenant_id", payload.tenant_id);
@@ -72,6 +73,10 @@ export function persistLoginSession(payload: {
   localStorage.setItem(
     "tenant_type",
     payload.tenant_type || (payload.is_platform_admin ? "platform" : "customer")
+  );
+  localStorage.setItem(
+    "user_permissions",
+    JSON.stringify(payload.permissions ?? [])
   );
   localStorage.removeItem("acting_tenant_name");
 }
@@ -83,15 +88,32 @@ export function clearSession() {
   localStorage.removeItem("user_role");
   localStorage.removeItem("user_name");
   localStorage.removeItem("tenant_type");
+  localStorage.removeItem("user_permissions");
   localStorage.removeItem("acting_tenant_name");
 }
 
 export function hasAdminUiAccess(): boolean {
   const role = localStorage.getItem("user_role") || "agente";
-  return (
+  if (
     role === "platform_admin" ||
     role === "admin_local" ||
     role === "supervisor" ||
     role === "admin"
-  );
+  ) {
+    try {
+      const raw = localStorage.getItem("user_permissions");
+      const perms = raw ? (JSON.parse(raw) as string[]) : [];
+      if (Array.isArray(perms) && perms.length > 0) return true;
+    } catch {
+      /* fallback legado */
+    }
+    return true;
+  }
+  try {
+    const raw = localStorage.getItem("user_permissions");
+    const perms = raw ? (JSON.parse(raw) as string[]) : [];
+    return Array.isArray(perms) && perms.length > 0;
+  } catch {
+    return false;
+  }
 }

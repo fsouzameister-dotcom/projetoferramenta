@@ -1,4 +1,5 @@
 import 'fastify';
+import type { AppPermission } from '../auth-permissions';
 
 // Interface para o objeto Tenant que será injetado na requisição
 interface Tenant {
@@ -20,7 +21,7 @@ interface AuthenticatedUser {
   role_name?: string;
   email: string;
   name?: string;
-  // Adicione outras propriedades do usuário que você queira acessar globalmente
+  permissions?: AppPermission[];
 }
 
 // Estende a interface FastifyRequest para incluir as novas propriedades

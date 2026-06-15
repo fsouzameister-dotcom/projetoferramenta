@@ -1,6 +1,5 @@
 import type { FastifyPluginAsync } from "fastify";
 import { ApiError, ERROR_CODES, sendSuccess } from "../http";
-import { hasAdminAccess } from "../auth-roles";
 import { listFlowsByTenant } from "../flows";
 import { listWhatsAppChannels } from "../whatsapp-channels";
 import {
@@ -47,14 +46,7 @@ function mapCampaignError(err: unknown): never {
 }
 
 const campaignRoutes: FastifyPluginAsync = async (fastify) => {
-  const ensureAdmin = (role?: string) => {
-    if (!hasAdminAccess(role)) {
-      throw new ApiError(403, ERROR_CODES.users.FORBIDDEN_ROLE, "Acesso negado");
-    }
-  };
-
   fastify.get("/admin/campaigns/templates", async (request, reply) => {
-    ensureAdmin(request.user?.role_name);
     const tenantId = request.tenant.id;
     const channelAccountId = String((request.query as { channelAccountId?: string }).channelAccountId ?? "").trim();
     if (!channelAccountId) {
@@ -65,13 +57,11 @@ const campaignRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.get("/admin/campaigns/channels", async (request, reply) => {
-    ensureAdmin(request.user?.role_name);
     const channels = await listWhatsAppChannels(request.tenant.id);
     return sendSuccess(request, reply, channels);
   });
 
   fastify.post("/admin/campaigns/parse-spreadsheet", async (request, reply) => {
-    ensureAdmin(request.user?.role_name);
     const body = request.body as { filename?: string; contentBase64?: string };
     const filename = body.filename?.trim() ?? "upload.csv";
     const contentBase64 = body.contentBase64?.trim();
@@ -89,7 +79,6 @@ const campaignRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.post("/admin/campaigns/preview-template", async (request, reply) => {
-    ensureAdmin(request.user?.role_name);
     const body = request.body as {
       bodyPreview?: string;
       columnMapping?: Record<string, string>;
@@ -104,13 +93,11 @@ const campaignRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.get("/admin/campaigns", async (request, reply) => {
-    ensureAdmin(request.user?.role_name);
     const items = await listCampaigns(request.tenant.id);
     return sendSuccess(request, reply, items);
   });
 
   fastify.get("/admin/campaigns/:campaignId", async (request, reply) => {
-    ensureAdmin(request.user?.role_name);
     const { campaignId } = request.params as { campaignId: string };
     const item = await getCampaign(request.tenant.id, campaignId);
     if (!item) {
@@ -120,7 +107,6 @@ const campaignRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.post("/admin/campaigns", async (request, reply) => {
-    ensureAdmin(request.user?.role_name);
     const body = request.body as {
       name?: string;
       flowId?: string;
@@ -191,7 +177,6 @@ const campaignRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.get("/admin/campaigns/:campaignId/recipients", async (request, reply) => {
-    ensureAdmin(request.user?.role_name);
     const { campaignId } = request.params as { campaignId: string };
     const q = request.query as { status?: string; page?: string; limit?: string };
     try {
@@ -209,7 +194,6 @@ const campaignRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.post("/admin/campaigns/:campaignId/dispatch", async (request, reply) => {
-    ensureAdmin(request.user?.role_name);
     const { campaignId } = request.params as { campaignId: string };
     try {
       const updated = await startCampaignDispatch(request.tenant.id, campaignId);
@@ -223,7 +207,6 @@ const campaignRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.post("/admin/campaigns/:campaignId/pause", async (request, reply) => {
-    ensureAdmin(request.user?.role_name);
     const { campaignId } = request.params as { campaignId: string };
     try {
       const updated = await pauseCampaign(request.tenant.id, campaignId);
@@ -237,7 +220,6 @@ const campaignRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.post("/admin/campaigns/:campaignId/resume", async (request, reply) => {
-    ensureAdmin(request.user?.role_name);
     const { campaignId } = request.params as { campaignId: string };
     try {
       const updated = await resumeCampaign(request.tenant.id, campaignId);
@@ -251,7 +233,6 @@ const campaignRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.post("/admin/campaigns/:campaignId/cancel", async (request, reply) => {
-    ensureAdmin(request.user?.role_name);
     const { campaignId } = request.params as { campaignId: string };
     try {
       const updated = await cancelCampaign(request.tenant.id, campaignId);
@@ -265,7 +246,6 @@ const campaignRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.post("/admin/campaigns/:campaignId/retry-failed", async (request, reply) => {
-    ensureAdmin(request.user?.role_name);
     const { campaignId } = request.params as { campaignId: string };
     const body = (request.body ?? {}) as { recipientIds?: string[] };
     try {
@@ -284,7 +264,6 @@ const campaignRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.get("/reports/campaigns", async (request, reply) => {
-    ensureAdmin(request.user?.role_name);
     const q = request.query as {
       flowId?: string;
       campaignId?: string;
@@ -308,7 +287,6 @@ const campaignRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.get("/admin/campaigns/options/flows", async (request, reply) => {
-    ensureAdmin(request.user?.role_name);
     const flows = await listFlowsByTenant(request.tenant.id);
     return sendSuccess(request, reply, flows);
   });

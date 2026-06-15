@@ -17,6 +17,7 @@ import FlowEditor from "./pages/FlowEditor";
 import FlowForm from "./pages/FlowForm";
 import AgentHome from "./pages/AgentHome";
 import UsersAdmin from "./pages/UsersAdmin";
+import RolesAdmin from "./pages/RolesAdmin";
 import AiAdmin from "./pages/AiAdmin";
 import WhatsAppAdmin from "./pages/WhatsAppAdmin";
 import InboundAdmin from "./pages/InboundAdmin";
@@ -27,7 +28,8 @@ import PlatformTenants from "./pages/PlatformTenants";
 import Faq from "./pages/Faq";
 import Sidebar from "./components/Sidebar";
 import TenantActingBanner from "./components/TenantActingBanner";
-import { clearSession, isSessionValid } from "./lib/session";
+import { clearSession, hasAdminUiAccess, isSessionValid } from "./lib/session";
+import { canAccessPath } from "./lib/permissions";
 
 function getUserRole(): string {
   return localStorage.getItem("user_role") || "agente";
@@ -137,10 +139,48 @@ const RequireAuth = () => {
   return <Outlet />;
 };
 
-const RequireRoles = ({ allowed }: { allowed: string[] }) => {
+const RequireAdmin = () => {
   const role = getUserRole();
-  if (!allowed.includes(role)) {
-    return <Navigate to={role === "agente" ? "/agent" : "/dashboard"} replace />;
+  if (role === "agente") {
+    return <Navigate to="/agent" replace />;
+  }
+  if (!hasAdminUiAccess()) {
+    return <Navigate to="/login" replace />;
+  }
+  return <Outlet />;
+};
+
+const RequirePathAccess = () => {
+  const location = useLocation();
+  const basePath = location.pathname.replace(/\/flows\/[^/]+$/, "/flows");
+  const pathKey =
+    Object.keys({
+      "/dashboard": true,
+      "/reports": true,
+      "/faq": true,
+      "/flows": true,
+      "/flows/new": true,
+      "/admin/users": true,
+      "/admin/roles": true,
+      "/admin/ai": true,
+      "/admin/whatsapp": true,
+      "/admin/inbound": true,
+      "/admin/campaigns": true,
+      "/admin/monitoring": true,
+      "/admin/operations": true,
+      "/admin/platform/tenants": true,
+    }).find((p) => location.pathname === p || location.pathname.startsWith(`${p}/`)) ??
+    (location.pathname.startsWith("/flows/edit/") ? "/flows" : basePath);
+
+  if (!canAccessPath(pathKey)) {
+    return <Navigate to="/dashboard" replace />;
+  }
+  return <Outlet />;
+};
+
+const RequireAgent = () => {
+  if (getUserRole() !== "agente") {
+    return <Navigate to="/dashboard" replace />;
   }
   return <Outlet />;
 };
@@ -156,44 +196,41 @@ const router = createBrowserRouter([
         element: <RequireAuth />,
         children: [
           {
-            element: (
-              <RequireRoles
-                allowed={[
-                  "platform_admin",
-                  "admin_local",
-                  "supervisor",
-                  "admin",
-                ]}
-              />
-            ),
+            element: <RequireAdmin />,
             children: [
               {
-                element: <LayoutWithSidebar />,
+                element: <RequirePathAccess />,
                 children: [
-                  { path: "dashboard", element: <Dashboard /> },
-                  { path: "reports", element: <Reports /> },
-                  { path: "faq", element: <Faq /> },
-                  { path: "flows", element: <Flows /> },
-                  { path: "flows/new", element: <FlowForm /> },
-                  { path: "flows/edit/:id", element: <FlowForm /> },
-                  { path: "admin/users", element: <UsersAdmin /> },
-                  { path: "admin/ai", element: <AiAdmin /> },
-                  { path: "admin/whatsapp", element: <WhatsAppAdmin /> },
-                  { path: "admin/inbound", element: <InboundAdmin /> },
-                  { path: "admin/campaigns", element: <CampaignsAdmin /> },
-                  { path: "admin/monitoring", element: <MonitoringAdmin /> },
-                  { path: "admin/operations", element: <OperationsAdmin /> },
                   {
-                    path: "admin/platform/tenants",
-                    element: <PlatformTenants />,
+                    element: <LayoutWithSidebar />,
+                    children: [
+                      { path: "dashboard", element: <Dashboard /> },
+                      { path: "reports", element: <Reports /> },
+                      { path: "faq", element: <Faq /> },
+                      { path: "flows", element: <Flows /> },
+                      { path: "flows/new", element: <FlowForm /> },
+                      { path: "flows/edit/:id", element: <FlowForm /> },
+                      { path: "admin/users", element: <UsersAdmin /> },
+                      { path: "admin/roles", element: <RolesAdmin /> },
+                      { path: "admin/ai", element: <AiAdmin /> },
+                      { path: "admin/whatsapp", element: <WhatsAppAdmin /> },
+                      { path: "admin/inbound", element: <InboundAdmin /> },
+                      { path: "admin/campaigns", element: <CampaignsAdmin /> },
+                      { path: "admin/monitoring", element: <MonitoringAdmin /> },
+                      { path: "admin/operations", element: <OperationsAdmin /> },
+                      {
+                        path: "admin/platform/tenants",
+                        element: <PlatformTenants />,
+                      },
+                    ],
                   },
+                  { path: "flows/:flowId", element: <FlowEditor /> },
                 ],
               },
-              { path: "flows/:flowId", element: <FlowEditor /> },
             ],
           },
           {
-            element: <RequireRoles allowed={["agente"]} />,
+            element: <RequireAgent />,
             children: [{ path: "agent", element: <AgentHome /> }],
           },
         ],

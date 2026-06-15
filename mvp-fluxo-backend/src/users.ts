@@ -7,9 +7,11 @@ import {
   isAllowedRoleForTenant,
 } from "./auth-roles";
 import { getTenantById } from "./tenant-platform";
+import { getOrCreateRoleId } from "./roles";
 
 export type { AppRole } from "./auth-roles";
 export { isAllowedRole, CUSTOMER_ROLES };
+export { getOrCreateRoleId } from "./roles";
 
 export type TenantUser = {
   id: string;
@@ -32,30 +34,6 @@ export async function listUsersByTenant(tenantId: string): Promise<TenantUser[]>
       [tenantId]
     );
     return result.rows;
-  } finally {
-    client.release();
-  }
-}
-
-export async function getOrCreateRoleId(
-  tenantId: string,
-  roleName: AppRole
-): Promise<string> {
-  const client = await pool.connect();
-  try {
-    const existing = await client.query<{ id: string }>(
-      `SELECT id FROM roles WHERE tenant_id = $1 AND name = $2 LIMIT 1`,
-      [tenantId, roleName]
-    );
-    if (existing.rows.length > 0) return existing.rows[0].id;
-
-    const created = await client.query<{ id: string }>(
-      `INSERT INTO roles (id, tenant_id, name)
-       VALUES (gen_random_uuid(), $1, $2)
-       RETURNING id`,
-      [tenantId, roleName]
-    );
-    return created.rows[0].id;
   } finally {
     client.release();
   }
@@ -85,13 +63,18 @@ export async function createUserForTenant(input: {
   name: string;
   email: string;
   password: string;
-  roleName: AppRole;
+  roleName?: AppRole;
+  roleId?: string;
 }): Promise<TenantUser> {
   const tenant = await getTenantById(input.tenantId);
   const tenantType =
     tenant?.tenant_type === "platform" ? "platform" : "customer";
 
-  if (!isAllowedRoleForTenant(input.roleName, tenantType)) {
+  if (!input.roleId && !input.roleName) {
+    throw new Error("ROLE_REQUIRED");
+  }
+
+  if (input.roleName && !isAllowedRoleForTenant(input.roleName, tenantType)) {
     throw new Error("ROLE_NOT_ALLOWED_FOR_TENANT");
   }
 
@@ -101,7 +84,21 @@ export async function createUserForTenant(input: {
     throw err;
   }
 
-  const roleId = await getOrCreateRoleId(input.tenantId, input.roleName);
+  let roleId = input.roleId;
+  let roleName = input.roleName;
+
+  if (roleId) {
+    const roleRow = await pool.query<{ name: string }>(
+      `SELECT name FROM roles WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+      [roleId, input.tenantId]
+    );
+    if (!roleRow.rows[0]) throw new Error("ROLE_NOT_FOUND");
+    roleName = roleRow.rows[0].name as AppRole;
+  } else if (roleName) {
+    roleId = await getOrCreateRoleId(input.tenantId, roleName);
+  }
+
+  if (!roleId || !roleName) throw new Error("ROLE_REQUIRED");
   const passwordHash = await bcrypt.hash(input.password, 10);
   const client = await pool.connect();
   try {
@@ -119,7 +116,7 @@ export async function createUserForTenant(input: {
     );
     return {
       ...inserted.rows[0],
-      role_name: input.roleName,
+      role_name: roleName,
     };
   } finally {
     client.release();
@@ -133,6 +130,7 @@ export async function updateUserForTenant(input: {
   email?: string;
   password?: string;
   roleName?: AppRole;
+  roleId?: string;
 }): Promise<TenantUser | null> {
   const client = await pool.connect();
   try {
@@ -151,11 +149,11 @@ export async function updateUserForTenant(input: {
       }
     }
 
-    if (input.roleName !== undefined) {
+    if (input.roleName !== undefined || input.roleId !== undefined) {
       const tenant = await getTenantById(input.tenantId);
       const tenantType =
         tenant?.tenant_type === "platform" ? "platform" : "customer";
-      if (!isAllowedRoleForTenant(input.roleName, tenantType)) {
+      if (input.roleName && !isAllowedRoleForTenant(input.roleName, tenantType)) {
         throw new Error("ROLE_NOT_ALLOWED_FOR_TENANT");
       }
     }
@@ -177,7 +175,15 @@ export async function updateUserForTenant(input: {
       updates.push(`password_hash = $${p++}`);
       values.push(hash);
     }
-    if (input.roleName !== undefined) {
+    if (input.roleId !== undefined) {
+      const roleRow = await client.query<{ id: string }>(
+        `SELECT id FROM roles WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+        [input.roleId, input.tenantId]
+      );
+      if (!roleRow.rows[0]) throw new Error("ROLE_NOT_FOUND");
+      updates.push(`role_id = $${p++}`);
+      values.push(input.roleId);
+    } else if (input.roleName !== undefined) {
       const roleId = await getOrCreateRoleId(input.tenantId, input.roleName);
       updates.push(`role_id = $${p++}`);
       values.push(roleId);

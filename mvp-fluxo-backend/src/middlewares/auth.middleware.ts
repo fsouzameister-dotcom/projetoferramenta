@@ -3,6 +3,7 @@ import * as jwt from "jsonwebtoken";
 import { JWT_SECRET } from "../config";
 import { pool } from "../db";
 import { isPlatformAdmin } from "../auth-roles";
+import { resolveEffectivePermissions, type AppPermission } from "../auth-permissions";
 import { ApiError, ERROR_CODES } from "../http";
 import {
   assertCustomerTenantTarget,
@@ -38,7 +39,9 @@ export async function authMiddleware(
     const client = await pool.connect();
     try {
       const userResult = await client.query(
-        `SELECT u.id, u.tenant_id, u.role_id, u.email, u.name, COALESCE(r.name, 'agente') AS role_name
+        `SELECT u.id, u.tenant_id, u.role_id, u.email, u.name,
+                COALESCE(r.name, 'agente') AS role_name,
+                r.permissions AS role_permissions
          FROM users u
          LEFT JOIN roles r ON r.id = u.role_id
          WHERE u.id = $1 AND u.tenant_id = $2`,
@@ -80,7 +83,16 @@ export async function authMiddleware(
       }
 
       request.homeTenantId = homeTenantId;
-      request.user = row;
+      const roleName = row.role_name as string | undefined;
+      const permissions = resolveEffectivePermissions({
+        roleName,
+        storedPermissions: row.role_permissions,
+      });
+      request.user = {
+        ...row,
+        role_name: roleName,
+        permissions,
+      };
     } finally {
       client.release();
     }

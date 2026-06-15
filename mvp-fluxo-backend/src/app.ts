@@ -6,6 +6,7 @@ import * as bcrypt from "bcrypt";
 import { JWT_SECRET, getCorsOrigin, resolveLoginTenantId } from "./config";
 import { pool } from "./db";
 import { findUserByEmail } from "./tenant-platform";
+import { getPermissionsForRoleId } from "./roles";
 import {
   ApiError,
   ERROR_CODES,
@@ -336,6 +337,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
       const tenantType =
         (user.tenant_type as string | undefined) ?? "customer";
       const isPlatformAdmin = user.role_name === "platform_admin";
+      const { permissions } = await getPermissionsForRoleId(user.role_id);
 
       return sendSuccess(request, reply, {
         message: "Login successful",
@@ -345,6 +347,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
         name: user.name ?? user.email,
         tenant_type: tenantType,
         is_platform_admin: isPlatformAdmin,
+        permissions,
       });
     } catch (error) {
       if (error instanceof ApiError) {

@@ -1,24 +1,23 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import api, { getApiErrorMessage, unwrapApiData } from "../api/client";
-import {
-  getActingTenantId,
-  getHomeTenantId,
-  isPlatformAdmin,
-} from "~lib/session";
 import InfoTooltip from "~components/InfoTooltip";
+import { hasPermission } from "~lib/permissions";
 
 type UserRow = {
   id: string;
   email: string;
   name: string;
+  role_id: string;
   role_name: string;
 };
 
-const customerRoleOptions = [
-  { value: "admin_local", label: "Admin local" },
-  { value: "supervisor", label: "Supervisor" },
-  { value: "agente", label: "Agente" },
-];
+type AssignableRole = {
+  id: string;
+  name: string;
+  label: string;
+  is_system: boolean;
+};
 
 const USERS_ADMIN_TOUR_STORAGE_KEY = "users_admin_tour_completed_v1";
 const USERS_ADMIN_TOUR_STEPS = [
@@ -45,18 +44,7 @@ function getSimulationFeatureKey(): string {
 }
 
 export default function UsersAdmin() {
-  const roleOptions = useMemo(() => {
-    const onPlatformHome =
-      isPlatformAdmin() && getActingTenantId() === getHomeTenantId();
-    if (onPlatformHome) {
-      return [
-        { value: "platform_admin", label: "Operador plataforma (master)" },
-        ...customerRoleOptions,
-      ];
-    }
-    return customerRoleOptions;
-  }, []);
-
+  const [assignableRoles, setAssignableRoles] = useState<AssignableRole[]>([]);
   const simulationFeatureKey = getSimulationFeatureKey();
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -66,14 +54,14 @@ export default function UsersAdmin() {
     name: "",
     email: "",
     password: "",
-    role_name: "agente",
+    role_id: "",
   });
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({
     name: "",
     email: "",
     password: "",
-    role_name: "agente",
+    role_id: "",
   });
   const [simulationEnabled, setSimulationEnabled] = useState(
     () => localStorage.getItem(getSimulationFeatureKey()) === "true"
@@ -81,6 +69,20 @@ export default function UsersAdmin() {
   const [simulationNotice, setSimulationNotice] = useState<string | null>(null);
   const [showTour, setShowTour] = useState(false);
   const [tourStepIndex, setTourStepIndex] = useState(0);
+
+  const loadAssignableRoles = async () => {
+    try {
+      const res = await api.get("/roles/assignable");
+      const roles = unwrapApiData<AssignableRole[]>(res.data);
+      setAssignableRoles(roles);
+      const agentRole = roles.find((r) => r.name === "agente");
+      if (agentRole) {
+        setForm((f) => (f.role_id ? f : { ...f, role_id: agentRole.id }));
+      }
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Erro ao carregar perfis"));
+    }
+  };
 
   const loadUsers = async () => {
     setLoading(true);
@@ -96,6 +98,7 @@ export default function UsersAdmin() {
   };
 
   useEffect(() => {
+    void loadAssignableRoles();
     void loadUsers();
   }, []);
 
@@ -113,7 +116,13 @@ export default function UsersAdmin() {
     setError(null);
     try {
       await api.post("/users", form);
-      setForm({ name: "", email: "", password: "", role_name: "agente" });
+      const agentRole = assignableRoles.find((r) => r.name === "agente");
+      setForm({
+        name: "",
+        email: "",
+        password: "",
+        role_id: agentRole?.id ?? "",
+      });
       await loadUsers();
     } catch (err) {
       setError(getApiErrorMessage(err, "Erro ao criar usuário"));
@@ -128,7 +137,7 @@ export default function UsersAdmin() {
       name: user.name,
       email: user.email,
       password: "",
-      role_name: user.role_name,
+      role_id: user.role_id,
     });
   };
 
@@ -141,10 +150,10 @@ export default function UsersAdmin() {
         name: editForm.name,
         email: editForm.email,
         password: editForm.password || undefined,
-        role_name: editForm.role_name,
+        role_id: editForm.role_id,
       });
       setEditingUserId(null);
-      setEditForm({ name: "", email: "", password: "", role_name: "agente" });
+      setEditForm({ name: "", email: "", password: "", role_id: "" });
       await loadUsers();
     } catch (err) {
       setError(getApiErrorMessage(err, "Erro ao atualizar usuário"));
@@ -193,9 +202,16 @@ export default function UsersAdmin() {
         <div>
           <h1 className="text-2xl font-bold text-white">Usuários e Permissões</h1>
           <p className="text-sm text-gray-300 mt-1 flex items-center gap-2">
-            Crie perfis de admin local, supervisor e agente.
+            Crie usuários e associe a um perfil com permissões definidas.
             <InfoTooltip text="Controle aqui quem pode administrar canais, fluxos e atendimento dentro do tenant." />
           </p>
+          {hasPermission("roles") ? (
+            <p className="text-xs text-cyan-300 mt-2">
+              <Link to="/admin/roles" className="underline">
+                Gerenciar perfis e permissões
+              </Link>
+            </p>
+          ) : null}
           <p className="text-xs text-gray-400 mt-1">
             O campo de nome define como o atendente aparece nas mensagens para o cliente.
           </p>
@@ -262,11 +278,11 @@ export default function UsersAdmin() {
         <div className="flex gap-2 min-w-0">
           <select
             className="border rounded-lg px-3 py-2 text-gray-900 flex-1 min-w-0"
-            value={form.role_name}
-            onChange={(e) => setForm((p) => ({ ...p, role_name: e.target.value }))}
+            value={form.role_id}
+            onChange={(e) => setForm((p) => ({ ...p, role_id: e.target.value }))}
           >
-            {roleOptions.map((role) => (
-              <option key={role.value} value={role.value}>
+            {assignableRoles.map((role) => (
+              <option key={role.id} value={role.id}>
                 {role.label}
               </option>
             ))}
@@ -334,13 +350,13 @@ export default function UsersAdmin() {
                       <div className="flex gap-2">
                         <select
                           className="border rounded px-2 py-1"
-                          value={editForm.role_name}
+                          value={editForm.role_id}
                           onChange={(e) =>
-                            setEditForm((p) => ({ ...p, role_name: e.target.value }))
+                            setEditForm((p) => ({ ...p, role_id: e.target.value }))
                           }
                         >
-                          {roleOptions.map((role) => (
-                            <option key={role.value} value={role.value}>
+                          {assignableRoles.map((role) => (
+                            <option key={role.id} value={role.id}>
                               {role.label}
                             </option>
                           ))}
@@ -372,7 +388,10 @@ export default function UsersAdmin() {
                       </div>
                     ) : (
                       <div className="flex items-center justify-between gap-3">
-                        <span>{user.role_name}</span>
+                        <span>
+                          {assignableRoles.find((r) => r.id === user.role_id)?.label ??
+                            user.role_name}
+                        </span>
                         <div className="flex gap-2">
                           <button
                             type="button"

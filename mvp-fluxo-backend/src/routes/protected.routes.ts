@@ -69,10 +69,22 @@ import {
   updateMasterClientPhone,
 } from "../clients-master";
 import {
-  hasAdminAccess,
   isAllowedRoleForTenant,
   isPlatformAdmin,
+  type AppRole,
 } from "../auth-roles";
+import {
+  requireAdminAccess,
+  requirePermission,
+} from "../request-authz";
+import { resolveRoutePermission } from "../route-permissions";
+import {
+  createCustomRole,
+  deleteCustomRole,
+  getPermissionCatalog,
+  listRolesByTenant,
+  updateRoleForTenant,
+} from "../roles";
 import {
   createCustomerTenant,
   ensurePlatformTenantSchema,
@@ -339,14 +351,20 @@ const whatsappChannelIdParamSchema = {
 
 // Declaração do plugin Fastify
 const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
-  const ensureAdminAccess = (roleName?: string) => {
-    if (!hasAdminAccess(roleName)) {
-      throw new ApiError(
-        403,
-        ERROR_CODES.users.FORBIDDEN_ROLE,
-        "Apenas administradores podem executar esta ação"
-      );
+  fastify.addHook("preHandler", async (request) => {
+    if (!request.user) return;
+    const routePath =
+      (request.routeOptions && "url" in request.routeOptions
+        ? String(request.routeOptions.url)
+        : null) ?? request.url.split("?")[0];
+    const permission = resolveRoutePermission(routePath);
+    if (permission) {
+      requirePermission(request, permission);
     }
+  });
+
+  const ensureAdminAccess = (request: { user?: { role_name?: string; permissions?: import("../auth-permissions").AppPermission[] } }) => {
+    requireAdminAccess(request as import("fastify").FastifyRequest);
   };
 
   const ensurePlatformAdmin = (roleName?: string) => {
@@ -359,14 +377,8 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
     }
   };
 
-  const ensureAiAdminAccess = (roleName?: string) => {
-    if (!hasAdminAccess(roleName)) {
-      throw new ApiError(
-        403,
-        ERROR_CODES.ai.AI_FORBIDDEN_ROLE,
-        "Apenas admin local e supervisor podem configurar IA"
-      );
-    }
+  const ensureAiAdminAccess = (request: import("fastify").FastifyRequest) => {
+    requirePermission(request, "ai");
   };
 
   // Aplica o tenantMiddleware a todas as rotas registradas dentro deste plugin
@@ -614,7 +626,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
     async (request, reply) => {
-      ensureAiAdminAccess(request.user?.role_name);
+      ensureAiAdminAccess(request);
       const body = request.body;
       try {
         const created = await createAiProviderSetting({
@@ -663,7 +675,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
     async (request, reply) => {
-      ensureAiAdminAccess(request.user?.role_name);
+      ensureAiAdminAccess(request);
       try {
         const providers = await listAiProviderSettings(request.tenant.id);
         return sendSuccess(request, reply, providers);
@@ -693,7 +705,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
     async (request, reply) => {
-      ensureAdminAccess(request.user?.role_name);
+      ensureAdminAccess(request);
       try {
         const data = await listWhatsAppChannels(request.tenant.id);
         return sendSuccess(request, reply, data);
@@ -749,7 +761,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
     async (request, reply) => {
-      ensureAdminAccess(request.user?.role_name);
+      ensureAdminAccess(request);
       const body = request.body;
       try {
         const created = await createWhatsAppChannelOptionB({
@@ -809,7 +821,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
     async (request, reply) => {
-      ensureAdminAccess(request.user?.role_name);
+      ensureAdminAccess(request);
       const body = request.body;
       try {
         const created = await createWhatsAppChannelTwilio({
@@ -862,7 +874,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
     async (request, reply) => {
-      ensureAdminAccess(request.user?.role_name);
+      ensureAdminAccess(request);
       try {
         await updateWhatsAppChannelLabel(
           request.tenant.id,
@@ -914,7 +926,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
     async (request, reply) => {
-      ensureAdminAccess(request.user?.role_name);
+      ensureAdminAccess(request);
       try {
         await deleteWhatsAppChannel(request.tenant.id, request.params.channelId);
         return sendSuccess(request, reply, { success: true });
@@ -974,7 +986,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
     async (request, reply) => {
-      ensureAdminAccess(request.user?.role_name);
+      ensureAdminAccess(request);
       try {
         const data = await getServerWhatsAppSettingsPublic();
         return sendSuccess(request, reply, data);
@@ -1025,7 +1037,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
     async (request, reply) => {
-      ensureAdminAccess(request.user?.role_name);
+      ensureAdminAccess(request);
       const body = request.body;
       try {
         await upsertServerWhatsAppSettings({
@@ -1081,7 +1093,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
     async (request, reply) => {
-      ensureAiAdminAccess(request.user?.role_name);
+      ensureAiAdminAccess(request);
       try {
         const persona = await createAiPersona({
           tenantId: request.tenant.id,
@@ -1167,7 +1179,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
     async (request, reply) => {
-      ensureAiAdminAccess(request.user?.role_name);
+      ensureAiAdminAccess(request);
       const { personaId } = request.params;
       try {
         const updated = await updateAiPersona({
@@ -1229,7 +1241,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
     async (request, reply) => {
-      ensureAiAdminAccess(request.user?.role_name);
+      ensureAiAdminAccess(request);
       try {
         const script = await createAiScript({
           tenantId: request.tenant.id,
@@ -1536,7 +1548,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
     async (request, reply) => {
-      ensureAdminAccess(request.user?.role_name);
+      ensureAdminAccess(request);
       const { flowId } = request.params;
       const tenantId = request.tenant.id;
       const body = request.body ?? {};
@@ -1878,7 +1890,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     const tenantId = request.tenant.id;
     try {
       const rows = await listTabulacoesByTenant(tenantId);
@@ -1929,7 +1941,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     const tenantId = request.tenant.id;
     try {
       const updated = await updateMasterClient({
@@ -1978,7 +1990,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     const tenantId = request.tenant.id;
     try {
       const ok = await deleteMasterClientPhone({
@@ -2029,7 +2041,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     const tenantId = request.tenant.id;
     try {
       const result = await deleteMasterClient({
@@ -2082,7 +2094,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     const tenantId = request.tenant.id;
     const body = request.body;
     try {
@@ -2148,7 +2160,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     const tenantId = request.tenant.id;
     try {
       const updated = await updateTabulacao({
@@ -2205,7 +2217,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     const tenantId = request.tenant.id;
     try {
       const ok = await deleteTabulacao(tenantId, request.params.tabulacaoId);
@@ -2240,7 +2252,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     try {
       const rows = await listQueuesByTenant(request.tenant.id);
       return sendSuccess(request, reply, rows);
@@ -2282,7 +2294,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     const body = request.body;
     try {
       const created = await createQueue({
@@ -2346,7 +2358,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     try {
       const updated = await updateQueue({
         tenantId: request.tenant.id,
@@ -2389,7 +2401,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     try {
       const ok = await deleteQueue(request.tenant.id, request.params.queueId);
       if (!ok) {
@@ -2412,7 +2424,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     try {
       const settings = await getTenantServiceSettings(request.tenant.id);
       return sendSuccess(request, reply, settings);
@@ -2454,7 +2466,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     try {
       const status = await getBotSafeguardStatus(request.tenant.id);
       return sendSuccess(request, reply, status);
@@ -2486,7 +2498,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     const statusRaw = request.query.status?.trim();
     const status =
       statusRaw === "em_espera" || statusRaw === "em_andamento" || statusRaw === "historico"
@@ -2516,7 +2528,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     const messages = await listMonitoringMessages(
       request.tenant.id,
       request.params.conversationId
@@ -2537,7 +2549,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     const tenantId = request.tenant.id;
     const { conversationId } = request.params;
     const conv = await pool.query<{ metadata: { queue?: string } | null }>(
@@ -2586,7 +2598,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     const { conversationId } = request.params;
     const closedByLabel = request.user?.name || request.user?.email || "admin";
     try {
@@ -2641,7 +2653,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     try {
       const updated = await setBotSafeguardPaused({
         tenantId: request.tenant.id,
@@ -2681,7 +2693,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     try {
       const updated = await upsertTenantServiceSettings({
         tenantId: request.tenant.id,
@@ -2731,7 +2743,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     try {
       const routes = await listInboundRoutes(request.tenant.id);
       return sendSuccess(request, reply, routes);
@@ -2781,7 +2793,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     try {
       const created = await createInboundRoute({
         tenantId: request.tenant.id,
@@ -2860,7 +2872,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     try {
       const updated = await updateInboundRoute(request.tenant.id, request.params.routeId, {
         label: request.body.label,
@@ -2924,7 +2936,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     try {
       const ok = await deleteInboundRoute(request.tenant.id, request.params.routeId);
       if (!ok) {
@@ -2967,7 +2979,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     const tenantId = request.tenant.id;
     try {
       const data = await getMasterClientWithPhones({
@@ -3008,7 +3020,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     const tenantId = request.tenant.id;
     const q = request.query ?? {};
     try {
@@ -3068,7 +3080,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     const tenantId = request.tenant.id;
     try {
       const updated = await updateMasterClientPhone({
@@ -3132,7 +3144,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     const tenantId = request.tenant.id;
     const body = request.body;
     try {
@@ -3172,7 +3184,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     const tenantId = request.tenant.id;
     try {
       const rows = await listMasterClientPhones({
@@ -3228,7 +3240,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
   }, async (request, reply) => {
-    ensureAdminAccess(request.user?.role_name);
+    ensureAdminAccess(request);
     const tenantId = request.tenant.id;
     const body = request.body;
     try {
@@ -3463,7 +3475,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
     async (request, reply) => {
-      ensureAdminAccess(request.user?.role_name);
+      ensureAdminAccess(request);
       const tenantId = request.tenant.id;
       const q = request.query ?? {};
       try {
@@ -3522,7 +3534,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
     async (request, reply) => {
-      ensureAdminAccess(request.user?.role_name);
+      ensureAdminAccess(request);
       const tenantId = request.tenant.id;
       const q = request.query ?? {};
       try {
@@ -3575,7 +3587,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
     async (request, reply) => {
-      ensureAdminAccess(request.user?.role_name);
+      ensureAdminAccess(request);
       const tenantId = request.tenant.id;
       const q = request.query ?? {};
       if (!q.flowId?.trim()) {
@@ -3631,7 +3643,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
     async (request, reply) => {
-      ensureAdminAccess(request.user?.role_name);
+      ensureAdminAccess(request);
       const tenantId = request.tenant.id;
       const q = request.query ?? {};
       if (!q.flowId?.trim()) {
@@ -3662,6 +3674,130 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
     }
   );
 
+
+  fastify.get("/roles/assignable", async (request, reply) => {
+    ensureAdminAccess(request);
+    try {
+      const tenantMeta = await getTenantById(request.tenant.id);
+      const roles = await listRolesByTenant(request.tenant.id);
+      return sendSuccess(
+        request,
+        reply,
+        roles
+          .filter((r) => {
+            if (r.name !== "platform_admin") return true;
+            return (
+              tenantMeta?.tenant_type === "platform" &&
+              isPlatformAdmin(request.user?.role_name)
+            );
+          })
+          .map((r) => ({
+            id: r.id,
+            name: r.name,
+            label: r.label,
+            is_system: r.is_system,
+          }))
+      );
+    } catch (error) {
+      request.log.error(error);
+      throw new ApiError(500, ERROR_CODES.users.ROLES_LIST_FAILED, "Erro ao listar perfis");
+    }
+  });
+
+  fastify.get("/roles/permissions-catalog", async (request, reply) => {
+    ensureAdminAccess(request);
+    return sendSuccess(request, reply, getPermissionCatalog());
+  });
+
+  fastify.get("/roles", async (request, reply) => {
+    ensureAdminAccess(request);
+    try {
+      const roles = await listRolesByTenant(request.tenant.id);
+      return sendSuccess(request, reply, roles);
+    } catch (error) {
+      request.log.error(error);
+      throw new ApiError(
+        500,
+        ERROR_CODES.users.ROLES_LIST_FAILED,
+        "Erro ao listar perfis"
+      );
+    }
+  });
+
+  fastify.patch<{
+    Params: { roleId: string };
+    Body: { label?: string; permissions?: string[] };
+  }>("/roles/:roleId", async (request, reply) => {
+    ensureAdminAccess(request);
+    try {
+      const updated = await updateRoleForTenant({
+        tenantId: request.tenant.id,
+        roleId: request.params.roleId,
+        label: request.body.label,
+        permissions: request.body.permissions as import("../auth-permissions").AppPermission[] | undefined,
+      });
+      if (!updated) {
+        throw new ApiError(404, ERROR_CODES.users.ROLE_NOT_FOUND, "Perfil não encontrado");
+      }
+      return sendSuccess(request, reply, updated);
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      if (error instanceof Error && error.message === "ROLE_NOT_EDITABLE") {
+        throw new ApiError(403, ERROR_CODES.users.ROLE_NOT_EDITABLE, "Este perfil do sistema não pode ser editado");
+      }
+      request.log.error(error);
+      throw new ApiError(500, ERROR_CODES.users.ROLE_UPDATE_FAILED, "Erro ao atualizar perfil");
+    }
+  });
+
+  fastify.post<{
+    Body: { name: string; label: string; permissions: string[] };
+  }>("/roles", async (request, reply) => {
+    ensureAdminAccess(request);
+    try {
+      const created = await createCustomRole({
+        tenantId: request.tenant.id,
+        name: request.body.name,
+        label: request.body.label,
+        permissions: request.body.permissions as import("../auth-permissions").AppPermission[],
+      });
+      return sendSuccess(request, reply, created, 201);
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.message === "ROLE_NAME_EXISTS") {
+          throw new ApiError(409, ERROR_CODES.users.ROLE_NAME_EXISTS, "Já existe um perfil com este identificador");
+        }
+        if (error.message === "ROLE_NAME_RESERVED") {
+          throw new ApiError(400, ERROR_CODES.users.ROLE_NAME_RESERVED, "Nome de perfil reservado");
+        }
+        if (error.message === "ROLE_PERMISSIONS_REQUIRED") {
+          throw new ApiError(400, ERROR_CODES.users.ROLE_PERMISSIONS_REQUIRED, "Selecione ao menos uma permissão");
+        }
+      }
+      request.log.error(error);
+      throw new ApiError(500, ERROR_CODES.users.ROLE_CREATE_FAILED, "Erro ao criar perfil");
+    }
+  });
+
+  fastify.delete<{ Params: { roleId: string } }>("/roles/:roleId", async (request, reply) => {
+    ensureAdminAccess(request);
+    try {
+      await deleteCustomRole(request.tenant.id, request.params.roleId);
+      return sendSuccess(request, reply, { success: true });
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.message === "ROLE_NOT_DELETABLE") {
+          throw new ApiError(403, ERROR_CODES.users.ROLE_NOT_DELETABLE, "Perfis do sistema não podem ser excluídos");
+        }
+        if (error.message === "ROLE_IN_USE") {
+          throw new ApiError(409, ERROR_CODES.users.ROLE_IN_USE, "Perfil em uso por usuários");
+        }
+      }
+      request.log.error(error);
+      throw new ApiError(500, ERROR_CODES.users.ROLE_DELETE_FAILED, "Erro ao excluir perfil");
+    }
+  });
+
   fastify.get(
     "/users",
     {
@@ -3689,7 +3825,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
     async (request, reply) => {
-      ensureAdminAccess(request.user?.role_name);
+      ensureAdminAccess(request);
       try {
         const users = await listUsersByTenant(request.tenant.id);
         return sendSuccess(request, reply, users);
@@ -3709,7 +3845,8 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       name: string;
       email: string;
       password: string;
-      role_name: string;
+      role_name?: string;
+      role_id?: string;
     };
   }>(
     "/users",
@@ -3718,11 +3855,12 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
         body: {
           type: "object",
           additionalProperties: false,
-          required: ["name", "email", "password", "role_name"],
+          required: ["name", "email", "password"],
           properties: {
             name: { type: "string", minLength: 2 },
             email: { type: "string", minLength: 5 },
             password: { type: "string", minLength: 6 },
+            role_id: { type: "string", minLength: 1 },
             role_name: {
               type: "string",
               enum: [
@@ -3756,9 +3894,12 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
     async (request, reply) => {
-      ensureAdminAccess(request.user?.role_name);
-      const { name, email, password, role_name } = request.body;
-      if (!isAllowedRole(role_name)) {
+      ensureAdminAccess(request);
+      const { name, email, password, role_name, role_id } = request.body;
+      if (!role_id && !role_name) {
+        throw new ApiError(400, ERROR_CODES.users.ROLE_REQUIRED, "Perfil de usuário é obrigatório");
+      }
+      if (role_name && !isAllowedRole(role_name)) {
         throw new ApiError(
           400,
           ERROR_CODES.users.ROLE_REQUIRED,
@@ -3768,7 +3909,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       const tenantMeta = await getTenantById(request.tenant.id);
       const tenantType =
         tenantMeta?.tenant_type === "platform" ? "platform" : "customer";
-      if (!isAllowedRoleForTenant(role_name, tenantType)) {
+      if (role_name && !isAllowedRoleForTenant(role_name, tenantType)) {
         throw new ApiError(
           400,
           ERROR_CODES.users.ROLE_REQUIRED,
@@ -3791,7 +3932,8 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           name,
           email,
           password,
-          roleName: role_name,
+          roleName: role_name as AppRole | undefined,
+          roleId: role_id,
         });
         return sendSuccess(request, reply, created, 201);
       } catch (error) {
@@ -3824,6 +3966,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       email?: string;
       password?: string;
       role_name?: string;
+      role_id?: string;
     };
   }>(
     "/users/:userId",
@@ -3837,6 +3980,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
             name: { type: "string", minLength: 2 },
             email: { type: "string", minLength: 5 },
             password: { type: "string", minLength: 6 },
+            role_id: { type: "string", minLength: 1 },
             role_name: { type: "string", enum: ["admin_local", "supervisor", "agente"] },
           },
         },
@@ -3862,9 +4006,9 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
     async (request, reply) => {
-      ensureAdminAccess(request.user?.role_name);
+      ensureAdminAccess(request);
       const { userId } = request.params;
-      const { name, email, password, role_name } = request.body;
+      const { name, email, password, role_name, role_id } = request.body;
 
       if (role_name !== undefined && !isAllowedRole(role_name)) {
         throw new ApiError(
@@ -3881,7 +4025,8 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           name,
           email,
           password,
-          roleName: role_name,
+          roleName: role_name as AppRole | undefined,
+          roleId: role_id,
         });
         if (!updated) {
           throw new ApiError(404, ERROR_CODES.users.USER_NOT_FOUND, "Usuário não encontrado");
@@ -3918,7 +4063,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       },
     },
     async (request, reply) => {
-      ensureAdminAccess(request.user?.role_name);
+      ensureAdminAccess(request);
       const { userId } = request.params;
       if (request.user?.id === userId) {
         throw new ApiError(

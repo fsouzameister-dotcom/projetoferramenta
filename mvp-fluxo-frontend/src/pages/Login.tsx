@@ -34,6 +34,7 @@ export default function Login() {
         name?: string;
         tenant_type?: string;
         is_platform_admin?: boolean;
+        permissions?: string[];
       }>(response.data);
 
       persistLoginSession({
@@ -43,6 +44,7 @@ export default function Login() {
         name: payload.name || email,
         tenant_type: payload.tenant_type,
         is_platform_admin: payload.is_platform_admin,
+        permissions: payload.permissions,
       });
 
       if ((payload.role_name || "agente") === "agente") {
