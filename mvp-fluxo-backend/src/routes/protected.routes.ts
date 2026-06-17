@@ -129,6 +129,17 @@ import {
   updateAgentMessageStatus,
 } from "../agent-conversations";
 import {
+  AGENT_COPILOT_SYSTEM_PROMPT,
+  buildAgentHintFallback,
+  buildAgentHintUserPrompt,
+  isLikelyCustomerFacingHint,
+  normalizeAgentHintText,
+} from "../agent-ai-hint";
+import {
+  getAgentAiHintsConfig,
+  isAgentAiHintsEnabledForConversation,
+} from "../agent-ai-hints-policy";
+import {
   createAiPersona,
   createAiProviderSetting,
   createAiScript,
@@ -205,7 +216,17 @@ const tabulacaoSchema = {
 const queueSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["id", "tenantId", "key", "label", "active", "userIds", "createdAt", "updatedAt"],
+  required: [
+    "id",
+    "tenantId",
+    "key",
+    "label",
+    "active",
+    "agentAiHintsEnabled",
+    "userIds",
+    "createdAt",
+    "updatedAt",
+  ],
   properties: {
     id: { type: "string" },
     tenantId: { type: "string" },
@@ -213,6 +234,7 @@ const queueSchema = {
     label: { type: "string" },
     description: { anyOf: [{ type: "string" }, { type: "null" }] },
     active: { type: "boolean" },
+    agentAiHintsEnabled: { type: "boolean" },
     businessHours: { type: ["object", "null"], additionalProperties: true },
     userIds: { type: "array", items: { type: "string" } },
     createdAt: { type: "string" },
@@ -223,11 +245,18 @@ const queueSchema = {
 const serviceSettingsSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["tenantId", "closureMessageTemplate", "returnLookupDays", "updatedAt"],
+  required: [
+    "tenantId",
+    "closureMessageTemplate",
+    "returnLookupDays",
+    "agentAiHintsEnabled",
+    "updatedAt",
+  ],
   properties: {
     tenantId: { type: "string" },
     closureMessageTemplate: { type: "string" },
     returnLookupDays: { type: "integer", minimum: 1, maximum: 365 },
+    agentAiHintsEnabled: { type: "boolean" },
     updatedAt: { type: "string" },
   },
 } as const;
@@ -544,46 +573,47 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
             ERROR_CODES.ai.AI_PROVIDER_NOT_FOUND,
             ERROR_CODES.ai.AI_PERSONA_NOT_FOUND,
           ]),
+          403: errorEnvelopeSchema([ERROR_CODES.ai.AI_HINTS_DISABLED]),
           502: errorEnvelopeSchema([ERROR_CODES.ai.AI_HINT_GENERATION_FAILED]),
         },
       },
     },
     async (request, reply) => {
       const { personaId, conversationId, customerContext } = request.body;
+      const hintsEnabled = conversationId
+        ? await isAgentAiHintsEnabledForConversation(request.tenant.id, conversationId)
+        : (await getAgentAiHintsConfig(request.tenant.id)).tenantAiHintsEnabled;
+      if (!hintsEnabled) {
+        throw new ApiError(
+          403,
+          ERROR_CODES.ai.AI_HINTS_DISABLED,
+          "Dicas de IA para agentes estão desabilitadas para este atendimento"
+        );
+      }
+
       const tags = customerContext?.tags ?? [];
       const recentMessages = customerContext?.recentMessages ?? [];
-      const contactName = customerContext?.contactName || "Cliente";
-      const heuristicText = `${tags.join(" ")} ${recentMessages.join(" ")}`.toLowerCase();
+      const contactName = customerContext?.contactName?.trim() || "Contato";
 
-      const fallbackHint = (() => {
-        if (/(reclama|insatisfeit|ruim|cancel|atras|problema|erro)/.test(heuristicText)) {
-          return "Cliente com possível risco de atrito. Valide o motivo, confirme entendimento e ofereça próximo passo com prazo claro.";
-        }
-        if (/(compr|contrat|plano|fechado|assin)/.test(heuristicText)) {
-          return "Cliente com sinal de interesse/compras anteriores. Priorize continuidade: confirme objetivo e ofereça upsell aderente ao histórico.";
-        }
-        return "Inicie com confirmação objetiva da necessidade e proponha duas opções claras para acelerar a decisão do cliente.";
-      })();
-
-      const prompt = [
-        `Você é um copiloto de atendimento para agente humano.`,
-        `Gere UMA dica curta (máx 220 caracteres), objetiva e acionável em português.`,
-        `Contato: ${contactName}`,
-        `Tags: ${tags.join(", ") || "sem tags"}`,
-        `Mensagens recentes: ${recentMessages.join(" | ") || "sem mensagens"}`,
-        `A dica deve reduzir atrito e aumentar resolução no primeiro contato.`,
-      ].join("\n");
+      const hintContext = { contactName, tags, recentMessages };
+      const fallbackHint = buildAgentHintFallback(hintContext);
+      const userPrompt = buildAgentHintUserPrompt(hintContext);
 
       try {
         const ai = await generateAiText({
           tenantId: request.tenant.id,
           personaId,
           conversationId,
-          message: prompt,
+          message: userPrompt,
+          systemPromptOverride: AGENT_COPILOT_SYSTEM_PROMPT,
+          temperature: 0.3,
         });
+        const normalized = normalizeAgentHintText(ai.text);
+        const useAi =
+          Boolean(normalized) && !isLikelyCustomerFacingHint(normalized);
         return sendSuccess(request, reply, {
-          hint: ai.text.slice(0, 220),
-          source: "ai",
+          hint: useAi ? normalized : fallbackHint,
+          source: useAi ? "ai" : "fallback",
         });
       } catch (error) {
         request.log.warn(error);
@@ -2273,6 +2303,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       label: string;
       description?: string;
       active?: boolean;
+      agentAiHintsEnabled?: boolean;
       businessHours?: Record<string, unknown> | null;
       userIds?: string[];
     };
@@ -2287,6 +2318,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           label: { type: "string", minLength: 1, maxLength: 120 },
           description: { type: "string", maxLength: 255 },
           active: { type: "boolean" },
+          agentAiHintsEnabled: { type: "boolean" },
           businessHours: { type: ["object", "null"], additionalProperties: true },
           userIds: { type: "array", items: { type: "string" } },
         },
@@ -2308,6 +2340,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
         label: body.label,
         description: body.description,
         active: body.active,
+        agentAiHintsEnabled: body.agentAiHintsEnabled,
         businessHours: body.businessHours as import("../service-queues").QueueBusinessHours | null,
         userIds: body.userIds,
       });
@@ -2332,6 +2365,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       label?: string;
       description?: string | null;
       active?: boolean;
+      agentAiHintsEnabled?: boolean;
       businessHours?: Record<string, unknown> | null;
       userIds?: string[];
     };
@@ -2351,6 +2385,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           label: { type: "string", minLength: 1, maxLength: 120 },
           description: { anyOf: [{ type: "string", maxLength: 255 }, { type: "null" }] },
           active: { type: "boolean" },
+          agentAiHintsEnabled: { type: "boolean" },
           businessHours: { type: ["object", "null"], additionalProperties: true },
           userIds: { type: "array", items: { type: "string" } },
         },
@@ -2681,7 +2716,11 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
   });
 
   fastify.put<{
-    Body: { closureMessageTemplate?: string; returnLookupDays?: number };
+    Body: {
+      closureMessageTemplate?: string;
+      returnLookupDays?: number;
+      agentAiHintsEnabled?: boolean;
+    };
   }>("/service-settings", {
     schema: {
       body: {
@@ -2690,6 +2729,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
         properties: {
           closureMessageTemplate: { type: "string", minLength: 1, maxLength: 2000 },
           returnLookupDays: { type: "integer", minimum: 1, maximum: 365 },
+          agentAiHintsEnabled: { type: "boolean" },
         },
       },
       response: {
@@ -4635,6 +4675,42 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           500,
           ERROR_CODES.agent.AGENT_MESSAGE_SEND_FAILED,
           "Erro ao enviar anexo"
+        );
+      }
+    }
+  );
+
+  fastify.get(
+    "/agent/service-settings",
+    {
+      schema: {
+        response: {
+          200: successEnvelopeSchema({
+            type: "object",
+            additionalProperties: false,
+            required: ["tenantAiHintsEnabled", "queueAiHintsByKey"],
+            properties: {
+              tenantAiHintsEnabled: { type: "boolean" },
+              queueAiHintsByKey: {
+                type: "object",
+                additionalProperties: { type: "boolean" },
+              },
+            },
+          }),
+          500: errorEnvelopeSchema([ERROR_CODES.serviceSettings.SERVICE_SETTINGS_GET_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      try {
+        const config = await getAgentAiHintsConfig(request.tenant.id);
+        return sendSuccess(request, reply, config);
+      } catch (err) {
+        request.log.error(err);
+        throw new ApiError(
+          500,
+          ERROR_CODES.serviceSettings.SERVICE_SETTINGS_GET_FAILED,
+          "Erro ao carregar configurações do agente"
         );
       }
     }

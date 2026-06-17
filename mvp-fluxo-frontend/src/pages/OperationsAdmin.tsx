@@ -8,6 +8,7 @@ type QueueRow = {
   label: string;
   description: string | null;
   active: boolean;
+  agentAiHintsEnabled: boolean;
   businessHours: {
     timezone: string;
     schedule: Record<string, { start: string; end: string }[]>;
@@ -29,6 +30,7 @@ type UserRow = { id: string; name: string; email: string; role_name: string };
 type ServiceSettings = {
   closureMessageTemplate: string;
   returnLookupDays: number;
+  agentAiHintsEnabled: boolean;
 };
 
 const WEEKDAYS: { key: string; label: string }[] = [
@@ -65,6 +67,7 @@ export default function OperationsAdmin() {
     key: "",
     description: "",
     active: true,
+    agentAiHintsEnabled: true,
     userIds: [] as string[],
     hoursEnabled: true,
     schedule: emptySchedule(),
@@ -83,6 +86,7 @@ export default function OperationsAdmin() {
   const [settingsForm, setSettingsForm] = useState({
     closureMessageTemplate: "",
     returnLookupDays: 7,
+    agentAiHintsEnabled: true,
   });
 
   const queueLabelById = useMemo(() => {
@@ -128,6 +132,7 @@ export default function OperationsAdmin() {
         setSettingsForm({
           closureMessageTemplate: s.closureMessageTemplate,
           returnLookupDays: s.returnLookupDays,
+          agentAiHintsEnabled: s.agentAiHintsEnabled,
         });
       } else {
         failures.push(`Configurações: ${getApiErrorMessage(settingsSettled.reason, "falha")}`);
@@ -152,6 +157,7 @@ export default function OperationsAdmin() {
       key: "",
       description: "",
       active: true,
+      agentAiHintsEnabled: true,
       userIds: [],
       hoursEnabled: true,
       schedule: emptySchedule(),
@@ -174,6 +180,7 @@ export default function OperationsAdmin() {
         key: queueForm.key.trim() || undefined,
         description: queueForm.description.trim() || undefined,
         active: queueForm.active,
+        agentAiHintsEnabled: queueForm.agentAiHintsEnabled,
         userIds: queueForm.userIds,
         businessHours: queueForm.hoursEnabled ? queueForm.schedule : null,
       };
@@ -200,6 +207,7 @@ export default function OperationsAdmin() {
       key: q.key,
       description: q.description ?? "",
       active: q.active,
+      agentAiHintsEnabled: q.agentAiHintsEnabled !== false,
       userIds: q.userIds ?? [],
       hoursEnabled: Boolean(q.businessHours),
       schedule: q.businessHours ?? emptySchedule(),
@@ -408,6 +416,22 @@ export default function OperationsAdmin() {
               />
               Fila ativa
             </label>
+            <label className="flex items-start gap-2 text-sm text-gray-800">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={queueForm.agentAiHintsEnabled}
+                onChange={(e) =>
+                  setQueueForm((p) => ({ ...p, agentAiHintsEnabled: e.target.checked }))
+                }
+              />
+              <span>
+                <span className="text-gray-700 flex items-center gap-1">
+                  Dicas de IA nesta fila
+                  <InfoTooltip text="Só vale se o interruptor geral em Configurações estiver ativo. Desative para filas em que os agentes não devem receber sugestões." />
+                </span>
+              </span>
+            </label>
             <label className="flex items-center gap-2 text-sm text-gray-800">
               <input
                 type="checkbox"
@@ -487,6 +511,9 @@ export default function OperationsAdmin() {
                       {q.label}
                       {!q.active ? (
                         <span className="ml-2 text-xs text-amber-600">inativa</span>
+                      ) : null}
+                      {q.agentAiHintsEnabled === false ? (
+                        <span className="ml-2 text-xs text-gray-500">sem dicas IA</span>
                       ) : null}
                     </td>
                     <td className="px-4 py-2 text-gray-600">{q.key}</td>
@@ -644,6 +671,25 @@ export default function OperationsAdmin() {
                 }))
               }
             />
+          </label>
+          <label className="flex items-start gap-2 text-sm text-gray-800">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={settingsForm.agentAiHintsEnabled}
+              onChange={(e) =>
+                setSettingsForm((p) => ({ ...p, agentAiHintsEnabled: e.target.checked }))
+              }
+            />
+            <span>
+              <span className="text-gray-700 flex items-center gap-1">
+                Dicas de IA para agentes
+                <InfoTooltip text="Interruptor geral do tenant. Quando desligado, nenhuma fila exibe dicas. Quando ligado, cada fila pode desativar individualmente na aba Filas." />
+              </span>
+              <span className="block text-xs text-gray-500 mt-0.5">
+                Desative se a equipe preferir atender sem sugestões automáticas da IA.
+              </span>
+            </span>
           </label>
           {settings ? (
             <p className="text-xs text-gray-500">Última atualização: {settings.closureMessageTemplate ? "ok" : "—"}</p>

@@ -4,6 +4,7 @@ export type TenantServiceSettings = {
   tenantId: string;
   closureMessageTemplate: string;
   returnLookupDays: number;
+  agentAiHintsEnabled: boolean;
   updatedAt: string;
 };
 
@@ -24,6 +25,10 @@ async function ensureSchema() {
         updated_at timestamptz NOT NULL DEFAULT now()
       )
     `);
+    await client.query(`
+      ALTER TABLE tenant_service_settings
+      ADD COLUMN IF NOT EXISTS agent_ai_hints_enabled boolean NOT NULL DEFAULT true
+    `);
     schemaReady = true;
   } finally {
     client.release();
@@ -35,7 +40,8 @@ export async function getTenantServiceSettings(
 ): Promise<TenantServiceSettings> {
   await ensureSchema();
   const result = await pool.query(
-    `SELECT tenant_id, closure_message_template, return_lookup_days, updated_at
+    `SELECT tenant_id, closure_message_template, return_lookup_days,
+            agent_ai_hints_enabled, updated_at
      FROM tenant_service_settings WHERE tenant_id = $1::uuid`,
     [tenantId]
   );
@@ -44,6 +50,7 @@ export async function getTenantServiceSettings(
       tenantId,
       closureMessageTemplate: DEFAULT_CLOSURE_TEMPLATE,
       returnLookupDays: 7,
+      agentAiHintsEnabled: true,
       updatedAt: new Date().toISOString(),
     };
   }
@@ -52,6 +59,7 @@ export async function getTenantServiceSettings(
     tenantId: String(row.tenant_id),
     closureMessageTemplate: String(row.closure_message_template),
     returnLookupDays: Number(row.return_lookup_days) || 7,
+    agentAiHintsEnabled: row.agent_ai_hints_enabled !== false,
     updatedAt:
       row.updated_at instanceof Date
         ? row.updated_at.toISOString()
@@ -63,6 +71,7 @@ export async function upsertTenantServiceSettings(input: {
   tenantId: string;
   closureMessageTemplate?: string;
   returnLookupDays?: number;
+  agentAiHintsEnabled?: boolean;
 }): Promise<TenantServiceSettings> {
   await ensureSchema();
   const current = await getTenantServiceSettings(input.tenantId);
@@ -72,15 +81,23 @@ export async function upsertTenantServiceSettings(input: {
     input.returnLookupDays !== undefined
       ? Math.min(365, Math.max(1, Math.floor(input.returnLookupDays)))
       : current.returnLookupDays;
+  const hintsEnabled =
+    input.agentAiHintsEnabled !== undefined
+      ? input.agentAiHintsEnabled
+      : current.agentAiHintsEnabled;
 
   await pool.query(
-    `INSERT INTO tenant_service_settings (tenant_id, closure_message_template, return_lookup_days, updated_at)
-     VALUES ($1::uuid, $2, $3, now())
+    `INSERT INTO tenant_service_settings (
+       tenant_id, closure_message_template, return_lookup_days,
+       agent_ai_hints_enabled, updated_at
+     )
+     VALUES ($1::uuid, $2, $3, $4, now())
      ON CONFLICT (tenant_id) DO UPDATE SET
        closure_message_template = EXCLUDED.closure_message_template,
        return_lookup_days = EXCLUDED.return_lookup_days,
+       agent_ai_hints_enabled = EXCLUDED.agent_ai_hints_enabled,
        updated_at = now()`,
-    [input.tenantId, template, days]
+    [input.tenantId, template, days, hintsEnabled]
   );
   return getTenantServiceSettings(input.tenantId);
 }

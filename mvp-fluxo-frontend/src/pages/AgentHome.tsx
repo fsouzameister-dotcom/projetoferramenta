@@ -96,6 +96,20 @@ type AiHintPayload = {
   source: "ai" | "fallback";
 };
 
+type AgentAiHintsConfig = {
+  tenantAiHintsEnabled: boolean;
+  queueAiHintsByKey: Record<string, boolean>;
+};
+
+function isAgentAiHintsEnabledForQueue(
+  config: AgentAiHintsConfig | null,
+  queueKey?: string | null
+): boolean {
+  if (!config?.tenantAiHintsEnabled) return false;
+  const key = queueKey?.trim() || "geral";
+  return config.queueAiHintsByKey[key] !== false;
+}
+
 type AgentDataMode = "mock" | "api";
 
 /** Em produção, sem variável explícita, usa API real (evita deploy só com VITE_API_URL). */
@@ -115,7 +129,7 @@ const AGENT_TOUR_STEPS = [
   {
     title: "Ações rápidas",
     description:
-      "No chat ativo você pode encerrar/reabrir, pedir dica IA e enviar imagem, anexo, localização, contato e áudio.",
+      "No chat ativo você pode encerrar/reabrir, pedir dica para o agente e enviar imagem, anexo, localização, contato e áudio.",
   },
   {
     title: "Cadastro mestre",
@@ -289,6 +303,7 @@ export default function AgentHome() {
     Record<string, ChatMessage[]>
   >({});
   const [loadingHint, setLoadingHint] = useState(false);
+  const [agentHintsConfig, setAgentHintsConfig] = useState<AgentAiHintsConfig | null>(null);
   const [activeMasterClient, setActiveMasterClient] = useState<MasterClientPayload | null>(null);
   const [loadingMasterClient, setLoadingMasterClient] = useState(false);
   const [masterClientById, setMasterClientById] = useState<Record<string, MasterClientPayload>>({});
@@ -351,6 +366,20 @@ export default function AgentHome() {
     };
 
     void loadConversations();
+  }, [envMode]);
+
+  useEffect(() => {
+    if (envMode !== "api") return;
+
+    void api
+      .get("/agent/service-settings")
+      .then((response) => {
+        const payload = unwrapApiData<AgentAiHintsConfig>(response.data);
+        setAgentHintsConfig(payload);
+      })
+      .catch(() => {
+        setAgentHintsConfig({ tenantAiHintsEnabled: true, queueAiHintsByKey: {} });
+      });
   }, [envMode]);
 
   useEffect(() => {
@@ -444,6 +473,14 @@ export default function AgentHome() {
 
   const activeConversation =
     conversations.find((conv) => conv.id === activeConversationId) ?? null;
+  const activeConversationAiHintsEnabled = useMemo(
+    () =>
+      isAgentAiHintsEnabledForQueue(
+        agentHintsConfig,
+        activeConversation?.metadata?.queue
+      ),
+    [agentHintsConfig, activeConversation?.metadata?.queue]
+  );
   const activeClientId =
     (activeConversation?.metadata?.clientId as string | undefined) ||
     (activeConversation?.metadata?.client_id as string | undefined) ||
@@ -505,7 +542,7 @@ export default function AgentHome() {
   };
 
   const requestAgentHint = async () => {
-    if (!activeConversation) return;
+    if (!activeConversation || !activeConversationAiHintsEnabled) return;
     setLoadingHint(true);
     try {
       let personaId = localStorage.getItem("ai_persona_id");
@@ -538,12 +575,12 @@ export default function AgentHome() {
         },
       });
       const payload = unwrapApiData<AiHintPayload>(response.data);
-      window.alert(payload.hint);
+      window.alert(`Dica para você (agente):\n\n${payload.hint}`);
     } catch (error) {
       window.alert(
         getApiErrorMessage(
           error,
-          "Não foi possível gerar dica IA agora. Continue com abordagem consultiva e confirme a necessidade do cliente."
+          "Não foi possível gerar a dica agora. Confirme a necessidade do cliente e defina o próximo passo antes de responder."
         )
       );
     } finally {
@@ -559,8 +596,9 @@ export default function AgentHome() {
   useEffect(() => {
     if (!activeConversationId) return;
     if (resolvedMode !== "api") return;
+    if (!activeConversationAiHintsEnabled) return;
     void requestAgentHint();
-  }, [activeConversationId, resolvedMode]);
+  }, [activeConversationId, resolvedMode, activeConversationAiHintsEnabled]);
 
   useEffect(() => {
     if (resolvedMode !== "api") return;
@@ -1361,14 +1399,16 @@ export default function AgentHome() {
                       Encerrar atendimento
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => void requestAgentHint()}
-                    disabled={loadingHint}
-                    className="px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-400/40 text-amber-200 text-[11px] hover:bg-amber-500/30 disabled:opacity-60"
-                  >
-                    {loadingHint ? "Gerando dica..." : "Gerar dica IA"}
-                  </button>
+                  {activeConversationAiHintsEnabled ? (
+                    <button
+                      type="button"
+                      onClick={() => void requestAgentHint()}
+                      disabled={loadingHint}
+                      className="px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-400/40 text-amber-200 text-[11px] hover:bg-amber-500/30 disabled:opacity-60"
+                    >
+                      {loadingHint ? "Gerando dica..." : "Dica para o agente"}
+                    </button>
+                  ) : null}
                 </div>
               </div>
 

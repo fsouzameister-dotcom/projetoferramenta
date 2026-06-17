@@ -16,6 +16,7 @@ export type ServiceQueueRecord = {
   label: string;
   description: string | null;
   active: boolean;
+  agentAiHintsEnabled: boolean;
   businessHours: QueueBusinessHours | null;
   userIds: string[];
   createdAt: string;
@@ -75,6 +76,7 @@ function mapRow(
     label: String(row.label),
     description: row.description ? String(row.description) : null,
     active: Boolean(row.active),
+    agentAiHintsEnabled: row.agent_ai_hints_enabled !== false,
     businessHours: parseBusinessHours(row.business_hours),
     userIds,
     createdAt:
@@ -130,6 +132,10 @@ export async function ensureSchema() {
         permission text NOT NULL DEFAULT 'agent',
         PRIMARY KEY (queue_id, user_id)
       )
+    `);
+    await client.query(`
+      ALTER TABLE service_queues
+      ADD COLUMN IF NOT EXISTS agent_ai_hints_enabled boolean NOT NULL DEFAULT true
     `);
     schemaReady = true;
   } finally {
@@ -230,14 +236,17 @@ export async function createQueue(input: {
   label: string;
   description?: string;
   active?: boolean;
+  agentAiHintsEnabled?: boolean;
   businessHours?: QueueBusinessHours | null;
   userIds?: string[];
 }): Promise<ServiceQueueRecord> {
   await ensureSchema();
   const key = normalizeKey(input.key || input.label);
   const result = await pool.query(
-    `INSERT INTO service_queues (tenant_id, key, label, description, active, business_hours)
-     VALUES ($1::uuid, $2, $3, $4, $5, $6::jsonb)
+    `INSERT INTO service_queues (
+       tenant_id, key, label, description, active, agent_ai_hints_enabled, business_hours
+     )
+     VALUES ($1::uuid, $2, $3, $4, $5, $6, $7::jsonb)
      RETURNING *`,
     [
       input.tenantId,
@@ -245,6 +254,7 @@ export async function createQueue(input: {
       input.label.trim(),
       input.description?.trim() || null,
       input.active ?? true,
+      input.agentAiHintsEnabled ?? true,
       input.businessHours ? JSON.stringify(input.businessHours) : null,
     ]
   );
@@ -262,6 +272,7 @@ export async function updateQueue(input: {
   label?: string;
   description?: string | null;
   active?: boolean;
+  agentAiHintsEnabled?: boolean;
   businessHours?: QueueBusinessHours | null;
   userIds?: string[];
 }): Promise<ServiceQueueRecord | null> {
@@ -284,6 +295,10 @@ export async function updateQueue(input: {
   if (input.active !== undefined) {
     updates.push(`active = $${idx++}`);
     values.push(input.active);
+  }
+  if (input.agentAiHintsEnabled !== undefined) {
+    updates.push(`agent_ai_hints_enabled = $${idx++}`);
+    values.push(input.agentAiHintsEnabled);
   }
   if (input.businessHours !== undefined) {
     updates.push(`business_hours = $${idx++}`);
