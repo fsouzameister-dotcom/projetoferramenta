@@ -17,16 +17,6 @@ const FAQ_ITEMS: FaqItem[] = [
       "Vá em Admin > WhatsApp, selecione o provedor (Meta ou Twilio), preencha as credenciais e conclua em 'Conectar número'.",
   },
   {
-    question: "Por que meu login pode falhar após deploy?",
-    answer:
-      "Normalmente por cache de navegador. Faça Ctrl+F5 e tente novamente. Se persistir, valide se a API de produção está configurada no build.",
-  },
-  {
-    question: "Como criar um novo tenant (cliente)?",
-    answer:
-      "Acesse Admin > Clientes (permissão de plataforma), preencha os dados do tenant e o administrador inicial, e clique em 'Criar tenant'.",
-  },
-  {
     question: "Onde configuro usuários e perfis de acesso?",
     answer:
       "Em Admin > Usuários você cria e edita contas. Em Admin > Perfis você define o que cada perfil pode acessar (painel, fluxos, campanhas, relatórios, etc.). Ao criar ou editar um usuário, associe o perfil desejado.",
