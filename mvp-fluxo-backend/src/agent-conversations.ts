@@ -42,6 +42,7 @@ import {
   formatTemplateErrorDescription,
   sendOutboundTemplateMessage,
 } from "./agent-template-outbound";
+import { ctwaReferralForMetadata, type CtwaReferral } from "./ctwa-referral";
 
 export type AgentConversationStatus = "em_espera" | "em_andamento" | "historico";
 export type AgentMessageType = "text" | "contact" | "location" | "image" | "audio" | "attachment";
@@ -675,6 +676,24 @@ export async function patchAgentMessageWhatsAppDelivery(input: {
   );
 }
 
+export async function persistCtwaReferralOnConversation(input: {
+  tenantId: string;
+  conversationId: string;
+  referral: CtwaReferral;
+}): Promise<void> {
+  await ensureSchema();
+  const payload = JSON.stringify(ctwaReferralForMetadata(input.referral));
+  await pool.query(
+    `UPDATE agent_conversations
+     SET metadata = COALESCE(metadata, '{}'::jsonb)
+       || jsonb_build_object('acquisition_channel', 'ctwa', 'ctwa_referral', $3::jsonb),
+         updated_at = now()
+     WHERE id = $1::uuid AND tenant_id = $2::uuid
+       AND (metadata->>'ctwa_referral') IS NULL`,
+    [input.conversationId, input.tenantId, payload]
+  );
+}
+
 export async function recordInboundWhatsAppMessage(input: {
   tenantId: string;
   providerMessageId: string;
@@ -682,6 +701,7 @@ export async function recordInboundWhatsAppMessage(input: {
   textBody: string;
   contactName?: string;
   timestampIso: string;
+  ctwaReferral?: CtwaReferral;
 }): Promise<{ duplicate: boolean; conversationId?: string }> {
   await ensureSchema();
   await syncWindowClosure(input.tenantId);
@@ -745,6 +765,13 @@ export async function recordInboundWhatsAppMessage(input: {
       input.timestampIso,
       input.contactName?.trim() || null
     );
+    if (input.ctwaReferral) {
+      await persistCtwaReferralOnConversation({
+        tenantId: input.tenantId,
+        conversationId: convId,
+        referral: input.ctwaReferral,
+      });
+    }
     return { duplicate: false, conversationId: convId };
   } finally {
     client.release();
@@ -1101,6 +1128,7 @@ export async function recordBotPhaseInboundMessage(input: {
   textBody: string;
   contactName?: string;
   timestampIso: string;
+  ctwaReferral?: CtwaReferral;
 }): Promise<{ duplicate: boolean; conversationId?: string; freshBotSession: boolean }> {
   await ensureSchema();
   await syncWindowClosure(input.tenantId);
@@ -1154,6 +1182,13 @@ export async function recordBotPhaseInboundMessage(input: {
     input.timestampIso,
     input.contactName
   );
+  if (input.ctwaReferral) {
+    await persistCtwaReferralOnConversation({
+      tenantId: input.tenantId,
+      conversationId: conv.id,
+      referral: input.ctwaReferral,
+    });
+  }
   return {
     duplicate: false,
     conversationId: conv.id,

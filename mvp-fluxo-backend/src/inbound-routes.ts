@@ -1,6 +1,7 @@
 import { pool } from "./db";
 import { matchesInboundTrigger } from "./flow-field-validators";
 import { WHATSAPP_PROVIDER_TWILIO } from "./whatsapp-channels";
+import { buildCtwaSourceKey, type CtwaReferral } from "./ctwa-referral";
 
 export const INBOUND_SOURCE_TYPES = [
   "whatsapp_meta",
@@ -9,6 +10,7 @@ export const INBOUND_SOURCE_TYPES = [
   "site_form",
   "facebook_lead",
   "instagram_lead",
+  "ctwa",
   "custom",
 ] as const;
 
@@ -136,6 +138,29 @@ export async function resolveInboundRoute(input: {
     }
   }
 
+  return null;
+}
+
+/** Rota dedicada para Click-to-WhatsApp (anúncio Meta → primeira mensagem WA). */
+export async function resolveCtwaInboundRoute(input: {
+  tenantId: string;
+  referral: CtwaReferral;
+}): Promise<InboundEntryRouteRow | null> {
+  const primaryKey = buildCtwaSourceKey(input.referral);
+  const exact = await resolveInboundRoute({
+    tenantId: input.tenantId,
+    sourceType: "ctwa",
+    sourceKey: primaryKey,
+  });
+  if (exact) return exact;
+
+  if (primaryKey !== "default") {
+    return resolveInboundRoute({
+      tenantId: input.tenantId,
+      sourceType: "ctwa",
+      sourceKey: "default",
+    });
+  }
   return null;
 }
 

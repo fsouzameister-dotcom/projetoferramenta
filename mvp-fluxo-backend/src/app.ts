@@ -462,6 +462,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
           contactName: ev.contactName,
           providerMessageId: ev.messageId,
           mirrorToAgentInbox: true,
+          ctwaReferral: ev.ctwaReferral,
         });
       } else if (ev.kind === "inbound_image") {
         const ts = ev.timestampSec

@@ -36,6 +36,7 @@ const SOURCE_TYPE_OPTIONS = [
   { value: "site_form", label: "Site — Fale conosco" },
   { value: "facebook_lead", label: "Facebook — Lead Ads" },
   { value: "instagram_lead", label: "Instagram — Lead Ads" },
+  { value: "ctwa", label: "Click to WhatsApp (anúncio Meta)" },
   { value: "custom", label: "Personalizado" },
 ];
 
@@ -46,6 +47,7 @@ const SOURCE_KEY_HINTS: Record<string, string> = {
   site_form: "site_fale_conosco",
   facebook_lead: "fb_campanha_xyz",
   instagram_lead: "ig_campanha_xyz",
+  ctwa: "ad_ID_DO_ANUNCIO ou default (qualquer CTWA)",
   custom: "identificador_livre",
 };
 

@@ -20,13 +20,14 @@ import {
 } from "./flow-outbound-delivery";
 import type { FlowOutboundMessage } from "./mensagem-outbound";
 import { checkAndRecordBotOutbound } from "./bot-outbound-safeguard";
-import { resolveInboundRoute, resolveInboundRouteByFirstMessage } from "./inbound-routes";
+import { resolveInboundRoute, resolveInboundRouteByFirstMessage, resolveCtwaInboundRoute } from "./inbound-routes";
 import {
   markCampaignRecipientResponded,
   resolveCampaignInboundRoute,
 } from "./campaign-inbound";
 import { getOutboundWhatsAppContext, WHATSAPP_PROVIDER_CLOUD, WHATSAPP_PROVIDER_TWILIO } from "./whatsapp-channels";
 import { redis } from "./redis";
+import { buildCtwaSourceKey, type CtwaReferral } from "./ctwa-referral";
 
 const CLAIM_PREFIX = "inbound:flow:claim:";
 const CLAIM_TTL_SEC = 60 * 60 * 24; // 24h
@@ -46,6 +47,7 @@ export type InboundProcessInput = {
   metadata?: Record<string, unknown>;
   /** Se true, grava mensagem na inbox do agente (WhatsApp). */
   mirrorToAgentInbox?: boolean;
+  ctwaReferral?: CtwaReferral;
 };
 
 export type InboundProcessResult = {
@@ -259,6 +261,7 @@ export async function processInboundMessage(
         textBody: messageText,
         contactName: input.contactName,
         timestampIso: new Date().toISOString(),
+        ctwaReferral: input.ctwaReferral,
       });
       if (recorded.conversationId) {
         conversationId = recorded.conversationId;
@@ -282,6 +285,7 @@ export async function processInboundMessage(
       textBody: messageText,
       contactName: input.contactName,
       timestampIso: new Date().toISOString(),
+      ctwaReferral: input.ctwaReferral,
     });
     if (recorded.duplicate) {
       return { routed: false, conversationId: recorded.conversationId };
@@ -297,6 +301,14 @@ export async function processInboundMessage(
     phone: input.phone,
   });
 
+  const ctwaRoute =
+    !campaignRoute && input.ctwaReferral
+      ? await resolveCtwaInboundRoute({
+          tenantId: input.tenantId,
+          referral: input.ctwaReferral,
+        })
+      : null;
+
   if (campaignRoute && input.phone) {
     await markCampaignRecipientResponded({
       tenantId: input.tenantId,
@@ -310,7 +322,8 @@ export async function processInboundMessage(
     }
   }
 
-  const messageRouteEarly = campaignRoute
+  const messageRouteEarly =
+    campaignRoute || ctwaRoute
     ? null
     : await resolveInboundRouteByFirstMessage({
         tenantId: input.tenantId,
@@ -319,7 +332,7 @@ export async function processInboundMessage(
         messageText,
       });
 
-  if ((freshBotSession || messageRouteEarly) && input.phone?.trim() && !campaignRoute) {
+  if ((freshBotSession || messageRouteEarly) && input.phone?.trim() && !campaignRoute && !ctwaRoute) {
     await clearInboundFlowSession({
       tenantId: input.tenantId,
       contactKey,
@@ -338,8 +351,9 @@ export async function processInboundMessage(
           conversationId,
         });
 
-  if (campaignRoute) {
-    if (existingSession && existingSession.flowId !== campaignRoute.flowId) {
+  if (campaignRoute || ctwaRoute) {
+    const targetFlowId = campaignRoute?.flowId ?? ctwaRoute?.flow_id;
+    if (existingSession && targetFlowId && existingSession.flowId !== targetFlowId) {
       await clearInboundFlowSession({
         tenantId: input.tenantId,
         contactKey,
@@ -417,12 +431,18 @@ export async function processInboundMessage(
 
   const route = campaignRoute
     ? { flow_id: campaignRoute.flowId, source_type: input.sourceType, source_key: input.sourceKey }
-    : messageRouteEarly ??
-      (await resolveInboundRoute({
-        tenantId: input.tenantId,
-        sourceType: input.sourceType,
-        sourceKey: input.sourceKey,
-      }));
+    : ctwaRoute
+      ? {
+          flow_id: ctwaRoute.flow_id,
+          source_type: "ctwa",
+          source_key: buildCtwaSourceKey(input.ctwaReferral!),
+        }
+      : messageRouteEarly ??
+        (await resolveInboundRoute({
+          tenantId: input.tenantId,
+          sourceType: input.sourceType,
+          sourceKey: input.sourceKey,
+        }));
 
   if (!route?.flow_id) {
     return { routed: false, conversationId };
@@ -431,8 +451,8 @@ export async function processInboundMessage(
   const result = await runFlow({
     tenantId: input.tenantId,
     flowId: route.flow_id,
-    sourceType: input.sourceType,
-    sourceKey: input.sourceKey,
+    sourceType: route.source_type ?? input.sourceType,
+    sourceKey: route.source_key ?? input.sourceKey,
     messageText,
     phone: input.phone,
     contactName: input.contactName,
@@ -460,11 +480,11 @@ export async function processInboundMessage(
       contactKey,
       phone: input.phone,
       conversationId,
-      sessionId: `${input.sourceType}:${input.sourceKey}:${contactKey}`,
+      sessionId: `${route.source_type ?? input.sourceType}:${route.source_key ?? input.sourceKey}:${contactKey}`,
       variables: result.variables,
       awaitingInput: result.awaitingInput,
-      sourceType: input.sourceType,
-      sourceKey: input.sourceKey,
+      sourceType: route.source_type ?? input.sourceType,
+      sourceKey: route.source_key ?? input.sourceKey,
     });
   }
 

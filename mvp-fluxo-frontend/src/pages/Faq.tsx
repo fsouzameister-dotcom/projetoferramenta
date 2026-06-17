@@ -47,6 +47,16 @@ const FAQ_ITEMS: FaqItem[] = [
       "Em Admin > Campanhas, importe a planilha de contatos, escolha o fluxo, o template e o canal, e dispare. O sistema registra entrega, leitura e resposta de cada destinatário.",
   },
   {
+    question: "Como configurar Click to WhatsApp (anúncio Meta)?",
+    answer:
+      "No anúncio, use o botão WhatsApp apontando para o número já conectado no ClientOn. Em Admin > Entrada, crie uma rota tipo CTWA com chave ad_ID_DO_ANUNCIO (ou default para qualquer anúncio) e o fluxo desejado. A origem do anúncio fica gravada na conversa.",
+  },
+  {
+    question: "Como receber leads de formulário Instagram/Facebook (Lead Ads)?",
+    answer:
+      "Em Admin > Entrada, crie rota tipo Instagram ou Facebook Lead Ads com uma chave (ex.: ig_minha_campanha). Envie POST para /webhooks/inbound com x-tenant-id, x-inbound-secret, sourceType, sourceKey, message, phone e name.",
+  },
+  {
     question: "O que mostra o Dashboard de Campanhas?",
     answer:
       "Na sub-aba Dashboard em Campanhas, o funil exibe: disparados → enviados → recebidos → lidos → respondidos. Há totais por campanha, linha do tempo e filtros por período.",

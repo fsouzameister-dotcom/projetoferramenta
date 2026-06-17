@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { WHATSAPP_GRAPH_API_VERSION } from "./config";
+import { parseCtwaReferral, type CtwaReferral } from "./ctwa-referral";
 
 const GRAPH_BASE = `https://graph.facebook.com/${WHATSAPP_GRAPH_API_VERSION}`;
 
@@ -719,6 +720,7 @@ export type ParsedWebhookEvent =
       timestampSec: number;
       textBody: string;
       contactName?: string;
+      ctwaReferral?: CtwaReferral;
     }
   | {
       kind: "inbound_image";
@@ -885,6 +887,7 @@ export function parseWhatsAppWebhookPayload(body: unknown): ParsedWebhookEvent[]
               button_reply?: { id?: string };
               list_reply?: { id?: string };
             };
+            referral?: Record<string, unknown>;
           }>
         | undefined;
 
@@ -1024,6 +1027,8 @@ export function parseWhatsAppWebhookPayload(body: unknown): ParsedWebhookEvent[]
           const c = contacts?.find((x) => (x as { wa_id?: string }).wa_id === fromWaId);
           if (c?.profile?.name) contactName = c.profile.name;
 
+          const ctwaReferral = parseCtwaReferral(msg.referral) ?? undefined;
+
           out.push({
             kind: "inbound_text",
             phoneNumberId,
@@ -1033,6 +1038,7 @@ export function parseWhatsAppWebhookPayload(body: unknown): ParsedWebhookEvent[]
             timestampSec: Number(msg.timestamp ?? 0) || 0,
             textBody,
             contactName,
+            ctwaReferral,
           });
         }
       }
