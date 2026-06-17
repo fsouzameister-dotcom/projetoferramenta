@@ -33,6 +33,11 @@ import {
   flowSpreadsheetToCsv,
 } from "../flow-responses-spreadsheet";
 import {
+  agentAttendanceDetailToCsv,
+  buildAgentAttendanceDetail,
+  buildAgentAttendanceSummary,
+} from "../agent-attendance-reports";
+import {
   createTabulacao,
   deleteTabulacao,
   listTabulacoesByTenant,
@@ -2606,6 +2611,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
         tenantId: request.tenant.id,
         conversationId,
         closedBy: `admin:${closedByLabel}`,
+        closedByUserId: request.user?.id,
         tabulacaoId: request.body.tabulacaoId,
       });
       if (!updated) {
@@ -3674,6 +3680,129 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
     }
   );
 
+  fastify.get<{
+    Querystring: {
+      dateField?: string;
+      from?: string;
+      to?: string;
+      agentUserId?: string;
+      campaignId?: string;
+      queueKey?: string;
+    };
+  }>(
+    "/reports/agent-attendance/summary",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            dateField: { type: "string", enum: ["opened", "closed"] },
+            from: { type: "string" },
+            to: { type: "string" },
+            agentUserId: { type: "string" },
+            campaignId: { type: "string" },
+            queueKey: { type: "string" },
+          },
+        },
+        response: {
+          403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        },
+      },
+    },
+    async (request, reply) => {
+      ensureAdminAccess(request);
+      const q = request.query ?? {};
+      try {
+        const data = await buildAgentAttendanceSummary({
+          tenantId: request.tenant.id,
+          dateField: q.dateField === "closed" ? "closed" : "opened",
+          from: q.from,
+          to: q.to,
+          agentUserId: q.agentUserId,
+          campaignId: q.campaignId,
+          queueKey: q.queueKey,
+        });
+        return sendSuccess(request, reply, data);
+      } catch (err) {
+        request.log.error(err);
+        throw new ApiError(
+          500,
+          ERROR_CODES.reports.AGENT_ATTENDANCE_SUMMARY_FAILED,
+          "Erro ao gerar resumo de atendimentos"
+        );
+      }
+    }
+  );
+
+  fastify.get<{
+    Querystring: {
+      dateField?: string;
+      from?: string;
+      to?: string;
+      agentUserId?: string;
+      campaignId?: string;
+      queueKey?: string;
+      limit?: number;
+      format?: string;
+    };
+  }>(
+    "/reports/agent-attendance/detail",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            dateField: { type: "string", enum: ["opened", "closed"] },
+            from: { type: "string" },
+            to: { type: "string" },
+            agentUserId: { type: "string" },
+            campaignId: { type: "string" },
+            queueKey: { type: "string" },
+            limit: { type: "number", minimum: 1, maximum: 10000 },
+            format: { type: "string", enum: ["csv"] },
+          },
+        },
+        response: {
+          403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+        },
+      },
+    },
+    async (request, reply) => {
+      ensureAdminAccess(request);
+      const q = request.query ?? {};
+      try {
+        const rows = await buildAgentAttendanceDetail({
+          tenantId: request.tenant.id,
+          dateField: q.dateField === "closed" ? "closed" : "opened",
+          from: q.from,
+          to: q.to,
+          agentUserId: q.agentUserId,
+          campaignId: q.campaignId,
+          queueKey: q.queueKey,
+          limit: q.limit,
+        });
+        if (q.format === "csv") {
+          reply.header("Content-Type", "text/csv; charset=utf-8");
+          reply.header(
+            "Content-Disposition",
+            'attachment; filename="atendimentos-detalhado.csv"'
+          );
+          return reply.send(agentAttendanceDetailToCsv(rows));
+        }
+        return sendSuccess(request, reply, { rows });
+      } catch (err) {
+        request.log.error(err);
+        throw new ApiError(
+          500,
+          ERROR_CODES.reports.AGENT_ATTENDANCE_DETAIL_FAILED,
+          "Erro ao gerar relatório detalhado de atendimentos"
+        );
+      }
+    }
+  );
+
 
   fastify.get("/roles/assignable", async (request, reply) => {
     ensureAdminAccess(request);
@@ -4237,6 +4366,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           {
             ...request.body,
             senderName: request.body.sender_name || request.user?.name || request.user?.email,
+            actingUserId: request.user?.id,
           }
         );
         if (!updated) {
@@ -4318,6 +4448,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
             caption: request.body.caption,
             senderName:
               request.body.sender_name || request.user?.name || request.user?.email,
+            actingUserId: request.user?.id,
             publicApiBaseUrl,
           }
         );
@@ -4397,6 +4528,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
             durationSec: request.body.durationSec,
             senderName:
               request.body.sender_name || request.user?.name || request.user?.email,
+            actingUserId: request.user?.id,
             publicApiBaseUrl,
           }
         );
@@ -4479,6 +4611,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
             caption: request.body.caption,
             senderName:
               request.body.sender_name || request.user?.name || request.user?.email,
+            actingUserId: request.user?.id,
             publicApiBaseUrl,
           }
         );
@@ -4584,6 +4717,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           tenantId: request.tenant.id,
           conversationId,
           closedBy: request.user?.name || request.user?.email,
+          closedByUserId: request.user?.id,
           tabulacaoId: request.body.tabulacaoId,
         });
         if (!updated) {

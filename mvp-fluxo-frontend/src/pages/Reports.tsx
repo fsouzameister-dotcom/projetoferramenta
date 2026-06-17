@@ -1,12 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 import api, { getApiErrorMessage, unwrapApiData } from "../api/client";
+import AgentAttendanceReportSection from "../components/AgentAttendanceReportSection";
 
 interface Flow {
   id: string;
   name: string;
 }
 
-type ReportView = "todas" | "tabulacoes" | "capturas" | "planilha" | "campanhas";
+type ReportView =
+  | "todas"
+  | "tabulacoes"
+  | "capturas"
+  | "planilha"
+  | "campanhas"
+  | "atendimentos"
+  | "conversas";
 
 type CampaignReportRow = {
   campaignId: string;
@@ -97,6 +105,16 @@ const VIEW_META: Record<
     title: "Relatório de campanhas",
     subtitle:
       "Status dos disparos de template: entrega, resposta, encerramento e transferência",
+  },
+  atendimentos: {
+    title: "Atendimentos (resumo)",
+    subtitle:
+      "Dashboard agregado por agente e fila — apenas conversas humanas (fora do bot)",
+  },
+  conversas: {
+    title: "Conversas (detalhado)",
+    subtitle:
+      "Lista exportável de atendimentos por agente, com campanha de origem e tempos TME/TMA",
   },
 };
 
@@ -205,6 +223,9 @@ export default function Reports() {
     }
     if (view === "campanhas") {
       loadCampaignReport();
+      return;
+    }
+    if (view === "atendimentos" || view === "conversas") {
       return;
     }
 
@@ -332,12 +353,18 @@ export default function Reports() {
                   ? "Capturas"
                   : key === "campanhas"
                     ? "Campanhas"
-                    : "Planilha"}
+                    : key === "atendimentos"
+                      ? "Atendimentos"
+                      : key === "conversas"
+                        ? "Conversas"
+                        : "Planilha"}
           </button>
         ))}
       </div>
 
       <div className="mb-6 flex flex-wrap gap-4 items-end">
+        {view !== "atendimentos" && view !== "conversas" && (
+        <>
         <div>
           <label className="block text-sm text-gray-300 mb-1">
             Fluxo {view === "planilha" && <span className="text-teal-400">*</span>}
@@ -416,6 +443,8 @@ export default function Reports() {
               Exportar Excel
             </button>
           </>
+        )}
+        </>
         )}
       </div>
 
@@ -534,7 +563,18 @@ export default function Reports() {
         </section>
       )}
 
-      {view !== "planilha" && view !== "campanhas" && (
+      {(view === "atendimentos" || view === "conversas") && (
+        <AgentAttendanceReportSection
+          mode={view === "atendimentos" ? "summary" : "detail"}
+          onError={setError}
+          onLoading={setLoading}
+        />
+      )}
+
+      {view !== "planilha" &&
+        view !== "campanhas" &&
+        view !== "atendimentos" &&
+        view !== "conversas" && (
         <>
           <section className="mb-10">
             <h2 className="text-lg font-semibold text-white mb-3">

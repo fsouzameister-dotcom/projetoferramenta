@@ -202,6 +202,14 @@ async function ensureSchema() {
       ALTER TABLE agent_messages
       ADD COLUMN IF NOT EXISTS attachment_payload jsonb
     `);
+    await client.query(`
+      ALTER TABLE agent_conversations
+      ADD COLUMN IF NOT EXISTS assigned_user_id UUID REFERENCES users(id) ON DELETE SET NULL
+    `);
+    await client.query(`
+      ALTER TABLE agent_conversations
+      ADD COLUMN IF NOT EXISTS closed_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL
+    `);
     schemaReady = true;
   } finally {
     client.release();
@@ -209,6 +217,32 @@ async function ensureSchema() {
 }
 
 const AGENT_DISPLAY_TZ = "America/Sao_Paulo";
+
+async function markConversationEngaged(
+  client: { query: (sql: string, params?: unknown[]) => Promise<unknown> },
+  tenantId: string,
+  conversationId: string,
+  actingUserId?: string | null
+): Promise<void> {
+  const userId = actingUserId?.trim() || null;
+  if (userId) {
+    await client.query(
+      `UPDATE agent_conversations
+       SET status = 'em_andamento',
+           updated_at = now(),
+           assigned_user_id = COALESCE(assigned_user_id, $3::uuid)
+       WHERE id = $1 AND tenant_id = $2`,
+      [conversationId, tenantId, userId]
+    );
+    return;
+  }
+  await client.query(
+    `UPDATE agent_conversations
+     SET status = 'em_andamento', updated_at = now()
+     WHERE id = $1 AND tenant_id = $2`,
+    [conversationId, tenantId]
+  );
+}
 
 function formatAgentMessageTime(isoDate: string | Date): string {
   const d = isoDate instanceof Date ? isoDate : new Date(isoDate);
@@ -1362,6 +1396,7 @@ export async function appendAgentImageMessage(
     fileName?: string;
     caption?: string;
     senderName?: string;
+    actingUserId?: string;
     publicApiBaseUrl?: string;
   }
 ): Promise<AgentConversation | null> {
@@ -1426,10 +1461,7 @@ export async function appendAgentImageMessage(
       ]
     );
     outboundMessageId = inserted.rows[0].id;
-    await client.query(
-      `UPDATE agent_conversations SET status = 'em_andamento', updated_at = now() WHERE id = $1 AND tenant_id = $2`,
-      [conversationId, tenantId]
-    );
+    await markConversationEngaged(client, tenantId, conversationId, input.actingUserId);
     await detachInboundBotFlow(tenantId, customerPhone);
   } finally {
     client.release();
@@ -1824,6 +1856,7 @@ export async function appendAgentAudioMessage(
     mimeType?: string;
     durationSec?: number;
     senderName?: string;
+    actingUserId?: string;
     publicApiBaseUrl?: string;
   }
 ): Promise<AgentConversation | null> {
@@ -1884,10 +1917,7 @@ export async function appendAgentAudioMessage(
       [conversationId, tenantId, normalizedSender, "Áudio enviado"]
     );
     outboundMessageId = inserted.rows[0].id;
-    await client.query(
-      `UPDATE agent_conversations SET status = 'em_andamento', updated_at = now() WHERE id = $1 AND tenant_id = $2`,
-      [conversationId, tenantId]
-    );
+    await markConversationEngaged(client, tenantId, conversationId, input.actingUserId);
     await detachInboundBotFlow(tenantId, customerPhone);
   } finally {
     client.release();
@@ -1989,6 +2019,7 @@ export async function appendAgentAttachmentMessage(
     fileName: string;
     caption?: string;
     senderName?: string;
+    actingUserId?: string;
     publicApiBaseUrl?: string;
   }
 ): Promise<AgentConversation | null> {
@@ -2046,10 +2077,7 @@ export async function appendAgentAttachmentMessage(
       [conversationId, tenantId, normalizedSender, caption ? `Anexo: ${fileName}` : `Anexo: ${fileName}`]
     );
     outboundMessageId = inserted.rows[0].id;
-    await client.query(
-      `UPDATE agent_conversations SET status = 'em_andamento', updated_at = now() WHERE id = $1 AND tenant_id = $2`,
-      [conversationId, tenantId]
-    );
+    await markConversationEngaged(client, tenantId, conversationId, input.actingUserId);
     await detachInboundBotFlow(tenantId, customerPhone);
   } finally {
     client.release();
@@ -2322,6 +2350,7 @@ export async function appendAgentMessage(
     contact?: { name: string; phone: string };
     location?: { label: string; lat: number; lng: number };
     senderName?: string;
+    actingUserId?: string;
   }
 ): Promise<AgentConversation | null> {
   await ensureTenantSeed(tenantId);
@@ -2419,12 +2448,7 @@ export async function appendAgentMessage(
       );
     }
 
-    await client.query(
-      `UPDATE agent_conversations
-       SET status = 'em_andamento', updated_at = now()
-       WHERE id = $1 AND tenant_id = $2`,
-      [conversationId, tenantId]
-    );
+    await markConversationEngaged(client, tenantId, conversationId, payload.actingUserId);
     await detachInboundBotFlow(tenantId, customerPhone);
   } finally {
     client.release();
@@ -2581,6 +2605,7 @@ export async function closeAgentConversation(input: {
   tenantId: string;
   conversationId: string;
   closedBy?: string;
+  closedByUserId?: string;
   tabulacaoId: string;
 }): Promise<AgentConversation | null> {
   await ensureSchema();
@@ -2642,12 +2667,14 @@ export async function closeAgentConversation(input: {
 
   const client = await pool.connect();
   try {
+    const closedByUserId = input.closedByUserId?.trim() || null;
     const result = await client.query(
       `UPDATE agent_conversations
        SET lifecycle_status = 'closed_manual',
            status = 'historico',
            closed_at = now(),
            closed_by = $3,
+           closed_by_user_id = COALESCE($7::uuid, closed_by_user_id),
            tabulacao_id = $4::uuid,
            tabulacao_label = $5,
            closure_message_status = $6,
@@ -2661,6 +2688,7 @@ export async function closeAgentConversation(input: {
         tabulacao.id,
         tabulacao.label,
         closureStatus,
+        closedByUserId,
       ]
     );
     if (result.rows.length === 0) return null;
@@ -2711,6 +2739,7 @@ export async function reopenAgentConversation(input: {
            status = 'em_andamento',
            closed_at = NULL,
            closed_by = NULL,
+           closed_by_user_id = NULL,
            metadata = COALESCE(metadata, '{}'::jsonb) || '{"bot_only":false}'::jsonb,
            updated_at = now()
        WHERE id = $1 AND tenant_id = $2`,
