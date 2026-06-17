@@ -24,17 +24,87 @@ const FAQ_ITEMS: FaqItem[] = [
   {
     question: "Como criar um novo tenant (cliente)?",
     answer:
-      "Acesse Admin > Clientes, preencha os dados do tenant e o administrador inicial, e clique em 'Criar tenant'.",
+      "Acesse Admin > Clientes (permissão de plataforma), preencha os dados do tenant e o administrador inicial, e clique em 'Criar tenant'.",
   },
   {
-    question: "Onde configuro usuários e permissões?",
+    question: "Onde configuro usuários e perfis de acesso?",
     answer:
-      "Em Admin > Usuários. Nessa tela você cria, edita e remove perfis com papéis como admin_local, supervisor e agente.",
+      "Em Admin > Usuários você cria e edita contas. Em Admin > Perfis você define o que cada perfil pode acessar (painel, fluxos, campanhas, relatórios, etc.). Ao criar ou editar um usuário, associe o perfil desejado.",
+  },
+  {
+    question: "Quais permissões existem no sistema?",
+    answer:
+      "Painel, Fluxos, Usuários, Perfis, IA, WhatsApp, Entrada, Campanhas, Monitoramento, Operação (filas e tabulações), Relatórios e Clientes (plataforma). O menu lateral e as rotas da API respeitam apenas o que o perfil do usuário permite.",
+  },
+  {
+    question: "O que o perfil Supervisor enxerga por padrão?",
+    answer:
+      "Por padrão: Painel, Fluxos, Monitoramento, Operação e Relatórios — sem Usuários, Campanhas, WhatsApp ou IA. Um administrador pode ajustar isso em Admin > Perfis.",
+  },
+  {
+    question: "Por que não vejo um menu (Campanhas, Relatórios, etc.)?",
+    answer:
+      "O menu depende das permissões do seu perfil. Peça a um administrador para revisar Admin > Perfis ou troque seu perfil em Admin > Usuários. Agentes enxergam somente a tela de Atendimento.",
   },
   {
     question: "Como usar o cadastro mestre no atendimento?",
     answer:
       "Quando a conversa possui vínculo com cliente, o sistema mostra o selo 'Cadastro mestre' e prioriza o telefone principal.",
+  },
+  {
+    question: "Como disparar uma campanha de WhatsApp?",
+    answer:
+      "Em Admin > Campanhas, importe a planilha de contatos, escolha o fluxo, o template e o canal, e dispare. O sistema registra entrega, leitura e resposta de cada destinatário.",
+  },
+  {
+    question: "O que mostra o Dashboard de Campanhas?",
+    answer:
+      "Na sub-aba Dashboard em Campanhas, o funil exibe: disparados → enviados → recebidos → lidos → respondidos. Há totais por campanha, linha do tempo e filtros por período.",
+  },
+  {
+    question: "Como pausar ou retomar uma campanha?",
+    answer:
+      "Na lista de campanhas, use as ações de pausar/retomar. Destinatários pendentes ficam em espera; é possível consultar destinatários e reprocessar envios que falharam.",
+  },
+  {
+    question: "Onde vejo o relatório de disparos de campanha?",
+    answer:
+      "Em Relatórios > Campanhas: status de entrega, primeira resposta, transferência para fila humana, protocolo e tabulação. Exporte em CSV pelo botão na tela.",
+  },
+  {
+    question: "Como exportar respostas de um fluxo em planilha?",
+    answer:
+      "Em Relatórios > Planilha, selecione o fluxo e clique em Atualizar. Cada linha é um contato e cada coluna segue a ordem das perguntas do fluxo. Use Exportar CSV ou Excel.",
+  },
+  {
+    question: "O que são os relatórios de Atendimentos e Conversas?",
+    answer:
+      "Em Relatórios > Atendimentos: resumo por agente e fila (totais, abertos, encerrados, TME e TMA). Em Relatórios > Conversas: lista detalhada exportável com protocolo, campanha de origem, tabulação e tempos.",
+  },
+  {
+    question: "O que conta como atendimento humano nos relatórios?",
+    answer:
+      "Somente conversas fora do bot (não marcadas como bot_only). Fluxos automáticos puros não entram na contagem de atendimentos do agente.",
+  },
+  {
+    question: "O que são TME e TMA nos relatórios?",
+    answer:
+      "TME: tempo até a primeira resposta humana do agente. TMA: tempo desde o início do atendimento humano até o encerramento — para conversas em aberto, o TMA é calculado até o momento da consulta.",
+  },
+  {
+    question: "Como o sistema identifica qual agente atendeu?",
+    answer:
+      "Ao assumir (primeira mensagem enviada pelo agente), o sistema grava o usuário em assigned_user_id. Ao encerrar, grava closed_by_user_id. Nos relatórios aparecem o nome cadastrado e o ID do usuário.",
+  },
+  {
+    question: "Como filtrar relatórios de atendimento?",
+    answer:
+      "Use filtro por data de abertura ou de encerramento, período (de/até), agente, campanha de origem e fila. No detalhado, exporte tudo em CSV.",
+  },
+  {
+    question: "O que mudou no fluxo Fox (botão Cadastrar-se)?",
+    answer:
+      "O roteamento inbound no início do fluxo foi corrigido: 'Cadastrar-se' e 'Agora não' seguem caminhos distintos de forma confiável em produção, inclusive após transferência da campanha para atendimento humano.",
   },
 ];
 
@@ -63,7 +133,7 @@ export default function Faq() {
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Buscar pergunta (ex.: login, WhatsApp, tenant)"
+          placeholder="Buscar pergunta (ex.: permissões, campanhas, relatórios, TME)"
           className="w-full bg-[#0f1a33] border border-[#314263] rounded-lg px-3 py-2 text-sm text-gray-100 outline-none"
         />
       </div>
