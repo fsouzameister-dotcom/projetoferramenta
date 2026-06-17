@@ -23,6 +23,7 @@ import {
 } from "../campaigns";
 import type { CampaignTemplateOption } from "../campaign-templates";
 import { buildCampaignReport, campaignReportToCsv } from "../campaign-reports";
+import { buildCampaignDashboard } from "../campaign-dashboard";
 import {
   WHATSAPP_PROVIDER_CLOUD,
   WHATSAPP_PROVIDER_TWILIO,
@@ -261,6 +262,21 @@ const campaignRoutes: FastifyPluginAsync = async (fastify) => {
     } catch (err) {
       mapCampaignError(err);
     }
+  });
+
+  fastify.get("/admin/campaigns/dashboard", async (request, reply) => {
+    const q = request.query as {
+      campaignId?: string;
+      from?: string;
+      to?: string;
+    };
+    const data = await buildCampaignDashboard({
+      tenantId: request.tenant.id,
+      campaignId: q.campaignId,
+      from: q.from,
+      to: q.to,
+    });
+    return sendSuccess(request, reply, data);
   });
 
   fastify.get("/reports/campaigns", async (request, reply) => {

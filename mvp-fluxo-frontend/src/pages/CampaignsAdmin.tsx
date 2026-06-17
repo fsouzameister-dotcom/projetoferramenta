@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import api, { getApiErrorMessage, unwrapApiData } from "../api/client";
 import InfoTooltip from "~components/InfoTooltip";
+import CampaignDashboardTab from "~components/CampaignDashboardTab";
 
 type FlowRow = { id: string; name: string };
 type ChannelRow = {
@@ -78,6 +79,7 @@ const statusLabel: Record<string, string> = {
 };
 
 export default function CampaignsAdmin() {
+  const [activeTab, setActiveTab] = useState<"disparos" | "dashboard">("disparos");
   const [flows, setFlows] = useState<FlowRow[]>([]);
   const [channels, setChannels] = useState<ChannelRow[]>([]);
   const [templates, setTemplates] = useState<TemplateOption[]>([]);
@@ -286,9 +288,40 @@ export default function CampaignsAdmin() {
         <h1 className="text-2xl font-semibold text-white">Campanhas</h1>
         <InfoTooltip text="Disparo em massa de templates WhatsApp (Twilio ou Meta). As respostas entram no fluxo selecionado." />
       </div>
-      <p className="text-sm text-gray-400 mb-6">
+      <p className="text-sm text-gray-400 mb-4">
         Upload de planilha CSV/Excel com coluna <strong>Telefone</strong> e mapeamento dinâmico das variáveis do template.
       </p>
+
+      <div className="flex gap-2 mb-6 border-b border-zinc-700">
+        <button
+          type="button"
+          onClick={() => setActiveTab("disparos")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            activeTab === "disparos"
+              ? "border-cyan-400 text-cyan-300"
+              : "border-transparent text-gray-400 hover:text-gray-200"
+          }`}
+        >
+          Disparos
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("dashboard")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            activeTab === "dashboard"
+              ? "border-cyan-400 text-cyan-300"
+              : "border-transparent text-gray-400 hover:text-gray-200"
+          }`}
+        >
+          Dashboard
+        </button>
+      </div>
+
+      {activeTab === "dashboard" ? (
+        <CampaignDashboardTab campaigns={campaigns.map((c) => ({ id: c.id, name: c.name }))} />
+      ) : (
+        <>
+      <p className="sr-only">Aba disparos</p>
 
       {error ? (
         <div className="mb-4 rounded-lg border border-red-500/40 bg-red-950/40 px-4 py-3 text-sm text-red-200">
@@ -619,6 +652,8 @@ export default function CampaignsAdmin() {
           )}
         </section>
       ) : null}
+        </>
+      )}
     </div>
   );
 }
