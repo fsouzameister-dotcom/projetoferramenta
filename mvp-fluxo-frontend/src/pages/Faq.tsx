@@ -101,11 +101,6 @@ const FAQ_ITEMS: FaqItem[] = [
     answer:
       "Use filtro por data de abertura ou de encerramento, período (de/até), agente, campanha de origem e fila. No detalhado, exporte tudo em CSV.",
   },
-  {
-    question: "O que mudou no fluxo Fox (botão Cadastrar-se)?",
-    answer:
-      "O roteamento inbound no início do fluxo foi corrigido: 'Cadastrar-se' e 'Agora não' seguem caminhos distintos de forma confiável em produção, inclusive após transferência da campanha para atendimento humano.",
-  },
 ];
 
 export default function Faq() {
