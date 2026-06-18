@@ -80,6 +80,7 @@ import {
 } from "../auth-roles";
 import {
   requireAdminAccess,
+  requireAnyPermission,
   requirePermission,
 } from "../request-authz";
 import { resolveRoutePermission } from "../route-permissions";
@@ -156,6 +157,17 @@ import {
   listInboundRoutes,
   updateInboundRoute,
 } from "../inbound-routes";
+import {
+  createAiInsightJob,
+  getAiInsightJob,
+  listAiInsightJobs,
+} from "../ai-insights";
+import {
+  createAiInsightTemplate,
+  deleteAiInsightTemplate,
+  listAiInsightTemplates,
+  updateAiInsightTemplate,
+} from "../ai-insight-templates";
 
 const flowSchema = {
   type: "object",
@@ -1365,6 +1377,221 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
         if (error instanceof ApiError) throw error;
         throw new ApiError(502, ERROR_CODES.ai.AI_RESPONSE_FAILED, "Erro ao gerar resposta de IA");
       }
+    }
+  );
+
+  fastify.get(
+    "/ai/insight-templates",
+    {
+      schema: {
+        response: {
+          200: successEnvelopeSchema({
+            type: "array",
+            items: { type: "object", additionalProperties: true },
+          }),
+        },
+      },
+    },
+    async (request, reply) => {
+      requirePermission(request, "ai");
+      const rows = await listAiInsightTemplates(request.tenant.id);
+      return sendSuccess(request, reply, rows);
+    }
+  );
+
+  fastify.post<{
+    Body: {
+      name: string;
+      description?: string;
+      systemPrompt: string;
+      isDefault?: boolean;
+      isActive?: boolean;
+    };
+  }>(
+    "/ai/insight-templates",
+    {
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["name", "systemPrompt"],
+          properties: {
+            name: { type: "string", minLength: 1 },
+            description: { type: "string" },
+            systemPrompt: { type: "string", minLength: 1 },
+            isDefault: { type: "boolean" },
+            isActive: { type: "boolean" },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      requirePermission(request, "ai");
+      const created = await createAiInsightTemplate({
+        tenantId: request.tenant.id,
+        createdBy: request.user?.id,
+        name: request.body.name,
+        description: request.body.description,
+        systemPrompt: request.body.systemPrompt,
+        isDefault: request.body.isDefault,
+        isActive: request.body.isActive,
+      });
+      return sendSuccess(request, reply, created, 201);
+    }
+  );
+
+  fastify.patch<{
+    Params: { templateId: string };
+    Body: {
+      name?: string;
+      description?: string | null;
+      systemPrompt?: string;
+      isDefault?: boolean;
+      isActive?: boolean;
+    };
+  }>(
+    "/ai/insight-templates/:templateId",
+    {
+      schema: {
+        params: {
+          type: "object",
+          additionalProperties: false,
+          required: ["templateId"],
+          properties: { templateId: { type: "string", minLength: 1 } },
+        },
+      },
+    },
+    async (request, reply) => {
+      requirePermission(request, "ai");
+      const updated = await updateAiInsightTemplate({
+        tenantId: request.tenant.id,
+        templateId: request.params.templateId,
+        name: request.body.name,
+        description: request.body.description,
+        systemPrompt: request.body.systemPrompt,
+        isDefault: request.body.isDefault,
+        isActive: request.body.isActive,
+      });
+      return sendSuccess(request, reply, updated);
+    }
+  );
+
+  fastify.delete<{ Params: { templateId: string } }>(
+    "/ai/insight-templates/:templateId",
+    {
+      schema: {
+        params: {
+          type: "object",
+          additionalProperties: false,
+          required: ["templateId"],
+          properties: { templateId: { type: "string", minLength: 1 } },
+        },
+      },
+    },
+    async (request, reply) => {
+      requirePermission(request, "ai");
+      await deleteAiInsightTemplate(request.tenant.id, request.params.templateId);
+      return sendSuccess(request, reply, { ok: true });
+    }
+  );
+
+  fastify.post<{
+    Body: {
+      dateFrom: string;
+      dateTo: string;
+      queueIds?: string[];
+      agentIds?: string[];
+      personaIds?: string[];
+      includeVoiceTranscripts?: boolean;
+      templateId?: string;
+      promptOverride?: string;
+      personaId?: string;
+    };
+  }>(
+    "/ai/insights/run",
+    {
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["dateFrom", "dateTo"],
+          properties: {
+            dateFrom: { type: "string", minLength: 1 },
+            dateTo: { type: "string", minLength: 1 },
+            queueIds: { type: "array", items: { type: "string" } },
+            agentIds: { type: "array", items: { type: "string" } },
+            personaIds: { type: "array", items: { type: "string" } },
+            includeVoiceTranscripts: { type: "boolean" },
+            templateId: { type: "string" },
+            promptOverride: { type: "string" },
+            personaId: { type: "string" },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      requireAnyPermission(request, ["ai", "reports"]);
+      const job = await createAiInsightJob({
+        tenantId: request.tenant.id,
+        requestedBy: request.user?.id,
+        templateId: request.body.templateId,
+        promptOverride: request.body.promptOverride,
+        filters: {
+          dateFrom: request.body.dateFrom,
+          dateTo: request.body.dateTo,
+          queueIds: request.body.queueIds,
+          agentIds: request.body.agentIds,
+          personaIds: request.body.personaIds,
+          includeVoiceTranscripts: request.body.includeVoiceTranscripts,
+          personaId: request.body.personaId,
+        },
+      });
+      return sendSuccess(request, reply, job, 202);
+    }
+  );
+
+  fastify.get<{ Querystring: { limit?: string } }>(
+    "/ai/insights",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          additionalProperties: false,
+          properties: { limit: { type: "string" } },
+        },
+      },
+    },
+    async (request, reply) => {
+      requireAnyPermission(request, ["ai", "reports"]);
+      const limit = request.query.limit ? Number(request.query.limit) : 30;
+      const rows = await listAiInsightJobs(request.tenant.id, limit);
+      return sendSuccess(request, reply, rows);
+    }
+  );
+
+  fastify.get<{ Params: { jobId: string } }>(
+    "/ai/insights/:jobId",
+    {
+      schema: {
+        params: {
+          type: "object",
+          additionalProperties: false,
+          required: ["jobId"],
+          properties: { jobId: { type: "string", minLength: 1 } },
+        },
+      },
+    },
+    async (request, reply) => {
+      requireAnyPermission(request, ["ai", "reports"]);
+      const job = await getAiInsightJob(request.tenant.id, request.params.jobId);
+      if (!job) {
+        throw new ApiError(
+          404,
+          ERROR_CODES.ai.AI_INSIGHT_JOB_NOT_FOUND,
+          "Job de insight não encontrado"
+        );
+      }
+      return sendSuccess(request, reply, job);
     }
   );
 

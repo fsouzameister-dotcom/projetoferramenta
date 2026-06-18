@@ -23,6 +23,7 @@ const baseNavItems: NavItem[] = [
   { label: "Monitoramento", path: "/admin/monitoring", icon: "📡", permission: "monitoring" },
   { label: "Operação", path: "/admin/operations", icon: "⚙️", permission: "operations" },
   { label: "Relatórios", path: "/reports", icon: "📊", permission: "reports" },
+  { label: "Insights IA", path: "/admin/insights", icon: "✨", permission: "reports" },
   { label: "FAQ", path: "/faq", icon: "❓", permission: "dashboard" },
 ];
 
@@ -35,6 +36,9 @@ export default function Sidebar() {
     : [];
 
   const navItems = [...platformItems, ...baseNavItems].filter((item) => {
+    if (item.path === "/admin/insights") {
+      return hasPermission("reports") || hasPermission("ai");
+    }
     if (!item.permission) return true;
     return hasPermission(item.permission);
   });

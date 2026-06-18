@@ -19,6 +19,7 @@ import AgentHome from "./pages/AgentHome";
 import UsersAdmin from "./pages/UsersAdmin";
 import RolesAdmin from "./pages/RolesAdmin";
 import AiAdmin from "./pages/AiAdmin";
+import InsightsAdmin from "./pages/InsightsAdmin";
 import WhatsAppAdmin from "./pages/WhatsAppAdmin";
 import InboundAdmin from "./pages/InboundAdmin";
 import OperationsAdmin from "./pages/OperationsAdmin";
@@ -163,6 +164,7 @@ const RequirePathAccess = () => {
       "/admin/users": true,
       "/admin/roles": true,
       "/admin/ai": true,
+      "/admin/insights": true,
       "/admin/whatsapp": true,
       "/admin/inbound": true,
       "/admin/campaigns": true,
@@ -227,6 +229,7 @@ const router = createBrowserRouter([
                       { path: "admin/users", element: <UsersAdmin /> },
                       { path: "admin/roles", element: <RolesAdmin /> },
                       { path: "admin/ai", element: <AiAdmin /> },
+                      { path: "admin/insights", element: <InsightsAdmin /> },
                       { path: "admin/whatsapp", element: <WhatsAppAdmin /> },
                       { path: "admin/inbound", element: <InboundAdmin /> },
                       { path: "admin/campaigns", element: <CampaignsAdmin /> },

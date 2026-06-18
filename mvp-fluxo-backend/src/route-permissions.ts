@@ -9,6 +9,7 @@ export function resolveRoutePermission(path: string): AppPermission | null {
   if (normalized.startsWith("/roles")) return "roles";
   if (normalized.startsWith("/users")) return "users";
   if (normalized.startsWith("/flows") || normalized.startsWith("/nodes")) return "flows";
+  if (normalized.startsWith("/ai/insights")) return null;
   if (normalized.startsWith("/ai")) return "ai";
   if (normalized.startsWith("/whatsapp")) return "whatsapp";
   if (normalized.startsWith("/inbound")) return "inbound";

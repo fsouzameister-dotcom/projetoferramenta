@@ -29,6 +29,7 @@ export const ROUTE_PERMISSIONS: Record<string, AppPermission> = {
   "/admin/users": "users",
   "/admin/roles": "roles",
   "/admin/ai": "ai",
+  "/admin/insights": "reports",
   "/admin/whatsapp": "whatsapp",
   "/admin/inbound": "inbound",
   "/admin/campaigns": "campaigns",
@@ -116,6 +117,9 @@ export function canAccessPath(path: string): boolean {
   const role = localStorage.getItem("user_role") || "agente";
   if (role === "agente") return path === "/agent";
   if (role === "platform_admin") return true;
+  if (path === "/admin/insights") {
+    return hasPermission("reports") || hasPermission("ai");
+  }
   if (/^\/flows\/[^/]+$/.test(path)) return hasPermission("flows");
   const permission = ROUTE_PERMISSIONS[path];
   if (!permission) return hasAdminUiAccess();

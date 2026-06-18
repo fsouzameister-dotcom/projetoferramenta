@@ -5,6 +5,7 @@ import { HOST } from "./config";
 import { testDbConnection } from "./db";
 import { testRedisConnection } from "./redis";
 import { startFlowWaitScheduler } from "./flow-wait-scheduler";
+import { startAiInsightScheduler } from "./ai-insight-scheduler";
 import { startCampaignDispatcher } from "./campaign-dispatcher";
 
 async function main() {
@@ -17,6 +18,7 @@ async function main() {
     const port = Number(process.env.PORT || 3000);
     await app.listen({ port, host: HOST });
     startFlowWaitScheduler();
+    startAiInsightScheduler();
     startCampaignDispatcher();
     console.log(`API rodando em http://${HOST}:${port}`);
   } catch (err) {
