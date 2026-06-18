@@ -50,7 +50,19 @@ export async function resolveCampaignInboundRoute(input: {
     const cached = await redis.get(routeKey(input.tenantId, digits));
     if (cached) {
       const parsed = JSON.parse(cached) as CampaignInboundRoute;
-      if (parsed?.flowId && parsed?.mailingId && parsed?.recipientId) return parsed;
+      if (parsed?.flowId && parsed?.mailingId && parsed?.recipientId) {
+        const stillActive = await pool.query<{ ok: number }>(
+          `SELECT 1 AS ok
+           FROM mailing_recipients
+           WHERE id = $1::uuid
+             AND tenant_id = $2::uuid
+             AND status IN ('sent', 'delivered', 'read')
+           LIMIT 1`,
+          [parsed.recipientId, input.tenantId]
+        );
+        if (stillActive.rows[0]?.ok) return parsed;
+        await clearCampaignInboundRoute(input.tenantId, digits);
+      }
     }
   } catch {
     /* ignore */
@@ -70,7 +82,7 @@ export async function resolveCampaignInboundRoute(input: {
      JOIN mailings m ON m.id = mr.mailing_id
      WHERE mr.tenant_id = $1::uuid
        AND regexp_replace(mr.phone_e164, '[^0-9]', '', 'g') = $2
-       AND mr.status NOT IN ('pending', 'failed', 'skipped')
+       AND mr.status IN ('sent', 'delivered', 'read')
        AND mr.sent_at IS NOT NULL
        AND mr.sent_at >= now() - interval '30 days'
        AND m.flow_id IS NOT NULL
@@ -80,12 +92,23 @@ export async function resolveCampaignInboundRoute(input: {
   );
   const row = result.rows[0];
   if (!row?.flow_id) return null;
-  return {
+  const route: CampaignInboundRoute = {
     flowId: row.flow_id,
     mailingId: row.mailing_id,
     recipientId: row.recipient_id,
     conversationId: row.conversation_id ?? undefined,
   };
+  try {
+    await redis.set(
+      routeKey(input.tenantId, digits),
+      JSON.stringify(route),
+      "EX",
+      ROUTE_TTL_SEC
+    );
+  } catch {
+    /* Redis opcional */
+  }
+  return route;
 }
 
 export async function markCampaignRecipientResponded(input: {
@@ -110,6 +133,9 @@ export async function markCampaignRecipientResponded(input: {
          AND first_reply_at IS NULL`,
       [input.recipientId, input.tenantId, input.timestampIso, text]
     );
+    if (digits) {
+      await clearCampaignInboundRoute(input.tenantId, digits);
+    }
     return;
   }
 
@@ -127,6 +153,20 @@ export async function markCampaignRecipientResponded(input: {
        AND status NOT IN ('pending', 'failed', 'skipped')`,
     [input.tenantId, digits, input.timestampIso, text]
   );
+  await clearCampaignInboundRoute(input.tenantId, digits);
+}
+
+export async function clearCampaignInboundRoute(
+  tenantId: string,
+  phoneDigits: string
+): Promise<void> {
+  const digits = phoneDigitsOnly(phoneDigits);
+  if (!digits) return;
+  try {
+    await redis.del(routeKey(tenantId, digits));
+  } catch {
+    /* Redis opcional */
+  }
 }
 
 export async function syncCampaignRecipientDeliveryStatus(input: {

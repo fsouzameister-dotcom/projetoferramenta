@@ -1,7 +1,17 @@
 import { pool } from "./db";
 import { matchesInboundTrigger } from "./flow-field-validators";
+import {
+  inboundTriggerRouteMatchesSource,
+  WHATSAPP_INBOUND_SOURCE_TYPES,
+} from "./inbound-channel-match";
 import { WHATSAPP_PROVIDER_TWILIO } from "./whatsapp-channels";
 import { buildCtwaSourceKey, type CtwaReferral } from "./ctwa-referral";
+
+export {
+  inboundTriggerRouteMatchesSource,
+  isWhatsAppInboundSourceType,
+  WHATSAPP_INBOUND_SOURCE_TYPES,
+} from "./inbound-channel-match";
 
 export const INBOUND_SOURCE_TYPES = [
   "whatsapp_meta",
@@ -187,15 +197,19 @@ export async function resolveInboundRouteByFirstMessage(input: {
             metadata, created_at::text, updated_at::text
      FROM inbound_entry_routes
      WHERE tenant_id = $1
-       AND source_type = $2
        AND active = true
        AND jsonb_array_length(COALESCE(metadata->'message_triggers', '[]'::jsonb)) > 0
+       AND (
+         source_type = $2
+         OR (
+           COALESCE(metadata->>'match_any_source_key', 'false') = 'true'
+           AND source_type = ANY($3::text[])
+           AND $2 = ANY($3::text[])
+         )
+       )
      ORDER BY updated_at DESC`,
-    [input.tenantId, sourceType]
+    [input.tenantId, sourceType, [...WHATSAPP_INBOUND_SOURCE_TYPES]]
   );
-
-  const incomingDigits =
-    sourceType === WHATSAPP_PROVIDER_TWILIO ? twilioRoutePhoneDigits(sourceKey) : "";
 
   for (const row of candidates.rows) {
     const meta = (row.metadata as Record<string, unknown>) ?? {};
@@ -206,15 +220,15 @@ export async function resolveInboundRouteByFirstMessage(input: {
       continue;
     }
 
-    const routeKey = row.source_key.trim();
-    const routeDigits =
-      sourceType === WHATSAPP_PROVIDER_TWILIO ? twilioRoutePhoneDigits(routeKey) : "";
-    const sameChannel =
-      routeKey === sourceKey ||
-      (incomingDigits && routeDigits && incomingDigits === routeDigits) ||
-      meta.match_any_source_key === true;
-
-    if (sameChannel) {
+    if (
+      inboundTriggerRouteMatchesSource({
+        routeSourceType: row.source_type,
+        routeSourceKey: row.source_key,
+        routeMetadata: meta,
+        inboundSourceType: sourceType,
+        inboundSourceKey: sourceKey,
+      })
+    ) {
       return { ...row, metadata: meta };
     }
   }

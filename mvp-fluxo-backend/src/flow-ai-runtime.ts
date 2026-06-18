@@ -12,6 +12,10 @@ import {
   type ConversaTransition,
 } from "./flow-conversa-node";
 import { parseJsonFromModel } from "./flow-executor-utils";
+import {
+  detectHumanHandoffRequest,
+  matchHumanHandoffTransition,
+} from "./flow-human-handoff";
 
 type FlowNodeLite = {
   id: string;
@@ -181,6 +185,17 @@ export async function resolveConversaTransition(input: {
   variables: Record<string, unknown>;
   conversationId?: string;
 }): Promise<{ nextNodeId: string | null; transitionId: string | null; reason: string }> {
+  if (detectHumanHandoffRequest(input.userMessage)) {
+    const humanTransition = matchHumanHandoffTransition(input.transitions);
+    if (humanTransition) {
+      return {
+        nextNodeId: humanTransition.next_node_id,
+        transitionId: humanTransition.id,
+        reason: "Pedido de atendimento humano (regra determinística).",
+      };
+    }
+  }
+
   if (!input.transitions.length) {
     return {
       nextNodeId: input.defaultNextNodeId,

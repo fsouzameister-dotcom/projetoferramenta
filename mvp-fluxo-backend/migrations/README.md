@@ -16,7 +16,10 @@ npm run migrate
 | Arquivo | Conteúdo |
 |---------|----------|
 | `001_schema_migrations.sql` | Tabela de controle `schema_migrations` |
-| `002_cadastro_mailing.sql` | `clients`, `client_phones`, `mailings`, `mailing_recipients` + `client_id` em `agent_conversations` |
+| `009_ai_insights.sql` | Insights IA (jobs, templates) |
+| `010_agent_bot_conversation_dedup.sql` | Fecha `bot_only` duplicadas por telefone; índice único parcial |
+
+Ver também: [INBOUND-ROUTING-E-HANDOFF.md](../../docs/flows/INBOUND-ROUTING-E-HANDOFF.md)
 
 ## Modelo proposto (cadastro mestre)
 

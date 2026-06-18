@@ -203,11 +203,25 @@ async function clearSessionFromConversation(input: {
       `UPDATE agent_conversations
        SET metadata = metadata - 'inbound_flow_session'
        WHERE tenant_id = $1::uuid
-         AND lifecycle_status = 'open'
-         AND regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') = $2`,
+         AND regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') = $2
+         AND metadata ? 'inbound_flow_session'`,
       [input.tenantId, digits]
     );
   }
+}
+
+async function isConversationOpenForSession(input: {
+  tenantId: string;
+  conversationId: string;
+}): Promise<boolean> {
+  const result = await pool.query<{ open: boolean }>(
+    `SELECT lifecycle_status = 'open' AS open
+     FROM agent_conversations
+     WHERE id = $1::uuid AND tenant_id = $2::uuid
+     LIMIT 1`,
+    [input.conversationId.trim(), input.tenantId]
+  );
+  return result.rows[0]?.open === true;
 }
 
 export async function loadInboundFlowSession(input: {
@@ -217,7 +231,24 @@ export async function loadInboundFlowSession(input: {
   conversationId?: string;
 }): Promise<StoredInboundFlowSession | null> {
   const fromRedis = await loadSessionFromRedis(input.tenantId, input.contactKey);
-  if (fromRedis) return fromRedis;
+  if (fromRedis) {
+    const sessionConversationId = fromRedis.conversationId?.trim();
+    if (
+      sessionConversationId &&
+      !(await isConversationOpenForSession({
+        tenantId: input.tenantId,
+        conversationId: sessionConversationId,
+      }))
+    ) {
+      await clearSessionFromRedis(input.tenantId, input.contactKey);
+      await clearSessionFromConversation({
+        tenantId: input.tenantId,
+        conversationId: sessionConversationId,
+      });
+    } else {
+      return fromRedis;
+    }
+  }
 
   const fromDb = await loadSessionFromConversation(input);
   if (fromDb) {

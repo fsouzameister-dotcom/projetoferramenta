@@ -235,6 +235,20 @@ export async function executeConversaNode(
     };
   }
 
+  if (transitionTarget?.type === "transferir_agente") {
+    return {
+      message: null,
+      nextNodeId: transition.nextNodeId,
+      awaitingInput: false,
+      details: {
+        executionMode: "rigid",
+        transitionId: transition.transitionId,
+        transitionReason: transition.reason,
+        deferredToHandoff: true,
+      },
+    };
+  }
+
   const systemPrompt = await buildFlowSystemPrompt({
     settings,
     globalNodes,

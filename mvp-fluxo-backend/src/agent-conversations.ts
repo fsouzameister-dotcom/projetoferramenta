@@ -1087,37 +1087,86 @@ async function getOrCreateBotPhaseConversation(input: {
 }): Promise<{ id: string; freshBotSession: boolean }> {
   const digits = phoneDigitsOnly(input.phone);
   const displayPhone = normalizeWaIdToPhone(input.phone);
-  const existing = await pool.query<{ id: string }>(
-    `SELECT id
-     FROM agent_conversations
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))`, [
+      `bot:${input.tenantId}:${digits}`,
+    ]);
+
+    const existing = await client.query<{ id: string }>(
+      `SELECT id
+       FROM agent_conversations
+       WHERE tenant_id = $1::uuid
+         AND lifecycle_status = 'open'
+         AND COALESCE(metadata->>'bot_only', 'false') = 'true'
+         AND regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') = $2
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      [input.tenantId, digits]
+    );
+    if (existing.rows[0]?.id) {
+      await client.query("COMMIT");
+      return { id: existing.rows[0].id, freshBotSession: false };
+    }
+
+    const created = await client.query<{ id: string }>(
+      `INSERT INTO agent_conversations (tenant_id, contact_name, phone, status, tags, lifecycle_status, metadata)
+       VALUES ($1, $2, $3, 'em_espera', '[]'::jsonb, 'open', $4::jsonb)
+       RETURNING id`,
+      [
+        input.tenantId,
+        input.contactName?.trim() || displayPhone,
+        displayPhone,
+        JSON.stringify({ bot_only: true }),
+      ]
+    );
+    await client.query("COMMIT");
+    await ensureConversationProtocol({
+      tenantId: input.tenantId,
+      conversationId: created.rows[0].id,
+    });
+    return { id: created.rows[0].id, freshBotSession: true };
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+/** Encerra conversas bot_only abertas do mesmo telefone (reinício de fluxo por gatilho). */
+export async function archiveOpenBotConversationsForPhone(input: {
+  tenantId: string;
+  phone: string;
+  exceptConversationId?: string;
+  closedBy?: string;
+}): Promise<number> {
+  await ensureSchema();
+  const digits = phoneDigitsOnly(input.phone);
+  if (!digits) return 0;
+
+  const result = await pool.query<{ id: string }>(
+    `UPDATE agent_conversations
+     SET lifecycle_status = 'closed_manual',
+         status = 'historico',
+         closed_at = now(),
+         closed_by = $4,
+         updated_at = now()
      WHERE tenant_id = $1::uuid
        AND lifecycle_status = 'open'
        AND COALESCE(metadata->>'bot_only', 'false') = 'true'
        AND regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') = $2
-     ORDER BY updated_at DESC
-     LIMIT 1`,
-    [input.tenantId, digits]
-  );
-  if (existing.rows[0]?.id) {
-    return { id: existing.rows[0].id, freshBotSession: false };
-  }
-
-  const created = await pool.query<{ id: string }>(
-    `INSERT INTO agent_conversations (tenant_id, contact_name, phone, status, tags, lifecycle_status, metadata)
-     VALUES ($1, $2, $3, 'em_espera', '[]'::jsonb, 'open', $4::jsonb)
+       AND ($3::uuid IS NULL OR id <> $3::uuid)
      RETURNING id`,
     [
       input.tenantId,
-      input.contactName?.trim() || displayPhone,
-      displayPhone,
-      JSON.stringify({ bot_only: true }),
+      digits,
+      input.exceptConversationId ?? null,
+      input.closedBy?.trim() || "system:inbound_restart",
     ]
   );
-  await ensureConversationProtocol({
-    tenantId: input.tenantId,
-    conversationId: created.rows[0].id,
-  });
-  return { id: created.rows[0].id, freshBotSession: true };
+  return result.rowCount ?? 0;
 }
 
 /** Grava inbound do WhatsApp na conversa oculta do bot (histórico da IA, fora da inbox do agente). */

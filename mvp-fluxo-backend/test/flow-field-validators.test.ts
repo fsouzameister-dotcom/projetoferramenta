@@ -101,6 +101,10 @@ describe("flow-field-validators", () => {
       true
     );
     assert.strictEqual(matchesInboundTrigger("oi", ["cadastrar-se"]), false);
+    assert.strictEqual(
+      matchesInboundTrigger("Olá! Quero conhecer o ClientOn.", ["quero conhecer o clienton"]),
+      true
+    );
   });
 
   test("valuesMatchForFlowDecision Fox entrada", () => {

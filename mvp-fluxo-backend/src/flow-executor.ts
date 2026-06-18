@@ -24,6 +24,10 @@ import { executeTransferirAgenteNode } from "./transferir-agente";
 import { recordFlowResponseEvent } from "./flow-response-events";
 import { ApiError, ERROR_CODES } from "./http";
 import { generateAiText } from "./ai";
+import {
+  detectHumanHandoffRequest,
+  findPreferredHandoffNodeId,
+} from "./flow-human-handoff";
 import { executeConversaNode } from "./execute-conversa-node";
 import { buildConversaAwaiting } from "./flow-conversa-node";
 import { parseJsonFromModel, normalizeFlowVariableName, normalizeMensagemTestUserInput } from "./flow-executor-utils";
@@ -865,6 +869,37 @@ export async function executeFlow(
       variables.last_user_message = Array.isArray(flowUserInput)
         ? flowUserInput.join(", ")
         : String(flowUserInput);
+    }
+
+    if (
+      flowUserInput !== undefined &&
+      !captureInputConsumed &&
+      currentNode.type !== "transferir_agente"
+    ) {
+      const rawHandoffInput = Array.isArray(flowUserInput)
+        ? flowUserInput.join(" ")
+        : String(flowUserInput);
+      if (detectHumanHandoffRequest(rawHandoffInput)) {
+        const handoffNodeId = findPreferredHandoffNodeId(allNodesLite);
+        if (handoffNodeId) {
+          captureInputConsumed = true;
+          flowUserInput = undefined;
+          delete variables.last_user_message;
+          delete variables.user_message;
+          const handoffNode = nodesById.get(handoffNodeId);
+          if (handoffNode) {
+            trace.push({
+              nodeId: currentNode.id,
+              nodeType: currentNode.type,
+              nodeName: currentNode.name,
+              nextNodeId: handoffNodeId,
+              details: { humanHandoffInterrupt: true },
+            });
+            currentNode = handoffNode;
+            continue;
+          }
+        }
+      }
     }
 
     let nextNodeId: string | null = null;

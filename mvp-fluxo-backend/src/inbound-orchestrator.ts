@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import {
+  archiveOpenBotConversationsForPhone,
   recordBotOutboundMessage,
   recordBotPhaseInboundMessage,
   recordInboundWhatsAppMessage,
@@ -30,7 +32,9 @@ import { redis } from "./redis";
 import { buildCtwaSourceKey, type CtwaReferral } from "./ctwa-referral";
 
 const CLAIM_PREFIX = "inbound:flow:claim:";
+const PHONE_CLAIM_PREFIX = "inbound:flow:phone-claim:";
 const CLAIM_TTL_SEC = 60 * 60 * 24; // 24h
+const PHONE_CLAIM_TTL_SEC = 20;
 /** Limite de textos enviados por um único inbound (evita rajada por bug de fluxo). */
 const MAX_OUTBOUND_PER_INBOUND = 3;
 
@@ -80,6 +84,36 @@ async function claimInboundProviderMessage(
   } catch {
     return true;
   }
+}
+
+/** Evita processar o mesmo texto do mesmo telefone em webhooks paralelos (Meta + Twilio). */
+async function claimInboundPhoneMessage(
+  tenantId: string,
+  phone: string | undefined,
+  messageText: string
+): Promise<boolean> {
+  const digits = phone?.trim() ? phoneDigitsOnly(phone) : "";
+  const text = messageText.trim();
+  if (!digits || !text) return true;
+  try {
+    const digest = createHash("sha256")
+      .update(`${digits}:${text.toLowerCase()}`)
+      .digest("hex")
+      .slice(0, 16);
+    const key = `${PHONE_CLAIM_PREFIX}${tenantId}:${digest}`;
+    const result = await redis.set(key, "1", "EX", PHONE_CLAIM_TTL_SEC, "NX");
+    return result === "OK";
+  } catch {
+    return true;
+  }
+}
+
+function isInboundRestartRoute(route: {
+  metadata: Record<string, unknown>;
+} | null): boolean {
+  if (!route) return false;
+  const triggers = route.metadata?.message_triggers;
+  return Array.isArray(triggers) && triggers.length > 0;
 }
 
 function buildWhatsAppSendContext(
@@ -276,6 +310,43 @@ export async function processInboundMessage(
     return { routed: false, conversationId: botGate.conversationId ?? conversationId };
   }
 
+  const campaignRouteRaw = await resolveCampaignInboundRoute({
+    tenantId: input.tenantId,
+    phone: input.phone,
+  });
+
+  const ctwaRoute =
+    !campaignRouteRaw && input.ctwaReferral
+      ? await resolveCtwaInboundRoute({
+          tenantId: input.tenantId,
+          referral: input.ctwaReferral,
+        })
+      : null;
+
+  const messageRouteEarly = ctwaRoute
+    ? null
+    : await resolveInboundRouteByFirstMessage({
+        tenantId: input.tenantId,
+        sourceType: input.sourceType,
+        sourceKey: input.sourceKey,
+        messageText,
+      });
+
+  const inboundRestart = isInboundRestartRoute(messageRouteEarly);
+  const campaignRoute = inboundRestart || ctwaRoute ? null : campaignRouteRaw;
+
+  if (inboundRestart && input.phone?.trim() && !ctwaRoute) {
+    await clearInboundFlowSessionForPhone(input.tenantId, input.phone);
+    await archiveOpenBotConversationsForPhone({
+      tenantId: input.tenantId,
+      phone: input.phone,
+    });
+  }
+
+  if (!(await claimInboundPhoneMessage(input.tenantId, input.phone, messageText))) {
+    return { routed: false, conversationId };
+  }
+
   let freshBotSession = false;
   if (input.phone && input.providerMessageId) {
     const recorded = await recordBotPhaseInboundMessage({
@@ -296,19 +367,6 @@ export async function processInboundMessage(
     freshBotSession = recorded.freshBotSession;
   }
 
-  const campaignRoute = await resolveCampaignInboundRoute({
-    tenantId: input.tenantId,
-    phone: input.phone,
-  });
-
-  const ctwaRoute =
-    !campaignRoute && input.ctwaReferral
-      ? await resolveCtwaInboundRoute({
-          tenantId: input.tenantId,
-          referral: input.ctwaReferral,
-        })
-      : null;
-
   if (campaignRoute && input.phone) {
     await markCampaignRecipientResponded({
       tenantId: input.tenantId,
@@ -321,16 +379,6 @@ export async function processInboundMessage(
       conversationId = campaignRoute.conversationId;
     }
   }
-
-  const messageRouteEarly =
-    campaignRoute || ctwaRoute
-    ? null
-    : await resolveInboundRouteByFirstMessage({
-        tenantId: input.tenantId,
-        sourceType: input.sourceType,
-        sourceKey: input.sourceKey,
-        messageText,
-      });
 
   if ((freshBotSession || messageRouteEarly) && input.phone?.trim() && !campaignRoute && !ctwaRoute) {
     await clearInboundFlowSession({
@@ -359,6 +407,18 @@ export async function processInboundMessage(
         contactKey,
         phone: input.phone,
         conversationId,
+      });
+      existingSession = null;
+    }
+  }
+  if (existingSession) {
+    const sessionConversationId = existingSession.conversationId?.trim();
+    if (sessionConversationId && sessionConversationId !== conversationId?.trim()) {
+      await clearInboundFlowSession({
+        tenantId: input.tenantId,
+        contactKey,
+        phone: input.phone,
+        conversationId: sessionConversationId,
       });
       existingSession = null;
     }
