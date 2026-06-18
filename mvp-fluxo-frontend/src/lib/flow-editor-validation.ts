@@ -1,3 +1,5 @@
+import { isFlowVariableRef } from "./flow-variable-ref";
+
 type FlowNodeLike = {
   id: string;
   type?: string;
@@ -24,7 +26,7 @@ function cfg(node: FlowNodeLike): Record<string, unknown> {
 }
 
 function isVariableRef(value: unknown): boolean {
-  return typeof value === "string" && /^\{\{\s*[\w.]+\s*\}\}$/.test(value.trim());
+  return typeof value === "string" && isFlowVariableRef(value);
 }
 
 function hasOutgoingConnection(node: FlowNodeLike, edgeSources: Set<string>): boolean {

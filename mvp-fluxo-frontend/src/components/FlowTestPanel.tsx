@@ -243,7 +243,7 @@ export default function FlowTestPanel({
       );
       return;
     }
-    submitUserInput(optionId, optionLabel ?? optionId);
+    submitUserInput(optionLabel ?? optionId, optionLabel);
   };
 
   const handleSubmitMulti = () => {

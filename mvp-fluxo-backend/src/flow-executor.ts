@@ -26,7 +26,7 @@ import { ApiError, ERROR_CODES } from "./http";
 import { generateAiText } from "./ai";
 import { executeConversaNode } from "./execute-conversa-node";
 import { buildConversaAwaiting } from "./flow-conversa-node";
-import { parseJsonFromModel } from "./flow-executor-utils";
+import { parseJsonFromModel, normalizeFlowVariableName, normalizeMensagemTestUserInput } from "./flow-executor-utils";
 import { listNodesByFlow } from "./nodes";
 import { executeTabulacaoNode, parseTabulacaoNodeConfig } from "./tabulacao-node";
 import {
@@ -125,8 +125,7 @@ function pickPath(source: unknown, path: string): unknown {
 
 
 function unwrapVariableRef(raw: string): string {
-  const match = raw.trim().match(/^\{\{(\w+)\}\}$/);
-  return match ? match[1] : raw.trim();
+  return normalizeFlowVariableName(raw);
 }
 
 function parseTimeToMinutes(value: string): number | null {
@@ -208,12 +207,18 @@ function evaluateDecisionRule(
       : "";
   const leftValue = variables[variableName];
   let result = compareValues(leftValue, operator, comparisonValue);
-  if (
-    !result &&
-    operator === "igual_a" &&
-    FLEXIBLE_DECISION_VARIABLES.has(variableName)
-  ) {
+  if (!result && operator === "igual_a") {
     result = valuesMatchForFlowDecision(leftValue, comparisonValue);
+    if (!result) {
+      const labels = variables[`${variableName}_labels`];
+      if (Array.isArray(labels)) {
+        result = labels.some(
+          (label) =>
+            compareValues(label, "igual_a", comparisonValue) ||
+            valuesMatchForFlowDecision(label, comparisonValue)
+        );
+      }
+    }
   }
   return { result, variableName, leftValue, operator, comparisonValue };
 }
@@ -878,11 +883,14 @@ export async function executeFlow(
         const rawInput = Array.isArray(input.userInput)
           ? input.userInput.join(", ")
           : String(input.userInput);
-        variables.last_user_message = rawInput;
+        const normalizedInput = normalizeMensagemTestUserInput(parsedMsg, rawInput);
+        variables.last_user_message = normalizedInput;
+        flowUserInput = normalizedInput;
         nextNodeId = parsedMsg.nextNodeId;
         details = {
           testInteractiveResume: true,
-          userInput: rawInput,
+          userInput: normalizedInput,
+          rawUserInput: rawInput,
           interactiveType: parsedMsg.interactiveType,
         };
       } else {

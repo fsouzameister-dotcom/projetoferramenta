@@ -1,4 +1,5 @@
 import { Handle, Position } from "reactflow";
+import { formatFlowVariableDisplay } from "../lib/flow-variable-ref";
 
 export const ConversaNode = ({ data }: { data: any }) => {
   const isGlobal = data.config?.isGlobal === true;
@@ -334,7 +335,8 @@ export const DecisaoNode = ({ data }: { data: any }) => (
           </div>
         ) : data.config?.variable ? (
           <div className="text-xs text-yellow-300 mt-1">
-            SE {`{{${data.config.variable}}}`} {data.config.operator?.replace(/_/g, " ")}{" "}
+            SE {formatFlowVariableDisplay(String(data.config.variable))}{" "}
+            {data.config.operator?.replace(/_/g, " ")}{" "}
             {data.config.comparisonValue && `"${data.config.comparisonValue}"`}
           </div>
         ) : null}

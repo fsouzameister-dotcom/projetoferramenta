@@ -17,6 +17,10 @@ import FlowAiSettingsPanel from "../components/FlowAiSettingsPanel";
 import FlowTestPanel from "../components/FlowTestPanel";
 import PersonaSelect from "../components/PersonaSelect";
 import { collectFlowEditorWarnings } from "../lib/flow-editor-validation";
+import {
+  isFlowVariableRef,
+  toStoredFlowVariableRef,
+} from "../lib/flow-variable-ref";
 import { nodeTypes } from "../components/flownodes"; // Seus tipos de nós personalizados
 
 // REMOVA ESTA LINHA: const tenantId = "1be433d5-f15b-4764-9a85-e88f3bc88732";
@@ -816,6 +820,34 @@ export default function FlowEditor() {
           staticSpeech:
             mode === "static" ? editNodeContent : editNodeConfig.staticSpeech || "",
         };
+      }
+      if (nodeType === "decisao") {
+        const mode = editNodeConfig.decisionMode || "simple";
+        if (mode === "simple" && typeof configPayload.variable === "string") {
+          configPayload.variable = toStoredFlowVariableRef(configPayload.variable);
+        }
+        if (mode === "combined" && Array.isArray(configPayload.rules)) {
+          configPayload.rules = (
+            configPayload.rules as Array<{ variable?: string }>
+          ).map((rule) => ({
+            ...rule,
+            variable:
+              typeof rule.variable === "string"
+                ? toStoredFlowVariableRef(rule.variable)
+                : rule.variable,
+          }));
+        }
+        if (mode === "multi_branch" && Array.isArray(configPayload.routeRules)) {
+          configPayload.routeRules = (
+            configPayload.routeRules as Array<{ variable?: string }>
+          ).map((rule) => ({
+            ...rule,
+            variable:
+              typeof rule.variable === "string"
+                ? toStoredFlowVariableRef(rule.variable)
+                : rule.variable,
+          }));
+        }
       }
 
       const response = await api.put(`/flows/${flowId}/nodes/${editingNodeId}`, {
@@ -2921,7 +2953,7 @@ export default function FlowEditor() {
                         className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
                       />
                       {editNodeConfig.variable &&
-                      !/^\{\{\s*[\w.]+\s*\}\}$/.test(String(editNodeConfig.variable).trim()) ? (
+                      !isFlowVariableRef(String(editNodeConfig.variable)) ? (
                         <p className="mt-1 text-xs text-amber-700">
                           Use o formato {"{{nome_da_variavel}}"} (ex.: {"{{mensagem_recebida}}"}). Valor
                           fixo não lê a resposta do cliente.
