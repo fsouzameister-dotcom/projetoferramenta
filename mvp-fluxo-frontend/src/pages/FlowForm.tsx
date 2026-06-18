@@ -90,7 +90,7 @@ export default function FlowForm() {
         });
       }
 
-      navigate("/dashboard");
+      navigate("/flows");
     } catch (err) {
       console.error("Erro ao salvar fluxo:", err);
       setError(getApiErrorMessage(err, "Erro ao salvar o fluxo. Tente novamente."));
@@ -183,7 +183,7 @@ export default function FlowForm() {
           <div className="flex gap-4">
             <button
               type="button"
-              onClick={() => navigate("/dashboard")}
+              onClick={() => navigate("/flows")}
               disabled={submitting}
               className="flex-1 px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
             >
