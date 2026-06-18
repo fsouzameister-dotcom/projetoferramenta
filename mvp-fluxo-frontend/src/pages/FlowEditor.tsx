@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import ReactFlow, {
   addEdge,
@@ -16,6 +16,7 @@ import api, { getApiErrorMessage, unwrapApiData } from "../api/client"; // Impor
 import FlowAiSettingsPanel from "../components/FlowAiSettingsPanel";
 import FlowTestPanel from "../components/FlowTestPanel";
 import PersonaSelect from "../components/PersonaSelect";
+import { collectFlowEditorWarnings } from "../lib/flow-editor-validation";
 import { nodeTypes } from "../components/flownodes"; // Seus tipos de nós personalizados
 
 // REMOVA ESTA LINHA: const tenantId = "1be433d5-f15b-4764-9a85-e88f3bc88732";
@@ -148,6 +149,8 @@ export default function FlowEditor() {
   const [tourStepIndex, setTourStepIndex] = useState(0);
   const [showFlowTest, setShowFlowTest] = useState(false);
   const [showTestSaveConfirm, setShowTestSaveConfirm] = useState(false);
+
+  const flowWarnings = useMemo(() => collectFlowEditorWarnings(nodes), [nodes]);
 
   const goToFlowsList = () => navigate("/flows");
 
@@ -1379,6 +1382,33 @@ export default function FlowEditor() {
           ?
         </button>
       </header>
+
+      {flowWarnings.length > 0 ? (
+        <div className="shrink-0 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2">
+          <p className="text-xs font-medium text-amber-200 mb-1">
+            Avisos de configuração ({flowWarnings.length})
+          </p>
+          <ul className="text-[11px] text-amber-100/90 space-y-0.5 max-h-24 overflow-y-auto">
+            {flowWarnings.map((w) => (
+              <li key={`${w.nodeId}-${w.message.slice(0, 24)}`}>
+                <button
+                  type="button"
+                  className="text-left hover:underline"
+                  onClick={() => {
+                    setSelectedNodeId(w.nodeId);
+                    setSelectedNodeType(
+                      nodes.find((n) => n.id === w.nodeId)?.data?.type ?? null
+                    );
+                    setShowFlowAiSettings(false);
+                  }}
+                >
+                  <span className="font-medium">{w.nodeName}:</span> {w.message}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       <div className="flex flex-1 min-h-0">
       {/* Painel Esquerdo */}
@@ -2887,9 +2917,16 @@ export default function FlowEditor() {
                         onChange={(e) =>
                           setEditNodeConfig({ ...editNodeConfig, variable: e.target.value })
                         }
-                        placeholder="nome_da_variavel"
+                        placeholder="{{mensagem_recebida}}"
                         className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
                       />
+                      {editNodeConfig.variable &&
+                      !/^\{\{\s*[\w.]+\s*\}\}$/.test(String(editNodeConfig.variable).trim()) ? (
+                        <p className="mt-1 text-xs text-amber-700">
+                          Use o formato {"{{nome_da_variavel}}"} (ex.: {"{{mensagem_recebida}}"}). Valor
+                          fixo não lê a resposta do cliente.
+                        </p>
+                      ) : null}
                     </div>
                     <div className="mb-4">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -3298,6 +3335,7 @@ export default function FlowEditor() {
         <FlowTestPanel
           flowId={flowId}
           flowName={flowData?.name}
+          warnings={flowWarnings}
           onClose={() => setShowFlowTest(false)}
         />
       ) : null}

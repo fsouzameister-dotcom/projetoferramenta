@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import api, { getApiErrorMessage, unwrapApiData } from "../api/client";
+import type { FlowEditorWarning } from "../lib/flow-editor-validation";
 
 type FlowOutboundMessage = {
   kind: "text" | "interactive_buttons" | "interactive_list";
@@ -59,6 +60,7 @@ type TestSession = {
 type FlowTestPanelProps = {
   flowId: string;
   flowName?: string;
+  warnings?: FlowEditorWarning[];
   onClose: () => void;
 };
 
@@ -85,7 +87,12 @@ function fallbackBotEntries(messages: string[], fromIndex: number): ChatEntry[] 
   }));
 }
 
-export default function FlowTestPanel({ flowId, flowName, onClose }: FlowTestPanelProps) {
+export default function FlowTestPanel({
+  flowId,
+  flowName,
+  warnings = [],
+  onClose,
+}: FlowTestPanelProps) {
   const [chat, setChat] = useState<ChatEntry[]>([]);
   const [trace, setTrace] = useState<ExecuteFlowResult["trace"]>([]);
   const [session, setSession] = useState<TestSession>({
@@ -178,7 +185,7 @@ export default function FlowTestPanel({ flowId, flowName, onClose }: FlowTestPan
       {
         id: nextChatId(),
         role: "system",
-        text: "Modo teste — sem canal. Nenhuma mensagem será enviada ao WhatsApp.",
+        text: "Modo teste — sem canal. Mensagens com botões pausam até você clicar.",
       },
     ]);
     setTrace([]);
@@ -202,20 +209,22 @@ export default function FlowTestPanel({ flowId, flowName, onClose }: FlowTestPan
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat, running]);
 
-  const submitUserInput = (input: string | string[]) => {
-    const display =
-      Array.isArray(input) ? input.join(", ") : input;
-    setChat((prev) => [...prev, { id: nextChatId(), role: "user", text: display }]);
+  const submitUserInput = useCallback(
+    (input: string | string[], displayLabel?: string) => {
+      const display = displayLabel ?? (Array.isArray(input) ? input.join(", ") : input);
+      setChat((prev) => [...prev, { id: nextChatId(), role: "user", text: display }]);
 
-    if (!session.currentNodeId) return;
+      if (!session.currentNodeId) return;
 
-    void runExecute({
-      startNodeId: session.currentNodeId,
-      userInput: input,
-      variables: session.variables,
-      awaitingStartedAt: session.awaitingStartedAt,
-    });
-  };
+      void runExecute({
+        startNodeId: session.currentNodeId,
+        userInput: input,
+        variables: session.variables,
+        awaitingStartedAt: session.awaitingStartedAt,
+      });
+    },
+    [runExecute, session]
+  );
 
   const handleSendText = () => {
     const trimmed = textInput.trim();
@@ -223,7 +232,7 @@ export default function FlowTestPanel({ flowId, flowName, onClose }: FlowTestPan
     submitUserInput(trimmed);
   };
 
-  const handleChoice = (optionId: string) => {
+  const handleChoice = (optionId: string, optionLabel?: string) => {
     if (running || session.status !== "awaiting_input") return;
     const awaiting = session.awaitingInput;
     if (!awaiting) return;
@@ -234,7 +243,7 @@ export default function FlowTestPanel({ flowId, flowName, onClose }: FlowTestPan
       );
       return;
     }
-    submitUserInput(optionId);
+    submitUserInput(optionId, optionLabel ?? optionId);
   };
 
   const handleSubmitMulti = () => {
@@ -306,6 +315,17 @@ export default function FlowTestPanel({ flowId, flowName, onClose }: FlowTestPan
         </button>
       </div>
 
+      {warnings.length > 0 ? (
+        <div className="shrink-0 border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 max-h-20 overflow-y-auto">
+          <p className="text-[10px] font-medium text-amber-200 mb-0.5">Avisos do fluxo</p>
+          {warnings.slice(0, 4).map((w) => (
+            <p key={`${w.nodeId}-${w.message}`} className="text-[10px] text-amber-100/90 leading-snug">
+              {w.nodeName}: {w.message}
+            </p>
+          ))}
+        </div>
+      ) : null}
+
       <div className="flex gap-1 border-b border-[#334155] px-3 py-2 shrink-0">
         <button
           type="button"
@@ -372,21 +392,33 @@ export default function FlowTestPanel({ flowId, flowName, onClose }: FlowTestPan
               {entry.outbound?.kind === "interactive_buttons" && entry.outbound.buttons?.length ? (
                 <div className="mt-2 flex flex-wrap gap-1">
                   {entry.outbound.buttons.map((btn) => (
-                    <span
+                    <button
                       key={btn.id}
-                      className="rounded border border-[#475569] px-2 py-0.5 text-[11px] text-gray-300"
+                      type="button"
+                      disabled={!canInteract}
+                      onClick={() => handleChoice(btn.id, btn.label)}
+                      className="rounded border border-teal-500/50 px-2 py-1 text-[11px] text-teal-100 hover:bg-teal-500/20 disabled:opacity-40 disabled:cursor-default"
                     >
                       {btn.label}
-                    </span>
+                    </button>
                   ))}
                 </div>
               ) : null}
               {entry.outbound?.kind === "interactive_list" && entry.outbound.listItems?.length ? (
-                <ul className="mt-2 space-y-1 text-[11px] text-gray-400">
+                <ul className="mt-2 space-y-1">
                   {entry.outbound.listItems.map((item) => (
                     <li key={item.id}>
-                      • {item.label}
-                      {item.description ? ` — ${item.description}` : ""}
+                      <button
+                        type="button"
+                        disabled={!canInteract}
+                        onClick={() => handleChoice(item.id, item.label)}
+                        className="w-full rounded border border-teal-500/40 px-2 py-1 text-left text-[11px] text-gray-200 hover:bg-teal-500/10 disabled:opacity-40 disabled:cursor-default"
+                      >
+                        {item.label}
+                        {item.description ? (
+                          <span className="block text-gray-500">{item.description}</span>
+                        ) : null}
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -420,7 +452,7 @@ export default function FlowTestPanel({ flowId, flowName, onClose }: FlowTestPan
                   key={opt.id}
                   type="button"
                   disabled={!canInteract}
-                  onClick={() => handleChoice(opt.id)}
+                  onClick={() => handleChoice(opt.id, opt.label)}
                   className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition-colors disabled:opacity-50 ${
                     selected
                       ? "border-teal-500 bg-teal-500/20 text-teal-100"
@@ -491,8 +523,8 @@ export default function FlowTestPanel({ flowId, flowName, onClose }: FlowTestPan
         ) : null}
 
         <p className="text-[10px] text-gray-500 leading-snug">
-          Nodes de API e IA executam de verdade (podem gerar custo). WhatsApp, relatórios e fila de
-          agente não são acionados.
+          Decisão avalia variáveis na hora — não espera texto. Use Receber/Capturar antes, ou
+          clique nos botões da mensagem quando o fluxo pausar.
         </p>
       </div>
     </div>

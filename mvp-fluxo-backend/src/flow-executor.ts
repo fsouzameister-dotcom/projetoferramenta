@@ -218,6 +218,43 @@ function evaluateDecisionRule(
   return { result, variableName, leftValue, operator, comparisonValue };
 }
 
+function buildMensagemTestAwaiting(
+  nodeId: string,
+  outbound: FlowOutboundMessage
+): CapturarEntradaAwaiting | null {
+  const awaitingStartedAt = new Date().toISOString();
+  if (outbound.kind === "interactive_buttons" && outbound.buttons?.length) {
+    return {
+      nodeId,
+      prompt: outbound.body,
+      promptKey: "mensagem_interactive",
+      inputMode: "single_choice",
+      options: outbound.buttons.map((btn) => ({ id: btn.id, label: btn.label })),
+      minSelections: 1,
+      maxSelections: 1,
+      variableName: "last_user_message",
+      awaitingStartedAt,
+    };
+  }
+  if (outbound.kind === "interactive_list" && outbound.listItems?.length) {
+    return {
+      nodeId,
+      prompt: outbound.body,
+      promptKey: "mensagem_interactive",
+      inputMode: "single_choice",
+      options: outbound.listItems.map((item) => ({
+        id: item.id,
+        label: item.label,
+      })),
+      minSelections: 1,
+      maxSelections: 1,
+      variableName: "last_user_message",
+      awaitingStartedAt,
+    };
+  }
+  return null;
+}
+
 
 async function executeApiCallNode(
   config: FlowConfig,
@@ -832,20 +869,67 @@ export async function executeFlow(
       nextNodeId = typeof config.next_node_id === "string" ? config.next_node_id : null;
     } else if (currentNode.type === "mensagem") {
       const parsedMsg = parseMensagemNodeConfig(config);
-      if (parsedMsg.sendDelaySeconds > 0) {
-        await sleepMs(parsedMsg.sendDelaySeconds * 1000);
+      const isTestInteractiveResume =
+        Boolean(input.testMode) &&
+        input.userInput !== undefined &&
+        input.startNodeId === currentNode.id;
+
+      if (isTestInteractiveResume) {
+        const rawInput = Array.isArray(input.userInput)
+          ? input.userInput.join(", ")
+          : String(input.userInput);
+        variables.last_user_message = rawInput;
+        nextNodeId = parsedMsg.nextNodeId;
+        details = {
+          testInteractiveResume: true,
+          userInput: rawInput,
+          interactiveType: parsedMsg.interactiveType,
+        };
+      } else {
+        if (parsedMsg.sendDelaySeconds > 0) {
+          await sleepMs(parsedMsg.sendDelaySeconds * 1000);
+        }
+        const msgResult = executeMensagemNode({
+          config,
+          variables,
+          resolveTemplate: (text) => resolveTemplate(text, variables),
+        });
+        for (const m of msgResult.messages) {
+          messages.push(m);
+        }
+        outboundMessages.push(...msgResult.outboundMessages);
+        nextNodeId = msgResult.nextNodeId;
+        details = msgResult.details;
+
+        const interactiveOutbound = msgResult.outboundMessages.find(
+          (msg) => msg.kind === "interactive_buttons" || msg.kind === "interactive_list"
+        );
+        const testAwaiting =
+          input.testMode && interactiveOutbound && nextNodeId
+            ? buildMensagemTestAwaiting(currentNode.id, interactiveOutbound)
+            : null;
+
+        if (testAwaiting) {
+          trace.push({
+            nodeId: currentNode.id,
+            nodeType: currentNode.type,
+            nodeName: currentNode.name,
+            nextNodeId: null,
+            details: { ...details, awaitingInteractive: true },
+          });
+          return {
+            flowId,
+            status: "awaiting_input",
+            visitedNodeIds,
+            currentNodeId: currentNode.id,
+            messages,
+            outboundMessages,
+            variables,
+            trace,
+            awaitingInput: testAwaiting,
+          };
+        }
       }
-      const msgResult = executeMensagemNode({
-        config,
-        variables,
-        resolveTemplate: (text) => resolveTemplate(text, variables),
-      });
-      for (const m of msgResult.messages) {
-        messages.push(m);
-      }
-      outboundMessages.push(...msgResult.outboundMessages);
-      nextNodeId = msgResult.nextNodeId;
-      details = msgResult.details;
     } else if (currentNode.type === "chamada_api") {
       const apiResult = await executeApiCallNode(config, variables);
       nextNodeId = apiResult.nextNodeId;
