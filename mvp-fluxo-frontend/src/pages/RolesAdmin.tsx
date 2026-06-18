@@ -171,7 +171,7 @@ export default function RolesAdmin() {
           {roles.map((role) => (
             <div
               key={role.id}
-              className="bg-white rounded-xl p-4 border border-gray-100 shadow"
+              className="bg-white rounded-xl p-4 border border-gray-100 shadow text-gray-900"
             >
               <div className="flex items-start justify-between gap-2">
                 <div>
@@ -223,12 +223,12 @@ export default function RolesAdmin() {
       )}
 
       {editingId ? (
-        <div className="bg-white rounded-xl p-5 border border-cyan-200 shadow-lg">
+        <div className="bg-white rounded-xl p-5 border border-cyan-200 shadow-lg text-gray-900">
           <h3 className="font-semibold text-gray-900 mb-3">Editar permissões</h3>
           <label className="block text-sm text-gray-700 mb-3">
             Nome de exibição
             <input
-              className="mt-1 w-full border rounded-lg px-3 py-2"
+              className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-gray-900 bg-white"
               value={editLabel}
               onChange={(e) => setEditLabel(e.target.value)}
             />
@@ -276,7 +276,7 @@ export default function RolesAdmin() {
             <button
               type="button"
               onClick={() => setEditingId(null)}
-              className="px-4 py-2 rounded-lg border text-sm"
+              className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 bg-white"
             >
               Cancelar
             </button>
@@ -286,14 +286,14 @@ export default function RolesAdmin() {
 
       <form
         onSubmit={(e) => void createRole(e)}
-        className="bg-white rounded-xl p-5 border border-gray-100 shadow"
+        className="bg-white rounded-xl p-5 border border-gray-100 shadow text-gray-900"
       >
         <h3 className="font-semibold text-gray-900 mb-3">Criar perfil customizado</h3>
         <div className="grid sm:grid-cols-2 gap-3">
           <label className="text-sm text-gray-700">
             Identificador (slug)
             <input
-              className="mt-1 w-full border rounded-lg px-3 py-2"
+              className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-gray-900 bg-white placeholder:text-gray-400"
               placeholder="supervisao_pesquisas"
               value={createForm.name}
               onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value }))}
@@ -303,7 +303,7 @@ export default function RolesAdmin() {
           <label className="text-sm text-gray-700">
             Nome de exibição
             <input
-              className="mt-1 w-full border rounded-lg px-3 py-2"
+              className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-gray-900 bg-white placeholder:text-gray-400"
               placeholder="Supervisão Pesquisas"
               value={createForm.label}
               onChange={(e) => setCreateForm((f) => ({ ...f, label: e.target.value }))}
@@ -317,7 +317,7 @@ export default function RolesAdmin() {
               <p className="text-xs font-semibold text-gray-500 uppercase">{group}</p>
               <div className="mt-2 grid sm:grid-cols-2 gap-2">
                 {items.map((item) => (
-                  <label key={item.key} className="flex items-center gap-2 text-sm">
+                  <label key={item.key} className="flex items-center gap-2 text-sm text-gray-800">
                     <input
                       type="checkbox"
                       checked={createForm.permissions.includes(item.key)}
