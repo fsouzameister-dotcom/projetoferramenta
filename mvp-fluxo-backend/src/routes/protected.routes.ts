@@ -3339,6 +3339,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       phone?: string;
       sessionId?: string;
       persistResponses?: boolean;
+      testMode?: boolean;
     };
   }>(
     "/flows/:flowId/execute",
@@ -3364,6 +3365,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
             phone: { type: "string", minLength: 1 },
             sessionId: { type: "string", minLength: 1 },
             persistResponses: { type: "boolean" },
+            testMode: { type: "boolean" },
           },
         },
         response: {

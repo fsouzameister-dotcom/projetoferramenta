@@ -870,6 +870,14 @@ Objetivo: permitir análises sob demanda sobre conversas, com segurança e rastr
 - response (`200`):
   - `{ data: [{ jobId, status, createdAt }], meta }`
 
+#### Prompts de análise (decisão de produto — híbrido)
+
+- **Template por tenant** (`ai_insight_templates`): `name`, `description`, `system_prompt`, `output_schema` (campos fixos: `summary`, `highlights`, `risks`, `opportunities`, `metrics`), `is_default`, `is_active`. CRUD em Admin → IA → Templates de insight.
+- **Override por execução**: `POST /api/ai/insights/run` aceita `templateId?` e `promptOverride?` (instruções adicionais ou refinamento pontual sem criar template).
+- **Precedência do prompt efetivo**: (1) base da plataforma — formato JSON + segurança; (2) `system_prompt` do template (`templateId` ou default do tenant); (3) `promptOverride` do job; (4) contexto gerado pelo sistema (conversas, métricas) — não editável pelo usuário.
+- **Persistência no job**: `template_id`, `prompt_override`, `resolved_prompt` (auditoria).
+- **RBAC**: admin CRUD de templates + override; supervisor usa templates e override no disparo; agente sem acesso.
+
 #### Ordem de implementação (Sprint 3)
 
 1) jobs assíncronos (fila com Redis/BullMQ).

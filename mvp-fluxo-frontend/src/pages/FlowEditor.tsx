@@ -14,6 +14,7 @@ import ReactFlow, {
 import "reactflow/dist/style.css";
 import api, { getApiErrorMessage, unwrapApiData } from "../api/client"; // Importa o cliente axios configurado
 import FlowAiSettingsPanel from "../components/FlowAiSettingsPanel";
+import FlowTestPanel from "../components/FlowTestPanel";
 import PersonaSelect from "../components/PersonaSelect";
 import { nodeTypes } from "../components/flownodes"; // Seus tipos de nós personalizados
 
@@ -145,6 +146,8 @@ export default function FlowEditor() {
   const [newTabulacaoKey, setNewTabulacaoKey] = useState("");
   const [showTour, setShowTour] = useState(false);
   const [tourStepIndex, setTourStepIndex] = useState(0);
+  const [showFlowTest, setShowFlowTest] = useState(false);
+  const [showTestSaveConfirm, setShowTestSaveConfirm] = useState(false);
 
   const goToFlowsList = () => navigate("/flows");
 
@@ -643,7 +646,7 @@ export default function FlowEditor() {
     }
   };
 
-  const handleSaveFlow = async (): Promise<boolean> => {
+  const handleSaveFlow = async (options?: { silent?: boolean }): Promise<boolean> => {
     if (!flowId || nodes.length === 0) return false;
     setSavingFlow(true);
     try {
@@ -680,7 +683,9 @@ export default function FlowEditor() {
       );
 
       setHasUnsavedChanges(false);
-      alert("Fluxo salvo com sucesso.");
+      if (!options?.silent) {
+        alert("Fluxo salvo com sucesso.");
+      }
       return true;
     } catch (err) {
       console.error("Erro ao salvar fluxo:", err);
@@ -688,6 +693,22 @@ export default function FlowEditor() {
       return false;
     } finally {
       setSavingFlow(false);
+    }
+  };
+
+  const handleOpenFlowTest = () => {
+    if (hasUnsavedChanges) {
+      setShowTestSaveConfirm(true);
+      return;
+    }
+    setShowFlowTest(true);
+  };
+
+  const handleSaveAndOpenFlowTest = async () => {
+    const saved = await handleSaveFlow({ silent: true });
+    if (saved) {
+      setShowTestSaveConfirm(false);
+      setShowFlowTest(true);
     }
   };
 
@@ -1317,6 +1338,14 @@ export default function FlowEditor() {
         </span>
         <button
           type="button"
+          onClick={handleOpenFlowTest}
+          disabled={!flowId || nodes.length === 0}
+          className="px-3 py-2 text-sm font-medium rounded-lg border border-violet-500/50 text-violet-100 hover:bg-violet-500/10 transition-colors disabled:opacity-50"
+        >
+          Testar fluxo
+        </button>
+        <button
+          type="button"
           onClick={() => {
             setShowFlowAiSettings((v) => !v);
             if (!showFlowAiSettings) {
@@ -1334,7 +1363,7 @@ export default function FlowEditor() {
         </button>
         <button
           type="button"
-          onClick={handleSaveFlow}
+          onClick={() => void handleSaveFlow()}
           disabled={savingFlow}
           className="px-4 py-2 bg-teal-600 text-white text-sm font-semibold rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-60"
         >
@@ -3230,6 +3259,48 @@ export default function FlowEditor() {
           </div>
         </div>
       )}
+      {showTestSaveConfirm && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="test-save-title"
+        >
+          <div className="w-full max-w-md rounded-xl border border-[#334155] bg-[#111827] p-6 shadow-2xl">
+            <h2 id="test-save-title" className="text-lg font-semibold text-white mb-2">
+              Salvar antes de testar
+            </h2>
+            <p className="text-sm text-gray-300 mb-6">
+              O teste usa a versão salva do fluxo no servidor. Salve as alterações
+              atuais para validar o que você editou.
+            </p>
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setShowTestSaveConfirm(false)}
+                className="px-4 py-2 rounded-lg border border-[#475569] text-gray-200 hover:bg-[#1e293b] text-sm font-medium"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveAndOpenFlowTest}
+                disabled={savingFlow}
+                className="px-4 py-2 rounded-lg bg-violet-600 text-white hover:bg-violet-700 text-sm font-semibold disabled:opacity-60"
+              >
+                {savingFlow ? "Salvando…" : "Salvar e testar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showFlowTest && flowId ? (
+        <FlowTestPanel
+          flowId={flowId}
+          flowName={flowData?.name}
+          onClose={() => setShowFlowTest(false)}
+        />
+      ) : null}
       {showTour ? (
         <div className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-[#111827] border border-[#334155] rounded-xl p-5">

@@ -72,6 +72,8 @@ export type ExecuteFlowInput = {
   sessionId?: string;
   /** Grava evento analítico (default: true) */
   persistResponses?: boolean;
+  /** Simulador do editor: não agenda timeout em background */
+  testMode?: boolean;
 };
 
 type ExecutionTraceEntry = {
@@ -902,6 +904,7 @@ export async function executeFlow(
         });
         const waitTimeout = parseReceberMensagemConfig(config, currentNode.id).waitTimeout;
         if (
+          !input.testMode &&
           waitTimeout.waitTimeoutSeconds > 0 &&
           waitTimeout.nextNodeIdOnTimeout
         ) {
@@ -968,6 +971,7 @@ export async function executeFlow(
         });
         const waitTimeout = parseFlowWaitTimeoutConfig(config);
         if (
+          !input.testMode &&
           waitTimeout.waitTimeoutSeconds > 0 &&
           waitTimeout.nextNodeIdOnTimeout
         ) {
