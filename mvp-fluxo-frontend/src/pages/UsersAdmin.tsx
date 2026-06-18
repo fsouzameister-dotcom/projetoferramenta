@@ -3,6 +3,11 @@ import { Link } from "react-router-dom";
 import api, { getApiErrorMessage, unwrapApiData } from "../api/client";
 import InfoTooltip from "~components/InfoTooltip";
 import { hasPermission } from "~lib/permissions";
+import {
+  getPasswordPolicyError,
+  PASSWORD_MIN_LENGTH,
+  PASSWORD_POLICY_MESSAGE,
+} from "~lib/password-policy";
 
 type UserRow = {
   id: string;
@@ -112,6 +117,11 @@ export default function UsersAdmin() {
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const passwordError = getPasswordPolicyError(form.password);
+    if (passwordError) {
+      setError(passwordError);
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -143,6 +153,13 @@ export default function UsersAdmin() {
 
   const saveEdit = async () => {
     if (!editingUserId) return;
+    if (editForm.password.trim()) {
+      const passwordError = getPasswordPolicyError(editForm.password);
+      if (passwordError) {
+        setError(passwordError);
+        return;
+      }
+    }
     setSaving(true);
     setError(null);
     try {
@@ -251,7 +268,8 @@ export default function UsersAdmin() {
         </div>
       )}
 
-      <form onSubmit={onSubmit} className="mt-6 bg-white rounded-xl p-6 grid grid-cols-1 md:grid-cols-4 gap-3">
+      <form onSubmit={onSubmit} className="mt-6 bg-white rounded-xl p-6 text-gray-900">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <input
           className="border rounded-lg px-3 py-2 text-gray-900"
           placeholder="Nome de exibicao no atendimento"
@@ -271,6 +289,7 @@ export default function UsersAdmin() {
           className="border rounded-lg px-3 py-2 text-gray-900"
           placeholder="Senha"
           type="password"
+          minLength={PASSWORD_MIN_LENGTH}
           value={form.password}
           onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
           required
@@ -296,6 +315,8 @@ export default function UsersAdmin() {
             {saving ? "Salvando..." : "Criar"}
           </button>
         </div>
+        </div>
+        <p className="mt-2 text-xs text-gray-500">{PASSWORD_POLICY_MESSAGE}</p>
       </form>
 
       <div className="mt-6 bg-white rounded-xl border border-gray-100 overflow-hidden">
@@ -365,6 +386,7 @@ export default function UsersAdmin() {
                           className="border rounded px-2 py-1"
                           placeholder="Nova senha (opcional)"
                           type="password"
+                          minLength={PASSWORD_MIN_LENGTH}
                           value={editForm.password}
                           onChange={(e) =>
                             setEditForm((p) => ({ ...p, password: e.target.value }))

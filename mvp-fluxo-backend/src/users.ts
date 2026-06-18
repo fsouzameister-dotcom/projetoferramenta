@@ -1,4 +1,5 @@
 import bcrypt from "bcrypt";
+import { assertPasswordPolicy } from "./password-policy";
 import { pool } from "./db";
 import {
   type AppRole,
@@ -99,6 +100,7 @@ export async function createUserForTenant(input: {
   }
 
   if (!roleId || !roleName) throw new Error("ROLE_REQUIRED");
+  assertPasswordPolicy(input.password);
   const passwordHash = await bcrypt.hash(input.password, 10);
   const client = await pool.connect();
   try {
@@ -171,6 +173,7 @@ export async function updateUserForTenant(input: {
       values.push(input.email.trim().toLowerCase());
     }
     if (input.password !== undefined && input.password.trim()) {
+      assertPasswordPolicy(input.password);
       const hash = await bcrypt.hash(input.password, 10);
       updates.push(`password_hash = $${p++}`);
       values.push(hash);

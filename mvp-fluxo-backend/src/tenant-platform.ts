@@ -1,7 +1,14 @@
 import bcrypt from "bcrypt";
+import { assertPasswordPolicy } from "./password-policy";
 import { pool } from "./db";
 import { getOrCreateRoleId } from "./users";
 import type { AppRole } from "./auth-roles";
+import {
+  getTenantSlugIssue,
+  normalizeTenantSlug,
+  slugifyTenantName,
+  type TenantSlugIssue,
+} from "./tenant-slug";
 
 export type TenantType = "platform" | "customer";
 
@@ -169,6 +176,34 @@ async function bootstrapCustomerRoles(tenantId: string): Promise<void> {
   }
 }
 
+export { slugifyTenantName, normalizeTenantSlug } from "./tenant-slug";
+
+export async function checkTenantSlugAvailability(input: {
+  slug?: string;
+  name?: string;
+}): Promise<{
+  slug: string;
+  available: boolean;
+  valid: boolean;
+  issue: TenantSlugIssue | null;
+}> {
+  await ensurePlatformTenantSchema();
+  const slug = normalizeTenantSlug(
+    input.slug?.trim() || slugifyTenantName(input.name?.trim() || "")
+  );
+  const issue = getTenantSlugIssue(slug);
+  if (issue) {
+    return { slug, available: false, valid: false, issue };
+  }
+  const taken = await slugExists(slug);
+  return {
+    slug,
+    available: !taken,
+    valid: true,
+    issue: taken ? "SLUG_ALREADY_EXISTS" : null,
+  };
+}
+
 export async function createCustomerTenant(input: {
   name: string;
   slug: string;
@@ -184,8 +219,11 @@ export async function createCustomerTenant(input: {
 }): Promise<{ tenant: TenantRow; adminUser: { id: string; email: string; name: string } }> {
   await ensurePlatformTenantSchema();
 
-  const slug = input.slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
-  if (slug.length < 2) {
+  const slug = normalizeTenantSlug(
+    input.slug.trim() || slugifyTenantName(input.name)
+  );
+  const issue = getTenantSlugIssue(slug);
+  if (issue === "INVALID_SLUG") {
     throw new Error("INVALID_SLUG");
   }
   if (await slugExists(slug)) {
@@ -213,6 +251,7 @@ export async function createCustomerTenant(input: {
     await bootstrapCustomerRoles(tenant.id);
 
     const roleId = await getOrCreateRoleId(tenant.id, "admin_local");
+    assertPasswordPolicy(input.initialAdmin.password);
     const passwordHash = await bcrypt.hash(input.initialAdmin.password, 10);
     const email = input.initialAdmin.email.trim().toLowerCase();
     const userIns = await client.query<{ id: string; email: string; name: string }>(

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api, { getApiErrorMessage, unwrapApiData } from "~api/client";
 import {
@@ -7,6 +7,26 @@ import {
   setActingTenant,
 } from "~lib/session";
 import InfoTooltip from "~components/InfoTooltip";
+import {
+  getPasswordPolicyError,
+  PASSWORD_MIN_LENGTH,
+  PASSWORD_POLICY_MESSAGE,
+} from "~lib/password-policy";
+import {
+  getTenantSlugClientError,
+  normalizeTenantSlug,
+  slugifyTenantName,
+} from "~lib/tenant-slug";
+
+type SlugCheckResult = {
+  slug: string;
+  available: boolean;
+  valid: boolean;
+  issue: "INVALID_SLUG" | "SLUG_ALREADY_EXISTS" | null;
+  message: string;
+};
+
+type SlugStatus = "idle" | "checking" | "available" | "unavailable" | "invalid";
 
 type CustomerTenant = {
   id: string;
@@ -61,6 +81,11 @@ export default function PlatformTenants() {
   });
   const [showTour, setShowTour] = useState(false);
   const [tourStepIndex, setTourStepIndex] = useState(0);
+  const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
+  const [slugStatus, setSlugStatus] = useState<SlugStatus>("idle");
+  const [slugMessage, setSlugMessage] = useState<string | null>(null);
+  const [validatingSlug, setValidatingSlug] = useState(false);
+  const slugCheckTimerRef = useRef<number | null>(null);
 
   const loadTenants = useCallback(async () => {
     setLoading(true);
@@ -98,8 +123,116 @@ export default function PlatformTenants() {
     navigate("/dashboard");
   };
 
+  const applySlugCheckResult = (result: SlugCheckResult) => {
+    setForm((current) =>
+      current.slug === result.slug ? current : { ...current, slug: result.slug }
+    );
+    if (!result.valid) {
+      setSlugStatus("invalid");
+      setSlugMessage(result.message);
+      return;
+    }
+    if (result.available) {
+      setSlugStatus("available");
+      setSlugMessage(result.message);
+      return;
+    }
+    setSlugStatus("unavailable");
+    setSlugMessage(result.message);
+  };
+
+  const validateSlug = useCallback(
+    async (input?: { slug?: string; name?: string }) => {
+      const slug = normalizeTenantSlug(input?.slug ?? form.slug);
+      const name = (input?.name ?? form.name).trim();
+      const clientError = getTenantSlugClientError(slug);
+      if (clientError) {
+        setSlugStatus("invalid");
+        setSlugMessage(clientError);
+        return false;
+      }
+      if (!slug && !name) {
+        setSlugStatus("idle");
+        setSlugMessage(null);
+        return false;
+      }
+
+      setValidatingSlug(true);
+      setSlugStatus("checking");
+      try {
+        const res = await api.get("/platform/tenants/check-slug", {
+          params: {
+            ...(slug ? { slug } : {}),
+            ...(name ? { name } : {}),
+          },
+          headers: { "x-tenant-id": getHomeTenantId() },
+        });
+        const result = unwrapApiData<SlugCheckResult>(res.data);
+        applySlugCheckResult(result);
+        return result.valid && result.available;
+      } catch (err: unknown) {
+        setSlugStatus("invalid");
+        setSlugMessage(getApiErrorMessage(err, "Não foi possível validar o slug"));
+        return false;
+      } finally {
+        setValidatingSlug(false);
+      }
+    },
+    [form.name, form.slug]
+  );
+
+  useEffect(() => {
+    if (slugCheckTimerRef.current) {
+      window.clearTimeout(slugCheckTimerRef.current);
+    }
+    const slug = normalizeTenantSlug(form.slug);
+    const name = form.name.trim();
+    if (!slug && !name) {
+      setSlugStatus("idle");
+      setSlugMessage(null);
+      return;
+    }
+
+    slugCheckTimerRef.current = window.setTimeout(() => {
+      void validateSlug({ slug, name });
+    }, 500);
+
+    return () => {
+      if (slugCheckTimerRef.current) {
+        window.clearTimeout(slugCheckTimerRef.current);
+      }
+    };
+  }, [form.slug, form.name, validateSlug]);
+
+  const handleNameChange = (name: string) => {
+    setForm((current) => {
+      const next = { ...current, name };
+      if (!slugManuallyEdited) {
+        next.slug = slugifyTenantName(name);
+      }
+      return next;
+    });
+  };
+
+  const handleSlugChange = (slug: string) => {
+    setSlugManuallyEdited(true);
+    setForm((current) => ({ ...current, slug }));
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    const passwordError = getPasswordPolicyError(form.initial_admin_password);
+    if (passwordError) {
+      setError(passwordError);
+      return;
+    }
+
+    const slugOk = await validateSlug();
+    if (!slugOk) {
+      setError(slugMessage || "Valide o slug antes de criar o tenant.");
+      return;
+    }
+
     setCreating(true);
     setError(null);
     try {
@@ -123,6 +256,9 @@ export default function PlatformTenants() {
         initial_admin_email: "",
         initial_admin_password: "",
       });
+      setSlugManuallyEdited(false);
+      setSlugStatus("idle");
+      setSlugMessage(null);
       await loadTenants();
     } catch (err: unknown) {
       setError(getApiErrorMessage(err, "Erro ao criar tenant"));
@@ -186,23 +322,57 @@ export default function PlatformTenants() {
             </legend>
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="block text-sm sm:col-span-1">
-                <span className="text-gray-300">Nome</span>
+                <span className="text-gray-300 flex items-center gap-1">
+                  Nome
+                  <InfoTooltip text="O slug interno é gerado automaticamente a partir do nome. Você pode editá-lo e validar antes de criar." />
+                </span>
                 <input
                   required
                   className="mt-1.5 w-full rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2.5 text-white"
                   value={form.name}
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  onChange={(e) => handleNameChange(e.target.value)}
                 />
               </label>
               <label className="block text-sm sm:col-span-1">
                 <span className="text-gray-300">Slug (URL interna)</span>
-                <input
-                  required
-                  className="mt-1.5 w-full rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2.5 text-white"
-                  value={form.slug}
-                  onChange={(e) => setForm((f) => ({ ...f, slug: e.target.value }))}
-                  placeholder="pesquisas-xyz"
-                />
+                <div className="mt-1.5 flex gap-2">
+                  <input
+                    required
+                    className="w-full rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2.5 text-white"
+                    value={form.slug}
+                    onChange={(e) => handleSlugChange(e.target.value)}
+                    onBlur={() => {
+                      const normalized = normalizeTenantSlug(form.slug);
+                      if (normalized !== form.slug) {
+                        setForm((current) => ({ ...current, slug: normalized }));
+                      }
+                    }}
+                    placeholder="gerado-automaticamente"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void validateSlug()}
+                    disabled={validatingSlug || (!form.slug.trim() && !form.name.trim())}
+                    className="shrink-0 rounded-lg border border-cyan-500/50 px-3 py-2 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                  >
+                    {validatingSlug ? "Validando…" : "Validar slug"}
+                  </button>
+                </div>
+                <p
+                  className={`mt-1 text-xs ${
+                    slugStatus === "available"
+                      ? "text-emerald-400"
+                      : slugStatus === "checking"
+                        ? "text-cyan-300"
+                        : slugStatus === "unavailable" || slugStatus === "invalid"
+                          ? "text-amber-300"
+                          : "text-gray-400"
+                  }`}
+                >
+                  {slugStatus === "idle"
+                    ? "O slug é sugerido automaticamente pelo nome do cliente."
+                    : slugMessage}
+                </p>
               </label>
               <label className="block text-sm sm:col-span-2 sm:max-w-xs">
                 <span className="text-gray-300">Segmento</span>
@@ -254,13 +424,14 @@ export default function PlatformTenants() {
                 <input
                   required
                   type="password"
-                  minLength={6}
+                  minLength={PASSWORD_MIN_LENGTH}
                   className="mt-1.5 w-full rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2.5 text-white"
                   value={form.initial_admin_password}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, initial_admin_password: e.target.value }))
                   }
                 />
+                <p className="mt-1 text-xs text-gray-400">{PASSWORD_POLICY_MESSAGE}</p>
               </label>
             </div>
           </fieldset>
@@ -268,7 +439,14 @@ export default function PlatformTenants() {
           <div className="pt-2">
             <button
               type="submit"
-              disabled={creating}
+              disabled={
+                creating ||
+                validatingSlug ||
+                slugStatus === "invalid" ||
+                slugStatus === "unavailable" ||
+                slugStatus === "checking" ||
+                slugStatus === "idle"
+              }
               className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-accent-dark transition-colors disabled:opacity-50"
             >
               {creating ? "Criando…" : "Criar tenant"}

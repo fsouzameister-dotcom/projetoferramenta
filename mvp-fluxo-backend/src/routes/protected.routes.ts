@@ -92,6 +92,7 @@ import {
 } from "../roles";
 import {
   createCustomerTenant,
+  checkTenantSlugAvailability,
   ensurePlatformTenantSchema,
   getTenantById,
   listCustomerTenants,
@@ -139,6 +140,7 @@ import {
   getAgentAiHintsConfig,
   isAgentAiHintsEnabledForConversation,
 } from "../agent-ai-hints-policy";
+import { PasswordPolicyError } from "../password-policy";
 import {
   createAiPersona,
   createAiProviderSetting,
@@ -4028,7 +4030,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           properties: {
             name: { type: "string", minLength: 2 },
             email: { type: "string", minLength: 5 },
-            password: { type: "string", minLength: 6 },
+            password: { type: "string", minLength: 8 },
             role_id: { type: "string", minLength: 1 },
             role_name: {
               type: "string",
@@ -4055,7 +4057,10 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
               role_name: { type: "string" },
             },
           }),
-          400: errorEnvelopeSchema([ERROR_CODES.users.ROLE_REQUIRED]),
+          400: errorEnvelopeSchema([
+            ERROR_CODES.users.ROLE_REQUIRED,
+            ERROR_CODES.users.PASSWORD_POLICY_VIOLATION,
+          ]),
           403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
           409: errorEnvelopeSchema([ERROR_CODES.users.USER_EMAIL_ALREADY_EXISTS]),
           500: errorEnvelopeSchema([ERROR_CODES.users.USER_CREATE_FAILED]),
@@ -4107,6 +4112,13 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
         return sendSuccess(request, reply, created, 201);
       } catch (error) {
         request.log.error(error);
+        if (error instanceof PasswordPolicyError) {
+          throw new ApiError(
+            400,
+            ERROR_CODES.users.PASSWORD_POLICY_VIOLATION,
+            error.userMessage
+          );
+        }
         if (
           error &&
           typeof error === "object" &&
@@ -4148,7 +4160,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           properties: {
             name: { type: "string", minLength: 2 },
             email: { type: "string", minLength: 5 },
-            password: { type: "string", minLength: 6 },
+            password: { type: "string", minLength: 8 },
             role_id: { type: "string", minLength: 1 },
             role_name: { type: "string", enum: ["admin_local", "supervisor", "agente"] },
           },
@@ -4167,7 +4179,10 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
               role_name: { type: "string" },
             },
           }),
-          400: errorEnvelopeSchema([ERROR_CODES.users.ROLE_REQUIRED]),
+          400: errorEnvelopeSchema([
+            ERROR_CODES.users.ROLE_REQUIRED,
+            ERROR_CODES.users.PASSWORD_POLICY_VIOLATION,
+          ]),
           403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
           404: errorEnvelopeSchema([ERROR_CODES.users.USER_NOT_FOUND]),
           500: errorEnvelopeSchema([ERROR_CODES.users.USER_UPDATE_FAILED]),
@@ -4204,6 +4219,13 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       } catch (error) {
         request.log.error(error);
         if (error instanceof ApiError) throw error;
+        if (error instanceof PasswordPolicyError) {
+          throw new ApiError(
+            400,
+            ERROR_CODES.users.PASSWORD_POLICY_VIOLATION,
+            error.userMessage
+          );
+        }
         throw new ApiError(500, ERROR_CODES.users.USER_UPDATE_FAILED, "Erro ao atualizar usuário");
       }
     }
@@ -4995,6 +5017,75 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
     }
   );
 
+  fastify.get<{
+    Querystring: { slug?: string; name?: string };
+  }>(
+    "/platform/tenants/check-slug",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            slug: { type: "string", minLength: 1 },
+            name: { type: "string", minLength: 1 },
+          },
+        },
+        response: {
+          200: successEnvelopeSchema({
+            type: "object",
+            additionalProperties: false,
+            required: ["slug", "available", "valid", "issue", "message"],
+            properties: {
+              slug: { type: "string" },
+              available: { type: "boolean" },
+              valid: { type: "boolean" },
+              issue: {
+                anyOf: [
+                  { type: "null" },
+                  { type: "string", enum: ["INVALID_SLUG", "SLUG_ALREADY_EXISTS"] },
+                ],
+              },
+              message: { type: "string" },
+            },
+          }),
+          400: errorEnvelopeSchema([ERROR_CODES.common.VALIDATION_ERROR]),
+          403: errorEnvelopeSchema([ERROR_CODES.platform.PLATFORM_FORBIDDEN]),
+          500: errorEnvelopeSchema([ERROR_CODES.platform.TENANTS_LIST_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      ensurePlatformAdmin(request.user?.role_name);
+      const { slug, name } = request.query;
+      if (!slug?.trim() && !name?.trim()) {
+        throw new ApiError(
+          400,
+          ERROR_CODES.common.VALIDATION_ERROR,
+          "Informe o slug ou o nome do cliente para validar"
+        );
+      }
+      try {
+        const result = await checkTenantSlugAvailability({ slug, name });
+        const message = !result.valid
+          ? "Slug inválido. Use ao menos 2 caracteres com letras, números e hífens."
+          : result.issue === "SLUG_ALREADY_EXISTS"
+            ? "Este slug já está em uso. Ajuste o nome ou edite o slug manualmente."
+            : result.available
+              ? "Slug disponível para cadastro."
+              : "Slug indisponível.";
+        return sendSuccess(request, reply, { ...result, message });
+      } catch (error) {
+        request.log.error(error);
+        throw new ApiError(
+          500,
+          ERROR_CODES.platform.TENANTS_LIST_FAILED,
+          "Erro ao validar slug do tenant"
+        );
+      }
+    }
+  );
+
   fastify.post<{
     Body: {
       name: string;
@@ -5029,7 +5120,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
             plan: { type: "string" },
             initial_admin_name: { type: "string", minLength: 2 },
             initial_admin_email: { type: "string", minLength: 5 },
-            initial_admin_password: { type: "string", minLength: 6 },
+            initial_admin_password: { type: "string", minLength: 8 },
           },
         },
         response: {
@@ -5040,6 +5131,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           400: errorEnvelopeSchema([
             ERROR_CODES.platform.TENANT_SLUG_INVALID,
             ERROR_CODES.users.ROLE_REQUIRED,
+            ERROR_CODES.users.PASSWORD_POLICY_VIOLATION,
           ]),
           403: errorEnvelopeSchema([ERROR_CODES.platform.PLATFORM_FORBIDDEN]),
           409: errorEnvelopeSchema([
@@ -5069,6 +5161,13 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
         return sendSuccess(request, reply, result, 201);
       } catch (error) {
         request.log.error(error);
+        if (error instanceof PasswordPolicyError) {
+          throw new ApiError(
+            400,
+            ERROR_CODES.users.PASSWORD_POLICY_VIOLATION,
+            error.userMessage
+          );
+        }
         if (error instanceof Error) {
           if (error.message === "SLUG_ALREADY_EXISTS") {
             throw new ApiError(
