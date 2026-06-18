@@ -10,6 +10,7 @@
     "test": "tsx --test test/*.test.ts",
     "seed:dev": "tsx scripts/seed-dev-admin.ts",
     "seed:cleo-flow": "tsx scripts/seed-flow-cleo-apresentacao.ts",
+    "seed:cleo-inbound": "tsx scripts/seed-cleo-inbound-routes.ts",
     "seed:fox-flow": "tsx scripts/seed-flow-fox-pesquisas.ts",
     "migrate": "tsx scripts/migrate.ts"
   },
