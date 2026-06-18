@@ -29,7 +29,7 @@ import Faq from "./pages/Faq";
 import Sidebar from "./components/Sidebar";
 import TenantActingBanner from "./components/TenantActingBanner";
 import { clearSession, hasAdminUiAccess, isSessionValid } from "./lib/session";
-import { canAccessPath } from "./lib/permissions";
+import { canAccessPath, getDefaultAdminLandingPath } from "./lib/permissions";
 
 function getUserRole(): string {
   return localStorage.getItem("user_role") || "agente";
@@ -173,7 +173,21 @@ const RequirePathAccess = () => {
     (location.pathname.startsWith("/flows/edit/") ? "/flows" : basePath);
 
   if (!canAccessPath(pathKey)) {
-    return <Navigate to="/dashboard" replace />;
+    const fallback = getDefaultAdminLandingPath();
+    if (fallback === "/login") {
+      return (
+        <div className="p-8 text-gray-200">
+          <h1 className="text-xl font-semibold text-white">Sem acesso</h1>
+          <p className="mt-2 text-sm text-gray-300">
+            Seu perfil não tem permissão para acessar nenhuma área administrativa.
+            Peça ao administrador para revisar suas permissões.
+          </p>
+        </div>
+      );
+    }
+    if (location.pathname !== fallback) {
+      return <Navigate to={fallback} replace />;
+    }
   }
   return <Outlet />;
 };

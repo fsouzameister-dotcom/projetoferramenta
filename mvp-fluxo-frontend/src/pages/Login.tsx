@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getApiErrorMessage, loginRequest, unwrapApiData } from "~api/client";
 import { persistLoginSession } from "~lib/session";
+import { getDefaultAdminLandingPath } from "~lib/permissions";
 import logoClienton from "../../logo-clienton.png";
 
 export default function Login() {
@@ -52,7 +53,7 @@ export default function Login() {
       } else if (payload.role_name === "platform_admin") {
         navigate("/admin/platform/tenants");
       } else {
-        navigate("/dashboard");
+        navigate(getDefaultAdminLandingPath());
       }
     } catch (err: unknown) {
       console.error("Erro no login:", err);

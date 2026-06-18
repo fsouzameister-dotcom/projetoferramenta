@@ -1,4 +1,5 @@
 import axios from "axios";
+import { getActingTenantId } from "~lib/session";
 
 /** Origem da API (sem barra final), usada em health checks e URLs públicas como webhooks. */
 export function getApiOrigin(): string {
@@ -54,7 +55,7 @@ export function getApiErrorMessage(error: unknown, fallback: string): string {
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("jwt_token");
-    const tenantId = localStorage.getItem("tenant_id");
+    const tenantId = getActingTenantId();
 
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;

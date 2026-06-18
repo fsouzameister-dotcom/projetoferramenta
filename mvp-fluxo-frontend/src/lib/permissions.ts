@@ -39,6 +39,29 @@ export const ROUTE_PERMISSIONS: Record<string, AppPermission> = {
   "/admin/platform/tenants": "platform_tenants",
 };
 
+const DEFAULT_ROLE_PERMISSIONS: Record<string, AppPermission[]> = {
+  platform_admin: [...APP_PERMISSIONS],
+  admin_local: APP_PERMISSIONS.filter((p) => p !== "platform_tenants"),
+  supervisor: ["dashboard", "flows", "monitoring", "operations", "reports"],
+  admin: APP_PERMISSIONS.filter((p) => p !== "platform_tenants"),
+  agente: [],
+};
+
+export const ADMIN_LANDING_PATHS = [
+  "/dashboard",
+  "/flows",
+  "/admin/users",
+  "/admin/operations",
+  "/reports",
+  "/admin/monitoring",
+  "/admin/campaigns",
+  "/admin/inbound",
+  "/admin/whatsapp",
+  "/admin/ai",
+  "/admin/roles",
+  "/faq",
+] as const;
+
 export function getStoredPermissions(): AppPermission[] {
   try {
     const raw = localStorage.getItem("user_permissions");
@@ -53,19 +76,40 @@ export function getStoredPermissions(): AppPermission[] {
   }
 }
 
+export function getEffectivePermissions(): AppPermission[] {
+  const role = localStorage.getItem("user_role") || "agente";
+  if (role === "platform_admin") return [...APP_PERMISSIONS];
+  const stored = getStoredPermissions();
+  if (stored.length > 0) return stored;
+  return DEFAULT_ROLE_PERMISSIONS[role] ?? [];
+}
+
 export function hasPermission(permission: AppPermission): boolean {
   const role = localStorage.getItem("user_role") || "agente";
   if (role === "platform_admin") return true;
-  return getStoredPermissions().includes(permission);
+  return getEffectivePermissions().includes(permission);
 }
 
 export function hasAdminUiAccess(): boolean {
   const role = localStorage.getItem("user_role") || "agente";
-  if (role === "platform_admin" || role === "admin_local" || role === "supervisor" || role === "admin") {
-    const perms = getStoredPermissions();
-    if (perms.length > 0) return true;
+  if (role === "platform_admin") return true;
+  if (
+    role === "admin_local" ||
+    role === "supervisor" ||
+    role === "admin"
+  ) {
+    return getEffectivePermissions().length > 0;
   }
-  return getStoredPermissions().length > 0;
+  return getEffectivePermissions().length > 0;
+}
+
+export function getDefaultAdminLandingPath(): string {
+  const role = localStorage.getItem("user_role") || "agente";
+  if (role === "platform_admin") return "/admin/platform/tenants";
+  for (const path of ADMIN_LANDING_PATHS) {
+    if (canAccessPath(path)) return path;
+  }
+  return "/login";
 }
 
 export function canAccessPath(path: string): boolean {
