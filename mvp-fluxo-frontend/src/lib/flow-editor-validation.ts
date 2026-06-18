@@ -29,12 +29,37 @@ function isVariableRef(value: unknown): boolean {
   return typeof value === "string" && isFlowVariableRef(value);
 }
 
+function isGlobalConversaNode(config: Record<string, unknown>): boolean {
+  return config.isGlobal === true || config.is_global === true;
+}
+
+function hasConversaTransitionOut(config: Record<string, unknown>): boolean {
+  const transitions = Array.isArray(config.transitions) ? config.transitions : [];
+  return transitions.some(
+    (t) =>
+      typeof (t as { next_node_id?: string }).next_node_id === "string" &&
+      Boolean((t as { next_node_id: string }).next_node_id)
+  );
+}
+
+function registerConversaOutgoing(nodeId: string, config: Record<string, unknown>, edgeSources: Set<string>) {
+  if (hasConversaTransitionOut(config)) edgeSources.add(nodeId);
+  if (typeof config.default_next_node_id === "string" && config.default_next_node_id) {
+    edgeSources.add(nodeId);
+  }
+}
+
 function hasOutgoingConnection(node: FlowNodeLike, edgeSources: Set<string>): boolean {
   const type = nodeType(node);
   const config = cfg(node);
 
   if (TERMINAL_TYPES.has(type)) return true;
   if (STOP_FLOW_TYPES.has(type)) return true;
+
+  if (type === "conversa") {
+    if (isGlobalConversaNode(config)) return true;
+    if (hasConversaTransitionOut(config)) return true;
+  }
 
   if (type === "decisao") {
     const mode = String(config.decisionMode || "simple");
@@ -108,6 +133,8 @@ export function collectFlowEditorWarnings(nodes: FlowNodeLike[]): FlowEditorWarn
           edgeSources.add(node.id);
         }
       }
+    } else if (type === "conversa") {
+      registerConversaOutgoing(node.id, config, edgeSources);
     } else if (typeof config.next_node_id === "string" && config.next_node_id) {
       edgeSources.add(node.id);
     } else if (type === "contador") {
