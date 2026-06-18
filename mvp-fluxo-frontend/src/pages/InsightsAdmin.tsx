@@ -37,7 +37,7 @@ type InsightJobDetail = InsightJobSummary & {
   } | null;
 };
 
-type QueueOption = { id: string; name: string; key: string };
+type QueueOption = { id: string; label: string; key: string };
 
 function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
@@ -111,8 +111,10 @@ export default function InsightsAdmin() {
   const loadQueues = async () => {
     try {
       const res = await api.get("/queues");
-      const rows = unwrapApiData<Array<{ id: string; name: string; key: string }>>(res.data);
-      setQueues(rows);
+      const rows = unwrapApiData<Array<{ id: string; label: string; key: string; active?: boolean }>>(
+        res.data
+      );
+      setQueues(rows.filter((q) => q.active !== false));
     } catch {
       setQueues([]);
     }
@@ -281,7 +283,7 @@ export default function InsightsAdmin() {
                 <option value="">Todas as filas</option>
                 {queues.map((q) => (
                   <option key={q.id} value={q.key}>
-                    {q.name}
+                    {q.label}
                   </option>
                 ))}
               </select>
