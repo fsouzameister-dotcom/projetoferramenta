@@ -279,8 +279,12 @@ export async function processAiInsightJob(jobId: string): Promise<void> {
     const insight = parseInsightResultFromModel(parsed, ai.text);
     const metrics = {
       ...insight.metrics,
-      totalConversas: contextBundle.stats.totalConversations,
-      conversasAmostradas: contextBundle.stats.sampledConversations,
+      escopo: contextBundle.stats.analysisScope,
+      totalConversasAgente: contextBundle.stats.totalAgentConversations,
+      conversasAgenteAmostradas: contextBundle.stats.sampledAgentConversations,
+      totalSessoesFluxo: contextBundle.stats.totalFlowSessions,
+      sessoesFluxoAmostradas: contextBundle.stats.sampledFlowSessions,
+      respostasFluxo: contextBundle.stats.totalFlowResponses,
       mensagensAmostradas: contextBundle.stats.totalMessages,
     };
 

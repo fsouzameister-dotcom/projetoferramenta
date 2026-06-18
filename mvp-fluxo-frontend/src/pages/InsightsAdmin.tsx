@@ -38,6 +38,8 @@ type InsightJobDetail = InsightJobSummary & {
 };
 
 type QueueOption = { id: string; label: string; key: string };
+type FlowOption = { id: string; name: string };
+type AnalysisScope = "agent" | "flow" | "all";
 
 function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
@@ -68,6 +70,7 @@ export default function InsightsAdmin() {
   const canManageTemplates = hasPermission("ai");
   const [templates, setTemplates] = useState<InsightTemplate[]>([]);
   const [queues, setQueues] = useState<QueueOption[]>([]);
+  const [flows, setFlows] = useState<FlowOption[]>([]);
   const [jobs, setJobs] = useState<InsightJobSummary[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [selectedJob, setSelectedJob] = useState<InsightJobDetail | null>(null);
@@ -78,6 +81,8 @@ export default function InsightsAdmin() {
   const [runForm, setRunForm] = useState({
     dateFrom: daysAgoIsoDate(7),
     dateTo: todayIsoDate(),
+    analysisScope: "agent" as AnalysisScope,
+    flowIds: [] as string[],
     templateId: "",
     promptOverride: "",
     queueId: "",
@@ -120,10 +125,20 @@ export default function InsightsAdmin() {
     }
   };
 
+  const loadFlows = async () => {
+    try {
+      const res = await api.get("/flows");
+      const rows = unwrapApiData<Array<{ id: string; name: string; is_active?: boolean }>>(res.data);
+      setFlows(rows.map((f) => ({ id: f.id, name: f.name })));
+    } catch {
+      setFlows([]);
+    }
+  };
+
   const loadAll = async () => {
     try {
       setLoading(true);
-      await Promise.all([loadJobs(), loadTemplates(), loadQueues()]);
+      await Promise.all([loadJobs(), loadTemplates(), loadQueues(), loadFlows()]);
     } catch (error) {
       setNotice(getApiErrorMessage(error, "Falha ao carregar insights"));
     } finally {
@@ -173,11 +188,15 @@ export default function InsightsAdmin() {
       const body: Record<string, unknown> = {
         dateFrom: runForm.dateFrom,
         dateTo: runForm.dateTo,
+        analysisScope: runForm.analysisScope,
         includeVoiceTranscripts: runForm.includeVoiceTranscripts,
       };
+      if (runForm.flowIds.length) body.flowIds = runForm.flowIds;
       if (runForm.templateId) body.templateId = runForm.templateId;
       if (runForm.promptOverride.trim()) body.promptOverride = runForm.promptOverride.trim();
-      if (runForm.queueId) body.queueIds = [runForm.queueId];
+      if (runForm.queueId && runForm.analysisScope !== "flow") {
+        body.queueIds = [runForm.queueId];
+      }
 
       const res = await api.post("/ai/insights/run", body);
       const created = unwrapApiData<InsightJobSummary>(res.data);
@@ -219,7 +238,8 @@ export default function InsightsAdmin() {
       <header>
         <h1 className="text-2xl font-bold text-zinc-100">Insights com IA</h1>
         <p className="text-sm text-zinc-400 mt-1">
-          Análises sob demanda sobre conversas do período, com resumo executivo e recomendações.
+          Análises sob demanda sobre atendimento humano, fluxos bot/IA ou ambos, com resumo executivo e
+          recomendações.
         </p>
       </header>
 
@@ -252,6 +272,44 @@ export default function InsightsAdmin() {
               required
             />
           </label>
+          <label className="text-sm text-zinc-300 md:col-span-2">
+            Escopo da análise
+            <select
+              className="mt-1 w-full rounded-lg border border-zinc-600 bg-zinc-800 px-3 py-2"
+              value={runForm.analysisScope}
+              onChange={(e) =>
+                setRunForm((p) => ({
+                  ...p,
+                  analysisScope: e.target.value as AnalysisScope,
+                  queueId: e.target.value === "flow" ? "" : p.queueId,
+                }))
+              }
+            >
+              <option value="agent">Atendimento humano</option>
+              <option value="flow">Fluxos (bot / IA)</option>
+              <option value="all">Ambos</option>
+            </select>
+          </label>
+          {(runForm.analysisScope === "flow" || runForm.analysisScope === "all") && flows.length > 0 && (
+            <label className="text-sm text-zinc-300 md:col-span-2">
+              Fluxos (opcional — vazio analisa todos)
+              <select
+                multiple
+                className="mt-1 w-full rounded-lg border border-zinc-600 bg-zinc-800 px-3 py-2 min-h-[120px]"
+                value={runForm.flowIds}
+                onChange={(e) => {
+                  const selected = Array.from(e.target.selectedOptions).map((opt) => opt.value);
+                  setRunForm((p) => ({ ...p, flowIds: selected }));
+                }}
+              >
+                {flows.map((flow) => (
+                  <option key={flow.id} value={flow.id}>
+                    {flow.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {templates.length > 0 && (
             <label className="text-sm text-zinc-300 md:col-span-2">
               Template
@@ -272,7 +330,7 @@ export default function InsightsAdmin() {
               </select>
             </label>
           )}
-          {queues.length > 0 && (
+          {queues.length > 0 && runForm.analysisScope !== "flow" && (
             <label className="text-sm text-zinc-300 md:col-span-2">
               Fila (opcional)
               <select

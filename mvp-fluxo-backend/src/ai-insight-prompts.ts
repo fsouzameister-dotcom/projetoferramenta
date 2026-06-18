@@ -14,6 +14,7 @@ Regras obrigatórias:
 - Não invente fatos que não estejam no contexto.
 - Não inclua dados pessoais identificáveis além do que já está no contexto (evite repetir telefones completos).
 - Use português do Brasil.
+- O contexto pode incluir atendimento humano (agentConversations) e/ou execuções de fluxo bot/IA (flowSessions com respostas estruturadas).
 - Campos obrigatórios no JSON:
   - "summary": string (parágrafo executivo)
   - "highlights": array de strings (pontos positivos)

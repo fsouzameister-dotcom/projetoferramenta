@@ -1505,6 +1505,8 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       includeVoiceTranscripts?: boolean;
       templateId?: string;
       promptOverride?: string;
+      flowIds?: string[];
+      analysisScope?: "agent" | "flow" | "all";
       personaId?: string;
     };
   }>(
@@ -1518,6 +1520,8 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           properties: {
             dateFrom: { type: "string", minLength: 1 },
             dateTo: { type: "string", minLength: 1 },
+            analysisScope: { type: "string", enum: ["agent", "flow", "all"] },
+            flowIds: { type: "array", items: { type: "string" } },
             queueIds: { type: "array", items: { type: "string" } },
             agentIds: { type: "array", items: { type: "string" } },
             personaIds: { type: "array", items: { type: "string" } },
@@ -1539,6 +1543,8 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
         filters: {
           dateFrom: request.body.dateFrom,
           dateTo: request.body.dateTo,
+          analysisScope: request.body.analysisScope,
+          flowIds: request.body.flowIds,
           queueIds: request.body.queueIds,
           agentIds: request.body.agentIds,
           personaIds: request.body.personaIds,
