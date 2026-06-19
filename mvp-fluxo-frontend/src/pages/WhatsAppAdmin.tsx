@@ -3,6 +3,24 @@ import type { FormEvent } from "react";
 import api, { getApiErrorMessage, getApiOrigin, unwrapApiData } from "../api/client";
 import BotSafeguardPanel from "../components/BotSafeguardPanel";
 import InfoTooltip from "~components/InfoTooltip";
+import {
+  adminBtnDangerClass,
+  adminBtnLinkClass,
+  adminBtnPrimaryClass,
+  adminBtnSecondaryClass,
+  adminCodeClass,
+  adminErrorClass,
+  adminInputClass,
+  adminLabelClass,
+  adminLegendClass,
+  adminModalClass,
+  adminModalOverlayClass,
+  adminNoticeClass,
+  adminPageShellClass,
+  adminPanelClass,
+  adminSectionClass,
+  adminSelectClass,
+} from "~lib/admin-ui";
 
 type PhoneNumber = {
   id: string;
@@ -333,9 +351,11 @@ export default function WhatsAppAdmin() {
     setShowTour(true);
   };
 
+  const checkboxClass = "rounded border-zinc-600 bg-zinc-900 accent-cyan-500";
+
   return (
-    <div className="p-8">
-      <div className="flex items-start justify-between gap-3">
+    <div className={adminPageShellClass(true)}>
+      <header className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-white">Canais WhatsApp</h1>
           <p className="text-sm text-gray-300 mt-1 flex items-center gap-2">
@@ -351,144 +371,131 @@ export default function WhatsAppAdmin() {
         <button
           type="button"
           onClick={handleOpenTour}
-          className="w-8 h-8 rounded-full border border-cyan-400/60 text-cyan-200 hover:bg-cyan-500/10 text-sm"
+          className="w-8 h-8 rounded-full border border-cyan-400/60 text-cyan-200 hover:bg-cyan-500/10 text-sm shrink-0"
           title="Reabrir tour do WhatsApp"
           aria-label="Reabrir tour do WhatsApp"
         >
           ?
         </button>
-      </div>
-      <p className="text-[10px] text-slate-500 mt-2 font-mono break-all" title="Se após deploy esta linha não mudar, o servidor ou CDN ainda entrega build antigo.">
+      </header>
+      <p
+        className="text-[10px] text-slate-500 font-mono break-all"
+        title="Se após deploy esta linha não mudar, o servidor ou CDN ainda entrega build antigo."
+      >
         UI multicanal · bundle: {entryScriptSrc || "…"}
       </p>
 
-      {error && (
-        <div className="mt-4 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
-          {error}
-        </div>
-      )}
-      {notice && (
-        <div className="mt-4 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg px-4 py-3 text-sm">
-          {notice}
-        </div>
-      )}
+      {error ? <div className={adminErrorClass}>{error}</div> : null}
+      {notice ? <div className={adminNoticeClass}>{notice}</div> : null}
 
-      <div className="mt-6">
-        <BotSafeguardPanel variant="compact" />
-      </div>
+      <BotSafeguardPanel variant="compact" />
 
-      <section className="mt-6 bg-white rounded-xl border border-slate-300 p-6 text-sm text-gray-800">
-        <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+      <section className={`${adminSectionClass} text-sm`}>
+        <h2 className="text-lg font-semibold text-white flex items-center gap-2">
           Configuração global (Meta webhooks)
           <InfoTooltip text="Essas configurações são globais no servidor e afetam a validação dos webhooks da Meta/Twilio." />
         </h2>
-        <p className="text-xs text-gray-600 mt-1 max-w-3xl">
-          Estes valores ficam no <strong>banco de dados</strong> (cifrados) e substituem{" "}
-          <span className="font-mono">WHATSAPP_WEBHOOK_VERIFY_TOKEN</span> e{" "}
-          <span className="font-mono">WHATSAPP_APP_SECRET</span> do <span className="font-mono">.env</span> quando
-          preenchidos aqui — não é necessário alterar código para trocar esses segredos.{" "}
-          <strong>Credenciais por canal</strong> (WABA / Twilio por número) continuam em{" "}
-          <strong>Nova conexão</strong> abaixo.
+        <p className="text-xs text-gray-400 mt-1 max-w-3xl">
+          Estes valores ficam no <strong className="text-gray-300">banco de dados</strong> (cifrados) e substituem{" "}
+          <code className={`${adminCodeClass} px-1 py-0.5`}>WHATSAPP_WEBHOOK_VERIFY_TOKEN</code> e{" "}
+          <code className={`${adminCodeClass} px-1 py-0.5`}>WHATSAPP_APP_SECRET</code> do{" "}
+          <code className={`${adminCodeClass} px-1 py-0.5`}>.env</code> quando preenchidos aqui — não é necessário
+          alterar código para trocar esses segredos. <strong className="text-gray-300">Credenciais por canal</strong>{" "}
+          (WABA / Twilio por número) continuam em <strong className="text-gray-300">Nova conexão</strong> abaixo.
         </p>
         {loadingServerSettings ? (
-          <p className="mt-4 text-gray-500">Carregando configurações…</p>
+          <p className="mt-4 text-gray-400">Carregando configurações…</p>
         ) : (
           <form onSubmit={onSaveServerSettings} className="mt-4 space-y-4 max-w-xl">
-            <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-gray-600">
+            <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-gray-400">
               <span>
                 Verify token:{" "}
-                <strong className={serverSettings?.meta.webhookVerifyTokenConfigured ? "text-emerald-700" : "text-amber-700"}>
+                <strong
+                  className={
+                    serverSettings?.meta.webhookVerifyTokenConfigured ? "text-emerald-300" : "text-amber-300"
+                  }
+                >
                   {serverSettings?.meta.webhookVerifyTokenConfigured ? "configurado" : "não configurado"}
                 </strong>
               </span>
               <span>
                 App Secret:{" "}
-                <strong className={serverSettings?.meta.appSecretConfigured ? "text-emerald-700" : "text-amber-700"}>
+                <strong
+                  className={serverSettings?.meta.appSecretConfigured ? "text-emerald-300" : "text-amber-300"}
+                >
                   {serverSettings?.meta.appSecretConfigured ? "configurado" : "não configurado"}
                 </strong>
               </span>
             </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1" htmlFor="srv-verify">
-                Novo verify token (Meta GET webhook)
-              </label>
+            <label className={adminLabelClass} htmlFor="srv-verify">
+              Novo verify token (Meta GET webhook)
               <input
                 id="srv-verify"
                 type="password"
                 autoComplete="off"
-                className="w-full border rounded-lg px-3 py-2 text-gray-900 font-mono text-xs"
+                className={`${adminInputClass} font-mono text-xs`}
                 placeholder="Deixe em branco para manter o atual"
                 value={serverMetaVerifyToken}
                 onChange={(e) => setServerMetaVerifyToken(e.target.value)}
               />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1" htmlFor="srv-secret">
-                Novo App Secret (Meta assinatura POST)
-              </label>
+            </label>
+            <label className={adminLabelClass} htmlFor="srv-secret">
+              Novo App Secret (Meta assinatura POST)
               <input
                 id="srv-secret"
                 type="password"
                 autoComplete="off"
-                className="w-full border rounded-lg px-3 py-2 text-gray-900 font-mono text-xs"
+                className={`${adminInputClass} font-mono text-xs`}
                 placeholder="Deixe em branco para manter o atual"
                 value={serverMetaAppSecret}
                 onChange={(e) => setServerMetaAppSecret(e.target.value)}
               />
-            </div>
-            <div className="space-y-2 border-t border-gray-100 pt-3">
-              <p className="text-xs text-amber-800 font-medium">Apenas desenvolvimento / diagnóstico</p>
-              <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+            </label>
+            <div className="space-y-2 border-t border-zinc-700/80 pt-3">
+              <p className="text-xs text-amber-300 font-medium">Apenas desenvolvimento / diagnóstico</p>
+              <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
                 <input
                   type="checkbox"
+                  className={checkboxClass}
                   checked={flagSkipMetaSig}
                   onChange={(e) => setFlagSkipMetaSig(e.target.checked)}
                 />
                 Não validar assinatura Meta (<span className="font-mono">X-Hub-Signature-256</span>)
               </label>
-              <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+              <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
                 <input
                   type="checkbox"
+                  className={checkboxClass}
                   checked={flagSkipTwilioSig}
                   onChange={(e) => setFlagSkipTwilioSig(e.target.checked)}
                 />
                 Não validar assinatura Twilio (<span className="font-mono">X-Twilio-Signature</span>)
               </label>
             </div>
-            <button
-              type="submit"
-              disabled={savingServerSettings}
-              className="bg-slate-800 text-white px-4 py-2 rounded-lg text-sm hover:bg-slate-900 disabled:opacity-50"
-            >
+            <button type="submit" disabled={savingServerSettings} className={adminBtnPrimaryClass}>
               {savingServerSettings ? "Salvando…" : "Salvar configuração global"}
             </button>
           </form>
         )}
       </section>
 
-      <section className="mt-6 bg-slate-900/60 border border-slate-700 rounded-xl p-5 text-sm text-gray-200">
+      <section className={`${adminSectionClass} text-sm`}>
         <h2 className="text-base font-semibold text-white mb-2">Webhooks e variáveis do servidor</h2>
         <p className="text-gray-400 text-xs mb-3">
           Garanta que o proxy encaminhe <span className="font-mono">/webhooks/</span> para o backend (não só{" "}
           <span className="font-mono">/api/</span>).
         </p>
 
-        <div className="border-t border-slate-700 pt-4 space-y-4">
+        <div className="border-t border-zinc-700/80 pt-4 space-y-4">
           <div>
-            <h3 className="text-xs font-semibold text-cyan-200/90 uppercase tracking-wide mb-2">Meta (Cloud API)</h3>
-            <p className="text-gray-400 text-xs mb-2">
+            <h3 className={adminLegendClass}>Meta (Cloud API)</h3>
+            <p className="text-gray-400 text-xs mb-2 mt-2">
               O app na Meta aponta para estes endpoints. O tenant é resolvido pelo{" "}
               <span className="font-mono">phone_number_id</span> nos eventos.
             </p>
             <div className="flex flex-wrap items-center gap-2 mt-1">
-              <code className="font-mono text-xs text-amber-100/95 break-all bg-black/30 px-2 py-1 rounded">
-                {metaWebhookUrl}
-              </code>
-              <button
-                type="button"
-                onClick={() => void flashCopy(metaWebhookUrl)}
-                className="text-xs bg-slate-700 hover:bg-slate-600 text-white px-3 py-1 rounded-lg"
-              >
+              <code className={adminCodeClass}>{metaWebhookUrl}</code>
+              <button type="button" onClick={() => void flashCopy(metaWebhookUrl)} className={adminBtnSecondaryClass}>
                 Copiar URL
               </button>
             </div>
@@ -501,23 +508,22 @@ export default function WhatsAppAdmin() {
           </div>
 
           <div>
-            <h3 className="text-xs font-semibold text-violet-200/90 uppercase tracking-wide mb-2">Twilio</h3>
-            <p className="text-gray-400 text-xs mb-2">
-              No console Twilio, configure o número WhatsApp: <strong className="text-gray-300">mensagem recebida</strong>{" "}
-              e <strong className="text-gray-300">status</strong> nas URLs abaixo (POST,{" "}
+            <h3 className={`${adminLegendClass} text-violet-200/90`}>Twilio</h3>
+            <p className="text-gray-400 text-xs mb-2 mt-2">
+              No console Twilio, configure o número WhatsApp:{" "}
+              <strong className="text-gray-300">mensagem recebida</strong> e{" "}
+              <strong className="text-gray-300">status</strong> nas URLs abaixo (POST,{" "}
               <span className="font-mono">application/x-www-form-urlencoded</span>).
             </p>
             <div className="space-y-2">
               <div>
                 <p className="text-[10px] text-gray-500 uppercase">Inbound (quando chegar mensagem)</p>
                 <div className="flex flex-wrap items-center gap-2 mt-0.5">
-                  <code className="font-mono text-xs text-amber-100/95 break-all bg-black/30 px-2 py-1 rounded">
-                    {twilioInboundUrl}
-                  </code>
+                  <code className={adminCodeClass}>{twilioInboundUrl}</code>
                   <button
                     type="button"
                     onClick={() => void flashCopy(twilioInboundUrl)}
-                    className="text-xs bg-slate-700 hover:bg-slate-600 text-white px-3 py-1 rounded-lg"
+                    className={adminBtnSecondaryClass}
                   >
                     Copiar
                   </button>
@@ -526,13 +532,11 @@ export default function WhatsAppAdmin() {
               <div>
                 <p className="text-[10px] text-gray-500 uppercase">Status (entrega / leitura)</p>
                 <div className="flex flex-wrap items-center gap-2 mt-0.5">
-                  <code className="font-mono text-xs text-amber-100/95 break-all bg-black/30 px-2 py-1 rounded">
-                    {twilioStatusUrl}
-                  </code>
+                  <code className={adminCodeClass}>{twilioStatusUrl}</code>
                   <button
                     type="button"
                     onClick={() => void flashCopy(twilioStatusUrl)}
-                    className="text-xs bg-slate-700 hover:bg-slate-600 text-white px-3 py-1 rounded-lg"
+                    className={adminBtnSecondaryClass}
                   >
                     Copiar
                   </button>
@@ -549,31 +553,28 @@ export default function WhatsAppAdmin() {
 
         <div className="mt-3 text-xs text-gray-500">
           <p className="font-mono text-[10px] text-gray-600">Base da API (VITE_API_URL): {apiOrigin}</p>
-          {copyHint && <p className="text-emerald-400 mt-1">{copyHint}</p>}
+          {copyHint ? <p className="text-emerald-400 mt-1">{copyHint}</p> : null}
         </div>
       </section>
 
-      <form
-        onSubmit={onConnectSubmit}
-        className="mt-6 bg-white rounded-xl border border-slate-300 p-6 space-y-4"
-      >
-        <div className="border-b border-gray-200 pb-3">
-          <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+      <form onSubmit={onConnectSubmit} className={`${adminSectionClass} space-y-4`}>
+        <div className="border-b border-zinc-700/80 pb-3">
+          <h2 className="text-lg font-semibold text-white flex items-center gap-2">
             Nova conexão
             <InfoTooltip text="Cadastre um canal por vez com as credenciais corretas do provedor selecionado." />
           </h2>
-          <p className="text-xs text-gray-500 mt-0.5">
+          <p className="text-xs text-gray-400 mt-0.5">
             Escolha o canal (BSP / API) e preencha as credenciais desse provedor apenas.
           </p>
         </div>
 
         <div>
-          <label htmlFor="channel-select" className="block text-sm font-medium text-gray-800 mb-1">
+          <label htmlFor="channel-select" className={adminLabelClass}>
             Canal
           </label>
           <select
             id="channel-select"
-            className="w-full max-w-xl border border-gray-300 rounded-lg px-3 py-2.5 text-gray-900 text-sm bg-white"
+            className={`${adminSelectClass} max-w-xl`}
             value={selectedChannelId}
             onChange={(e) => {
               const v = e.target.value;
@@ -597,15 +598,13 @@ export default function WhatsAppAdmin() {
               ))}
             </optgroup>
           </select>
-          {selectedOption && (
-            <p className="text-xs text-gray-500 mt-2 max-w-2xl">{selectedOption.hint}</p>
-          )}
+          {selectedOption && <p className="text-xs text-gray-400 mt-2 max-w-2xl">{selectedOption.hint}</p>}
         </div>
 
         {selectedChannelId ? (
           <>
             <input
-              className="w-full max-w-xl border rounded-lg px-3 py-2 text-gray-900"
+              className={`${adminInputClass} max-w-xl`}
               placeholder="Nome desta conexão (ex.: Atendimento BR, Twilio — filial SP)"
               value={channelLabel}
               onChange={(e) => setChannelLabel(e.target.value)}
@@ -617,27 +616,27 @@ export default function WhatsAppAdmin() {
             {selectedChannelId === "whatsapp_cloud_api" && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
                 <input
-                  className="border rounded-lg px-3 py-2 text-gray-900"
+                  className={adminInputClass}
                   placeholder="WABA ID (WhatsApp Business Account ID)"
                   value={metaCreds.wabaId}
                   onChange={(e) => setMetaCreds((p) => ({ ...p, wabaId: e.target.value }))}
                   required
                 />
                 <input
-                  className="border rounded-lg px-3 py-2 text-gray-900"
+                  className={adminInputClass}
                   placeholder="Phone Number ID (Meta)"
                   value={metaCreds.phoneNumberId}
                   onChange={(e) => setMetaCreds((p) => ({ ...p, phoneNumberId: e.target.value }))}
                   required
                 />
                 <input
-                  className="border rounded-lg px-3 py-2 text-gray-900 md:col-span-2"
+                  className={`${adminInputClass} md:col-span-2`}
                   placeholder="Telefone display (opcional, ex.: +55 11 99999-9999)"
                   value={metaCreds.displayPhoneNumber}
                   onChange={(e) => setMetaCreds((p) => ({ ...p, displayPhoneNumber: e.target.value }))}
                 />
                 <input
-                  className="border rounded-lg px-3 py-2 text-gray-900 font-mono text-xs md:col-span-2"
+                  className={`${adminInputClass} font-mono text-xs md:col-span-2`}
                   placeholder="Access Token permanente (System User)"
                   value={metaCreds.accessToken}
                   onChange={(e) => setMetaCreds((p) => ({ ...p, accessToken: e.target.value }))}
@@ -650,7 +649,7 @@ export default function WhatsAppAdmin() {
             {selectedChannelId === "twilio_whatsapp" && (
               <div className="grid grid-cols-1 gap-3 pt-1 max-w-xl">
                 <input
-                  className="border rounded-lg px-3 py-2 text-gray-900 font-mono text-xs"
+                  className={`${adminInputClass} font-mono text-xs`}
                   placeholder="Account SID (AC…)"
                   value={twilioCreds.accountSid}
                   onChange={(e) => setTwilioCreds((p) => ({ ...p, accountSid: e.target.value }))}
@@ -659,7 +658,7 @@ export default function WhatsAppAdmin() {
                   autoComplete="off"
                 />
                 <input
-                  className="border rounded-lg px-3 py-2 text-gray-900 font-mono text-xs"
+                  className={`${adminInputClass} font-mono text-xs`}
                   placeholder="Auth Token"
                   value={twilioCreds.authToken}
                   onChange={(e) => setTwilioCreds((p) => ({ ...p, authToken: e.target.value }))}
@@ -668,7 +667,7 @@ export default function WhatsAppAdmin() {
                   minLength={8}
                 />
                 <input
-                  className="border rounded-lg px-3 py-2 text-gray-900"
+                  className={adminInputClass}
                   placeholder="Número WhatsApp Twilio (E.164), ex.: +551150284949"
                   value={twilioCreds.fromWhatsApp}
                   onChange={(e) => setTwilioCreds((p) => ({ ...p, fromWhatsApp: e.target.value }))}
@@ -678,17 +677,13 @@ export default function WhatsAppAdmin() {
               </div>
             )}
 
-            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-gray-100">
-              <span className="text-xs text-gray-500">
-                Credenciais cifradas em repouso (AES-256-GCM).
-              </span>
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-zinc-700/80">
+              <span className="text-xs text-gray-500">Credenciais cifradas em repouso (AES-256-GCM).</span>
               <button
                 type="submit"
                 disabled={savingConnect}
-                className={`px-5 py-2 rounded-lg text-white text-sm font-medium disabled:opacity-50 ${
-                  selectedChannelId === "twilio_whatsapp"
-                    ? "bg-violet-600 hover:bg-violet-700"
-                    : "bg-accent hover:bg-accent-dark"
+                className={`${adminBtnPrimaryClass} disabled:opacity-50 ${
+                  selectedChannelId === "twilio_whatsapp" ? "bg-violet-600 hover:bg-violet-700" : ""
                 }`}
               >
                 {savingConnect ? "Salvando…" : "Conectar número"}
@@ -696,19 +691,19 @@ export default function WhatsAppAdmin() {
             </div>
           </>
         ) : (
-          <p className="text-sm text-gray-500">Selecione um canal acima para ver os campos de credencial.</p>
+          <p className="text-sm text-gray-400">Selecione um canal acima para ver os campos de credencial.</p>
         )}
       </form>
 
-      <div className="mt-8 bg-white rounded-xl border border-gray-100 overflow-hidden">
-        <div className="px-4 py-3 bg-gray-50 border-b text-sm font-semibold text-gray-700">
+      <div className={adminPanelClass}>
+        <div className="px-4 py-3 border-b border-zinc-700/80 text-sm font-semibold text-white">
           Conexões cadastradas
         </div>
-        <div className="divide-y">
+        <div className="divide-y divide-zinc-700/60">
           {loading ? (
-            <div className="p-6 text-sm text-gray-500">Carregando...</div>
+            <div className="p-6 text-sm text-gray-400">Carregando...</div>
           ) : channels.length === 0 ? (
-            <div className="p-6 text-sm text-gray-500">Nenhuma conexão ainda.</div>
+            <div className="p-6 text-sm text-gray-400">Nenhuma conexão ainda.</div>
           ) : (
             channels.map((channel) => (
               <div key={channel.id} className="p-5">
@@ -717,7 +712,7 @@ export default function WhatsAppAdmin() {
                     {editingId === channel.id ? (
                       <div className="flex flex-wrap items-center gap-2">
                         <input
-                          className="border rounded-lg px-3 py-2 text-gray-900 text-sm min-w-[12rem] flex-1 max-w-md"
+                          className={`${adminInputClass} mt-0 min-w-[12rem] flex-1 max-w-md`}
                           value={editLabel}
                           onChange={(e) => setEditLabel(e.target.value)}
                           aria-label="Novo nome da conexão"
@@ -726,7 +721,7 @@ export default function WhatsAppAdmin() {
                           type="button"
                           disabled={savingEditId === channel.id}
                           onClick={() => void saveEdit(channel.id)}
-                          className="text-sm bg-accent text-white px-3 py-2 rounded-lg hover:bg-accent-dark disabled:opacity-50"
+                          className={adminBtnPrimaryClass}
                         >
                           {savingEditId === channel.id ? "Salvando..." : "Salvar"}
                         </button>
@@ -734,16 +729,16 @@ export default function WhatsAppAdmin() {
                           type="button"
                           disabled={savingEditId === channel.id}
                           onClick={cancelEdit}
-                          className="text-sm border border-gray-300 text-gray-700 px-3 py-2 rounded-lg hover:bg-gray-50"
+                          className={adminBtnSecondaryClass}
                         >
                           Cancelar
                         </button>
                       </div>
                     ) : (
                       <>
-                        <p className="text-sm font-semibold text-gray-900">
+                        <p className="text-sm font-semibold text-white">
                           {channel.label || "WhatsApp"}{" "}
-                          <span className="text-xs font-normal text-gray-500">
+                          <span className="text-xs font-normal text-gray-400">
                             — {providerDisplayName(channel.provider)}
                           </span>
                         </p>
@@ -762,18 +757,14 @@ export default function WhatsAppAdmin() {
                   </div>
                   {editingId !== channel.id && (
                     <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => startEdit(channel)}
-                        className="text-sm text-accent hover:underline"
-                      >
+                      <button type="button" onClick={() => startEdit(channel)} className={adminBtnLinkClass}>
                         Renomear
                       </button>
                       <button
                         type="button"
                         disabled={deletingId === channel.id}
                         onClick={() => void removeChannel(channel.id, channel.label || "WhatsApp")}
-                        className="text-sm text-red-600 hover:underline disabled:opacity-50"
+                        className={adminBtnDangerClass}
                       >
                         {deletingId === channel.id ? "Removendo..." : "Remover"}
                       </button>
@@ -784,9 +775,9 @@ export default function WhatsAppAdmin() {
                   {channel.phone_numbers.map((p) => (
                     <div
                       key={p.id}
-                      className="rounded-lg border border-gray-200 px-3 py-2 text-sm bg-gray-50"
+                      className="rounded-lg border border-zinc-600/60 bg-zinc-900/50 px-3 py-2 text-sm"
                     >
-                      <p className="text-gray-900 font-medium">
+                      <p className="text-white font-medium">
                         {p.display_phone_number || "(número sem display)"}
                       </p>
                       <p className="text-xs text-gray-500">
@@ -809,7 +800,7 @@ export default function WhatsAppAdmin() {
         </div>
       </div>
 
-      <p className="mt-8 text-[10px] text-slate-600 max-w-3xl leading-relaxed">
+      <p className="text-[10px] text-slate-600 max-w-3xl leading-relaxed">
         Se você <strong className="text-slate-400">não</strong> vê o bloco &quot;Configuração global&quot;, o dropdown
         &quot;Canal&quot; e &quot;Nova conexão&quot;, faça deploy de novo o diretório <span className="font-mono">dist/</span>{" "}
         para o mesmo <span className="font-mono">DocumentRoot</span> do Apache do app e confira se não há outro
@@ -817,8 +808,8 @@ export default function WhatsAppAdmin() {
         <span className="font-mono">curl -s https://app.clienton.com.br/ | grep script</span>
       </p>
       {showTour ? (
-        <div className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-[#111827] border border-[#334155] rounded-xl p-5">
+        <div className={adminModalOverlayClass}>
+          <div className={adminModalClass}>
             <p className="text-[11px] uppercase tracking-wide text-cyan-300 mb-1">
               Tour do WhatsApp admin
             </p>
@@ -856,16 +847,12 @@ export default function WhatsAppAdmin() {
                         Math.min(WHATSAPP_ADMIN_TOUR_STEPS.length - 1, prev + 1)
                       )
                     }
-                    className="px-3 py-1.5 rounded-lg bg-teal-600 text-white hover:bg-teal-700 text-sm"
+                    className={adminBtnPrimaryClass}
                   >
                     Próximo
                   </button>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={handleCloseTour}
-                    className="px-3 py-1.5 rounded-lg bg-teal-600 text-white hover:bg-teal-700 text-sm"
-                  >
+                  <button type="button" onClick={handleCloseTour} className={adminBtnPrimaryClass}>
                     Concluir
                   </button>
                 )}

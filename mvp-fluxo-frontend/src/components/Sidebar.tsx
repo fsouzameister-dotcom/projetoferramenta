@@ -113,24 +113,31 @@ export default function Sidebar() {
 
   useEffect(() => {
     setExpandedGroups((prev) => {
-      let changed = false;
-      const next = { ...prev };
+      const activeGroup = groups.find((group) =>
+        groupContainsActivePath(group, location.pathname)
+      );
+      if (!activeGroup) return prev;
+
+      if (prev[activeGroup.id] && !groups.some((g) => g.id !== activeGroup.id && prev[g.id])) {
+        return prev;
+      }
+
+      const next: Record<string, boolean> = {};
       for (const group of groups) {
-        if (groupContainsActivePath(group, location.pathname) && !next[group.id]) {
-          next[group.id] = true;
-          changed = true;
-        }
+        next[group.id] = group.id === activeGroup.id;
       }
-      if (changed) {
-        localStorage.setItem(EXPANDED_STORAGE_KEY, JSON.stringify(next));
-      }
-      return changed ? next : prev;
+      localStorage.setItem(EXPANDED_STORAGE_KEY, JSON.stringify(next));
+      return next;
     });
   }, [location.pathname, groups]);
 
   const toggleGroup = (groupId: string) => {
     setExpandedGroups((prev) => {
-      const next = { ...prev, [groupId]: !prev[groupId] };
+      const next: Record<string, boolean> = {};
+      const willOpen = !prev[groupId];
+      for (const group of groups) {
+        next[group.id] = willOpen && group.id === groupId;
+      }
       localStorage.setItem(EXPANDED_STORAGE_KEY, JSON.stringify(next));
       return next;
     });

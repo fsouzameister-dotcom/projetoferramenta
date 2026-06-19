@@ -8,6 +8,22 @@ import {
   PASSWORD_MIN_LENGTH,
   PASSWORD_POLICY_MESSAGE,
 } from "~lib/password-policy";
+import {
+  adminBtnDangerClass,
+  adminBtnLinkClass,
+  adminBtnPrimaryClass,
+  adminBtnSecondaryClass,
+  adminErrorClass,
+  adminInputInlineClass,
+  adminModalClass,
+  adminModalOverlayClass,
+  adminPageShellClass,
+  adminPanelClass,
+  adminSectionClass,
+  adminSelectClass,
+  adminTableHeadClass,
+  adminTableRowClass,
+} from "~lib/admin-ui";
 
 type UserRow = {
   id: string;
@@ -213,9 +229,11 @@ export default function UsersAdmin() {
     setShowTour(true);
   };
 
+  const checkboxClass = "rounded border-zinc-600 bg-zinc-900 accent-cyan-500";
+
   return (
-    <div className="p-8">
-      <div className="flex items-start justify-between gap-3">
+    <div className={adminPageShellClass()}>
+      <header className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-white">Usuários e Permissões</h1>
           <p className="text-sm text-gray-300 mt-1 flex items-center gap-2">
@@ -224,7 +242,7 @@ export default function UsersAdmin() {
           </p>
           {hasPermission("roles") ? (
             <p className="text-xs text-cyan-300 mt-2">
-              <Link to="/admin/roles" className="underline">
+              <Link to="/admin/roles" className="underline hover:text-cyan-200">
                 Gerenciar perfis e permissões
               </Link>
             </p>
@@ -236,118 +254,116 @@ export default function UsersAdmin() {
         <button
           type="button"
           onClick={handleOpenTour}
-          className="w-8 h-8 rounded-full border border-cyan-400/60 text-cyan-200 hover:bg-cyan-500/10 text-sm"
+          className="w-8 h-8 rounded-full border border-cyan-400/60 text-cyan-200 hover:bg-cyan-500/10 text-sm shrink-0"
           title="Reabrir tour de usuários"
           aria-label="Reabrir tour de usuários"
         >
           ?
         </button>
-      </div>
-      <div className="mt-4 bg-white rounded-xl p-4 border border-gray-100">
-        <p className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+      </header>
+
+      <section className={`${adminSectionClass} text-sm`}>
+        <p className="font-semibold text-white flex items-center gap-2">
           Ambiente de testes
           <InfoTooltip text="Essa opção só afeta a interface local deste tenant e facilita validações sem envio real." />
         </p>
-        <p className="text-xs text-gray-600 mt-1">
+        <p className="text-xs text-gray-400 mt-1">
           Habilita o botão oculto "Simular cliente" na tela de atendimento para validar layout sem envio real.
         </p>
-        <label className="mt-3 inline-flex items-center gap-2 text-sm text-gray-800">
+        <label className="mt-3 inline-flex items-center gap-2 text-sm text-gray-300">
           <input
             type="checkbox"
+            className={checkboxClass}
             checked={simulationEnabled}
             onChange={(e) => toggleSimulationFeature(e.target.checked)}
           />
           Ativar simulação local para este tenant
         </label>
-        {simulationNotice ? <p className="mt-2 text-xs text-teal-700">{simulationNotice}</p> : null}
-      </div>
+        {simulationNotice ? <p className="mt-2 text-xs text-emerald-300">{simulationNotice}</p> : null}
+      </section>
 
-      {error && (
-        <div className="mt-4 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
-          {error}
-        </div>
-      )}
+      {error ? <div className={adminErrorClass}>{error}</div> : null}
 
-      <form onSubmit={onSubmit} className="mt-6 bg-white rounded-xl p-6 text-gray-900">
+      <form onSubmit={onSubmit} className={adminSectionClass}>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        <input
-          className="border rounded-lg px-3 py-2 text-gray-900"
-          placeholder="Nome de exibicao no atendimento"
-          value={form.name}
-          onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
-          required
-        />
-        <input
-          className="border rounded-lg px-3 py-2 text-gray-900"
-          placeholder="Email"
-          type="email"
-          value={form.email}
-          onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
-          required
-        />
-        <input
-          className="border rounded-lg px-3 py-2 text-gray-900"
-          placeholder="Senha"
-          type="password"
-          minLength={PASSWORD_MIN_LENGTH}
-          value={form.password}
-          onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
-          required
-        />
-        <div className="flex gap-2 min-w-0">
-          <select
-            className="border rounded-lg px-3 py-2 text-gray-900 flex-1 min-w-0"
-            value={form.role_id}
-            onChange={(e) => setForm((p) => ({ ...p, role_id: e.target.value }))}
-          >
-            {assignableRoles.map((role) => (
-              <option key={role.id} value={role.id}>
-                {role.label}
-              </option>
-            ))}
-          </select>
-          <button
-            type="submit"
-            disabled={saving}
-            className="bg-accent text-white px-3 py-2 rounded-lg hover:bg-accent-dark disabled:opacity-50 shrink-0"
-            title="Cria o usuário com o papel selecionado."
-          >
-            {saving ? "Salvando..." : "Criar"}
-          </button>
-        </div>
+          <input
+            className={adminInputInlineClass}
+            placeholder="Nome de exibicao no atendimento"
+            value={form.name}
+            onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+            required
+          />
+          <input
+            className={adminInputInlineClass}
+            placeholder="Email"
+            type="email"
+            value={form.email}
+            onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
+            required
+          />
+          <input
+            className={adminInputInlineClass}
+            placeholder="Senha"
+            type="password"
+            minLength={PASSWORD_MIN_LENGTH}
+            value={form.password}
+            onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
+            required
+          />
+          <div className="flex gap-2 min-w-0">
+            <select
+              className={`${adminSelectClass} mt-0 flex-1 min-w-0`}
+              value={form.role_id}
+              onChange={(e) => setForm((p) => ({ ...p, role_id: e.target.value }))}
+            >
+              {assignableRoles.map((role) => (
+                <option key={role.id} value={role.id}>
+                  {role.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="submit"
+              disabled={saving}
+              className={`${adminBtnPrimaryClass} shrink-0`}
+              title="Cria o usuário com o papel selecionado."
+            >
+              {saving ? "Salvando..." : "Criar"}
+            </button>
+          </div>
         </div>
         <p className="mt-2 text-xs text-gray-500">{PASSWORD_POLICY_MESSAGE}</p>
       </form>
 
-      <div className="mt-6 bg-white rounded-xl border border-gray-100 overflow-hidden">
+      <div className={adminPanelClass}>
         <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-600">
+          <thead className={adminTableHeadClass}>
             <tr>
               <th className="px-4 py-3 text-left">Nome de exibicao</th>
               <th className="px-4 py-3 text-left">Email</th>
               <th className="px-4 py-3 text-left">Perfil</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="text-gray-200">
             {loading ? (
               <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-gray-500">
+                <td colSpan={4} className="px-4 py-6 text-center text-gray-400">
                   Carregando...
                 </td>
               </tr>
             ) : users.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-gray-500">
+                <td colSpan={4} className="px-4 py-6 text-center text-gray-400">
                   Nenhum usuário cadastrado.
                 </td>
               </tr>
             ) : (
               users.map((user) => (
-                <tr key={user.id} className="border-t">
-                  <td className="px-4 py-3 text-gray-800">
+                <tr key={user.id} className={adminTableRowClass}>
+                  <td className="px-4 py-3 text-white">
                     {editingUserId === user.id ? (
                       <input
-                        className="border rounded px-2 py-1 w-full"
+                        className={adminInputInlineClass}
                         value={editForm.name}
                         onChange={(e) => setEditForm((p) => ({ ...p, name: e.target.value }))}
                       />
@@ -355,10 +371,10 @@ export default function UsersAdmin() {
                       user.name
                     )}
                   </td>
-                  <td className="px-4 py-3 text-gray-600">
+                  <td className="px-4 py-3 text-gray-300">
                     {editingUserId === user.id ? (
                       <input
-                        className="border rounded px-2 py-1 w-full"
+                        className={adminInputInlineClass}
                         value={editForm.email}
                         onChange={(e) => setEditForm((p) => ({ ...p, email: e.target.value }))}
                       />
@@ -366,11 +382,11 @@ export default function UsersAdmin() {
                       user.email
                     )}
                   </td>
-                  <td className="px-4 py-3 text-gray-700">
+                  <td className="px-4 py-3">
                     {editingUserId === user.id ? (
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2">
                         <select
-                          className="border rounded px-2 py-1"
+                          className={adminInputInlineClass}
                           value={editForm.role_id}
                           onChange={(e) =>
                             setEditForm((p) => ({ ...p, role_id: e.target.value }))
@@ -383,7 +399,7 @@ export default function UsersAdmin() {
                           ))}
                         </select>
                         <input
-                          className="border rounded px-2 py-1"
+                          className={adminInputInlineClass}
                           placeholder="Nova senha (opcional)"
                           type="password"
                           minLength={PASSWORD_MIN_LENGTH}
@@ -394,7 +410,7 @@ export default function UsersAdmin() {
                         />
                         <button
                           type="button"
-                          className="px-3 py-1 bg-teal-600 text-white rounded"
+                          className={adminBtnPrimaryClass}
                           disabled={saving}
                           onClick={saveEdit}
                         >
@@ -402,7 +418,7 @@ export default function UsersAdmin() {
                         </button>
                         <button
                           type="button"
-                          className="px-3 py-1 border rounded"
+                          className={adminBtnSecondaryClass}
                           onClick={() => setEditingUserId(null)}
                         >
                           Cancelar
@@ -410,14 +426,14 @@ export default function UsersAdmin() {
                       </div>
                     ) : (
                       <div className="flex items-center justify-between gap-3">
-                        <span>
+                        <span className="text-gray-300">
                           {assignableRoles.find((r) => r.id === user.role_id)?.label ??
                             user.role_name}
                         </span>
                         <div className="flex gap-2">
                           <button
                             type="button"
-                            className="text-blue-600 hover:underline"
+                            className={adminBtnLinkClass}
                             onClick={() => startEdit(user)}
                             title="Editar nome, email, perfil e senha opcional."
                           >
@@ -425,7 +441,7 @@ export default function UsersAdmin() {
                           </button>
                           <button
                             type="button"
-                            className="text-red-600 hover:underline"
+                            className={adminBtnDangerClass}
                             onClick={() => removeUser(user)}
                           >
                             Excluir
@@ -440,9 +456,10 @@ export default function UsersAdmin() {
           </tbody>
         </table>
       </div>
+
       {showTour ? (
-        <div className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-[#111827] border border-[#334155] rounded-xl p-5">
+        <div className={adminModalOverlayClass}>
+          <div className={adminModalClass}>
             <p className="text-[11px] uppercase tracking-wide text-cyan-300 mb-1">
               Tour de usuários
             </p>
@@ -480,16 +497,12 @@ export default function UsersAdmin() {
                         Math.min(USERS_ADMIN_TOUR_STEPS.length - 1, prev + 1)
                       )
                     }
-                    className="px-3 py-1.5 rounded-lg bg-teal-600 text-white hover:bg-teal-700 text-sm"
+                    className={adminBtnPrimaryClass}
                   >
                     Próximo
                   </button>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={handleCloseTour}
-                    className="px-3 py-1.5 rounded-lg bg-teal-600 text-white hover:bg-teal-700 text-sm"
-                  >
+                  <button type="button" onClick={handleCloseTour} className={adminBtnPrimaryClass}>
                     Concluir
                   </button>
                 )}

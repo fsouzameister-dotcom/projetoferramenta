@@ -4,6 +4,19 @@ import api, { getApiErrorMessage, unwrapApiData } from "../api/client";
 import InfoTooltip from "~components/InfoTooltip";
 import type { AppPermission } from "~lib/permissions";
 import { hasPermission } from "~lib/permissions";
+import {
+  adminBtnDangerClass,
+  adminBtnLinkClass,
+  adminBtnPrimaryClass,
+  adminBtnSecondaryClass,
+  adminCodeClass,
+  adminErrorClass,
+  adminInputClass,
+  adminLabelClass,
+  adminLegendClass,
+  adminPageShellClass,
+  adminSectionClass,
+} from "~lib/admin-ui";
 
 type RoleRow = {
   id: string;
@@ -135,19 +148,21 @@ export default function RolesAdmin() {
 
   if (!canManage) {
     return (
-      <div className="p-8 text-gray-200">
+      <div className={adminPageShellClass()}>
         <h1 className="text-2xl font-bold text-white">Perfis e permissões</h1>
-        <p className="mt-4">Você não tem permissão para gerenciar perfis.</p>
-        <Link to="/dashboard" className="text-cyan-300 underline mt-2 inline-block">
+        <p className="mt-4 text-gray-300">Você não tem permissão para gerenciar perfis.</p>
+        <Link to="/dashboard" className="text-cyan-300 underline mt-2 inline-block hover:text-cyan-200">
           Voltar ao painel
         </Link>
       </div>
     );
   }
 
+  const checkboxClass = "rounded border-zinc-600 bg-zinc-900 accent-cyan-500 mt-1";
+
   return (
-    <div className="p-8 space-y-6">
-      <div>
+    <div className={adminPageShellClass(true)}>
+      <header>
         <h1 className="text-2xl font-bold text-white">Perfis e permissões</h1>
         <p className="text-sm text-gray-300 mt-1 flex items-center gap-2">
           Defina o que cada perfil pode acessar no admin.
@@ -156,39 +171,28 @@ export default function RolesAdmin() {
         <p className="text-xs text-gray-400 mt-1">
           Usuários precisam fazer login novamente após alterar permissões do próprio perfil.
         </p>
-      </div>
+      </header>
 
-      {error ? (
-        <div className="rounded-lg bg-red-500/20 border border-red-400/40 text-red-100 px-4 py-3 text-sm">
-          {error}
-        </div>
-      ) : null}
+      {error ? <div className={adminErrorClass}>{error}</div> : null}
 
       {loading ? (
-        <p className="text-gray-300">Carregando perfis…</p>
+        <p className="text-gray-400">Carregando perfis…</p>
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
           {roles.map((role) => (
-            <div
-              key={role.id}
-              className="bg-white rounded-xl p-4 border border-gray-100 shadow text-gray-900"
-            >
+            <div key={role.id} className={adminSectionClass}>
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <h2 className="font-semibold text-gray-900">{role.label}</h2>
-                  <p className="text-xs text-gray-500">
+                  <h2 className="font-semibold text-white">{role.label}</h2>
+                  <p className="text-xs text-gray-400">
                     {role.is_system ? "Perfil do sistema" : "Perfil customizado"} ·{" "}
-                    <code className="text-gray-600">{role.name}</code> · {role.user_count}{" "}
+                    <code className={adminCodeClass}>{role.name}</code> · {role.user_count}{" "}
                     usuário(s)
                   </p>
                 </div>
                 <div className="flex gap-2">
                   {role.name !== "platform_admin" && role.name !== "agente" ? (
-                    <button
-                      type="button"
-                      onClick={() => startEdit(role)}
-                      className="text-sm text-cyan-700 hover:underline"
-                    >
+                    <button type="button" onClick={() => startEdit(role)} className={adminBtnLinkClass}>
                       Editar
                     </button>
                   ) : null}
@@ -196,7 +200,7 @@ export default function RolesAdmin() {
                     <button
                       type="button"
                       onClick={() => void removeRole(role)}
-                      className="text-sm text-red-600 hover:underline"
+                      className={adminBtnDangerClass}
                     >
                       Excluir
                     </button>
@@ -210,7 +214,7 @@ export default function RolesAdmin() {
                   role.permissions.map((p) => (
                     <span
                       key={p}
-                      className="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full"
+                      className="text-xs bg-zinc-900/80 border border-zinc-600/60 text-gray-300 px-2 py-0.5 rounded-full"
                     >
                       {catalog.find((c) => c.key === p)?.label ?? p}
                     </span>
@@ -223,30 +227,26 @@ export default function RolesAdmin() {
       )}
 
       {editingId ? (
-        <div className="bg-white rounded-xl p-5 border border-cyan-200 shadow-lg text-gray-900">
-          <h3 className="font-semibold text-gray-900 mb-3">Editar permissões</h3>
-          <label className="block text-sm text-gray-700 mb-3">
+        <div className={`${adminSectionClass} border-cyan-500/40`}>
+          <h3 className="font-semibold text-white mb-3">Editar permissões</h3>
+          <label className={adminLabelClass}>
             Nome de exibição
             <input
-              className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-gray-900 bg-white"
+              className={adminInputClass}
               value={editLabel}
               onChange={(e) => setEditLabel(e.target.value)}
             />
           </label>
-          <div className="space-y-4 max-h-80 overflow-y-auto">
+          <div className="mt-4 space-y-4 max-h-80 overflow-y-auto">
             {groupedCatalog.map(([group, items]) => (
               <div key={group}>
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                  {group}
-                </p>
+                <p className={adminLegendClass}>{group}</p>
                 <div className="mt-2 grid sm:grid-cols-2 gap-2">
                   {items.map((item) => (
-                    <label
-                      key={item.key}
-                      className="flex items-start gap-2 text-sm text-gray-800"
-                    >
+                    <label key={item.key} className="flex items-start gap-2 text-sm text-gray-300">
                       <input
                         type="checkbox"
+                        className={checkboxClass}
                         checked={editPerms.includes(item.key)}
                         onChange={(e) =>
                           setEditPerms((prev) =>
@@ -269,41 +269,34 @@ export default function RolesAdmin() {
               type="button"
               disabled={saving || editPerms.length === 0}
               onClick={() => void saveEdit()}
-              className="px-4 py-2 rounded-lg bg-cyan-600 text-white text-sm font-medium disabled:opacity-50"
+              className={adminBtnPrimaryClass}
             >
               Salvar
             </button>
-            <button
-              type="button"
-              onClick={() => setEditingId(null)}
-              className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 bg-white"
-            >
+            <button type="button" onClick={() => setEditingId(null)} className={adminBtnSecondaryClass}>
               Cancelar
             </button>
           </div>
         </div>
       ) : null}
 
-      <form
-        onSubmit={(e) => void createRole(e)}
-        className="bg-white rounded-xl p-5 border border-gray-100 shadow text-gray-900"
-      >
-        <h3 className="font-semibold text-gray-900 mb-3">Criar perfil customizado</h3>
+      <form onSubmit={(e) => void createRole(e)} className={`${adminSectionClass} space-y-4`}>
+        <h3 className="font-semibold text-white">Criar perfil customizado</h3>
         <div className="grid sm:grid-cols-2 gap-3">
-          <label className="text-sm text-gray-700">
+          <label className={adminLabelClass}>
             Identificador (slug)
             <input
-              className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-gray-900 bg-white placeholder:text-gray-400"
+              className={adminInputClass}
               placeholder="supervisao_pesquisas"
               value={createForm.name}
               onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value }))}
               required
             />
           </label>
-          <label className="text-sm text-gray-700">
+          <label className={adminLabelClass}>
             Nome de exibição
             <input
-              className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-gray-900 bg-white placeholder:text-gray-400"
+              className={adminInputClass}
               placeholder="Supervisão Pesquisas"
               value={createForm.label}
               onChange={(e) => setCreateForm((f) => ({ ...f, label: e.target.value }))}
@@ -311,15 +304,16 @@ export default function RolesAdmin() {
             />
           </label>
         </div>
-        <div className="mt-4 space-y-4 max-h-64 overflow-y-auto">
+        <div className="space-y-4 max-h-64 overflow-y-auto">
           {groupedCatalog.map(([group, items]) => (
             <div key={group}>
-              <p className="text-xs font-semibold text-gray-500 uppercase">{group}</p>
+              <p className={adminLegendClass}>{group}</p>
               <div className="mt-2 grid sm:grid-cols-2 gap-2">
                 {items.map((item) => (
-                  <label key={item.key} className="flex items-center gap-2 text-sm text-gray-800">
+                  <label key={item.key} className="flex items-center gap-2 text-sm text-gray-300">
                     <input
                       type="checkbox"
+                      className={checkboxClass}
                       checked={createForm.permissions.includes(item.key)}
                       onChange={(e) =>
                         setCreateForm((f) => ({
@@ -338,7 +332,7 @@ export default function RolesAdmin() {
         <button
           type="submit"
           disabled={saving || createForm.permissions.length === 0}
-          className="mt-4 px-4 py-2 rounded-lg bg-teal-600 text-white text-sm font-medium disabled:opacity-50"
+          className={adminBtnPrimaryClass}
         >
           Criar perfil
         </button>
