@@ -14,27 +14,27 @@ const FAQ_ITEMS: FaqItem[] = [
   {
     question: "Como conectar um número WhatsApp?",
     answer:
-      "Vá em Admin > WhatsApp, selecione o provedor (Meta ou Twilio), preencha as credenciais e conclua em 'Conectar número'.",
+      "A configuração de canal WhatsApp (Meta/Twilio) é feita pela equipe ClientOn (operador plataforma), em Admin > Plataforma > WhatsApp. Se precisar conectar ou alterar um número, solicite ao suporte ClientOn.",
   },
   {
     question: "Onde configuro usuários e perfis de acesso?",
     answer:
-      "Em Admin > Usuários você cria e edita contas. Em Admin > Perfis você define o que cada perfil pode acessar (painel, fluxos, campanhas, relatórios, etc.). Ao criar ou editar um usuário, associe o perfil desejado.",
+      "No menu Acessos: Usuários (contas) e Perfis (permissões). Ao criar ou editar um usuário, associe o perfil desejado.",
   },
   {
     question: "Quais permissões existem no sistema?",
     answer:
-      "Painel, Fluxos, Usuários, Perfis, IA, WhatsApp, Entrada, Campanhas, Monitoramento, Operação (filas e tabulações), Relatórios e Clientes (plataforma). O menu lateral e as rotas da API respeitam apenas o que o perfil do usuário permite.",
+      "Painel, Fluxos, Campanhas, Monitoramento, Operação, Relatórios, IA, Insights IA, Usuários e Perfis. WhatsApp, Entrada e Clientes são exclusivos do operador plataforma ClientOn. O menu lateral respeita apenas o que o perfil permite.",
   },
   {
     question: "O que o perfil Supervisor enxerga por padrão?",
     answer:
-      "Por padrão: Painel, Fluxos, Monitoramento, Operação e Relatórios — sem Usuários, Campanhas, WhatsApp ou IA. Um administrador pode ajustar isso em Admin > Perfis.",
+      "Por padrão: Painel, Fluxos, Monitoramento, Operação e Relatórios — sem Usuários, Campanhas ou IA. Um administrador pode ajustar isso em Acessos > Perfis.",
   },
   {
     question: "Por que não vejo um menu (Campanhas, Relatórios, etc.)?",
     answer:
-      "O menu depende das permissões do seu perfil. Peça a um administrador para revisar Admin > Perfis ou troque seu perfil em Admin > Usuários. Agentes enxergam somente a tela de Atendimento.",
+      "O menu depende das permissões do seu perfil. Peça a um administrador para revisar Acessos > Perfis ou troque seu perfil em Acessos > Usuários. Agentes enxergam somente a tela de Atendimento.",
   },
   {
     question: "Como usar o cadastro mestre no atendimento?",
@@ -49,12 +49,12 @@ const FAQ_ITEMS: FaqItem[] = [
   {
     question: "Como configurar Click to WhatsApp (anúncio Meta)?",
     answer:
-      "No anúncio, use o botão WhatsApp apontando para o número já conectado no ClientOn. Em Admin > Entrada, crie uma rota tipo CTWA com chave ad_ID_DO_ANUNCIO (ou default para qualquer anúncio) e o fluxo desejado. A origem do anúncio fica gravada na conversa.",
+      "No anúncio, use o botão WhatsApp apontando para o número já conectado no ClientOn. A rota CTWA em Plataforma > Entrada é configurada pela equipe ClientOn. A origem do anúncio fica gravada na conversa.",
   },
   {
     question: "Como receber leads de formulário Instagram/Facebook (Lead Ads)?",
     answer:
-      "Em Admin > Entrada, crie rota tipo Instagram ou Facebook Lead Ads com uma chave (ex.: ig_minha_campanha). Envie POST para /webhooks/inbound com x-tenant-id, x-inbound-secret, sourceType, sourceKey, message, phone e name.",
+      "Rotas de entrada para Lead Ads são configuradas pela equipe ClientOn (Plataforma > Entrada). O webhook POST usa x-tenant-id, x-inbound-secret, sourceType, sourceKey, message, phone e name.",
   },
   {
     question: "O que mostra o Dashboard de Campanhas?",

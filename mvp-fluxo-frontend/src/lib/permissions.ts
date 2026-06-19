@@ -15,6 +15,17 @@ export const APP_PERMISSIONS = [
 
 export type AppPermission = (typeof APP_PERMISSIONS)[number];
 
+/** Somente platform_admin — espelha auth-permissions.ts do backend. */
+export const PLATFORM_ONLY_PERMISSIONS: AppPermission[] = [
+  "platform_tenants",
+  "whatsapp",
+  "inbound",
+];
+
+export function isPlatformOnlyPermission(permission: AppPermission): boolean {
+  return PLATFORM_ONLY_PERMISSIONS.includes(permission);
+}
+
 export type PermissionMeta = {
   key: AppPermission;
   label: string;
@@ -42,9 +53,9 @@ export const ROUTE_PERMISSIONS: Record<string, AppPermission> = {
 
 const DEFAULT_ROLE_PERMISSIONS: Record<string, AppPermission[]> = {
   platform_admin: [...APP_PERMISSIONS],
-  admin_local: APP_PERMISSIONS.filter((p) => p !== "platform_tenants"),
+  admin_local: APP_PERMISSIONS.filter((p) => !isPlatformOnlyPermission(p)),
   supervisor: ["dashboard", "flows", "monitoring", "operations", "reports"],
-  admin: APP_PERMISSIONS.filter((p) => p !== "platform_tenants"),
+  admin: APP_PERMISSIONS.filter((p) => !isPlatformOnlyPermission(p)),
   agente: [],
 };
 
@@ -56,8 +67,6 @@ export const ADMIN_LANDING_PATHS = [
   "/reports",
   "/admin/monitoring",
   "/admin/campaigns",
-  "/admin/inbound",
-  "/admin/whatsapp",
   "/admin/ai",
   "/admin/roles",
   "/faq",
@@ -80,7 +89,7 @@ export function getStoredPermissions(): AppPermission[] {
 export function getEffectivePermissions(): AppPermission[] {
   const role = localStorage.getItem("user_role") || "agente";
   if (role === "platform_admin") return [...APP_PERMISSIONS];
-  const stored = getStoredPermissions();
+  const stored = getStoredPermissions().filter((p) => !isPlatformOnlyPermission(p));
   if (stored.length > 0) return stored;
   return DEFAULT_ROLE_PERMISSIONS[role] ?? [];
 }
@@ -88,6 +97,7 @@ export function getEffectivePermissions(): AppPermission[] {
 export function hasPermission(permission: AppPermission): boolean {
   const role = localStorage.getItem("user_role") || "agente";
   if (role === "platform_admin") return true;
+  if (isPlatformOnlyPermission(permission)) return false;
   return getEffectivePermissions().includes(permission);
 }
 
@@ -117,6 +127,9 @@ export function canAccessPath(path: string): boolean {
   const role = localStorage.getItem("user_role") || "agente";
   if (role === "agente") return path === "/agent";
   if (role === "platform_admin") return true;
+  if (path === "/admin/whatsapp" || path === "/admin/inbound" || path.startsWith("/admin/platform/")) {
+    return false;
+  }
   if (path === "/admin/insights") {
     return hasPermission("reports") || hasPermission("ai");
   }

@@ -1,51 +1,143 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import logoClienton from "../../logo-clienton.png";
-import { isPlatformAdmin } from "~lib/session";
-import { hasPermission, type AppPermission } from "~lib/permissions";
+import {
+  SIDEBAR_FOOTER,
+  SIDEBAR_GROUPS,
+  SIDEBAR_STANDALONE,
+  filterVisibleNavGroups,
+  filterVisibleNavItems,
+  groupContainsActivePath,
+  isPathActive,
+  type SidebarNavGroup,
+  type SidebarNavItem,
+} from "~lib/sidebar-nav";
 
-type NavItem = {
-  label: string;
-  path: string;
-  icon: string;
-  permission?: AppPermission;
-};
+const EXPANDED_STORAGE_KEY = "clienton.sidebar.expandedGroups.v2";
 
-const baseNavItems: NavItem[] = [
-  { label: "Painel", path: "/dashboard", icon: "⊞", permission: "dashboard" },
-  { label: "Fluxos", path: "/flows", icon: "⬡", permission: "flows" },
-  { label: "Usuários", path: "/admin/users", icon: "👤", permission: "users" },
-  { label: "Perfis", path: "/admin/roles", icon: "🛡️", permission: "roles" },
-  { label: "IA", path: "/admin/ai", icon: "🤖", permission: "ai" },
-  { label: "WhatsApp", path: "/admin/whatsapp", icon: "💬", permission: "whatsapp" },
-  { label: "Entrada", path: "/admin/inbound", icon: "📥", permission: "inbound" },
-  { label: "Campanhas", path: "/admin/campaigns", icon: "📣", permission: "campaigns" },
-  { label: "Monitoramento", path: "/admin/monitoring", icon: "📡", permission: "monitoring" },
-  { label: "Operação", path: "/admin/operations", icon: "⚙️", permission: "operations" },
-  { label: "Relatórios", path: "/reports", icon: "📊", permission: "reports" },
-  { label: "Insights IA", path: "/admin/insights", icon: "✨", permission: "reports" },
-  { label: "FAQ", path: "/faq", icon: "❓", permission: "dashboard" },
-];
+function loadExpandedGroups(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(EXPANDED_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return {};
+    return parsed as Record<string, boolean>;
+  } catch {
+    return {};
+  }
+}
+
+function NavLink({ item, active }: { item: SidebarNavItem; active: boolean }) {
+  return (
+    <Link
+      to={item.path}
+      className={`mx-2 rounded-lg flex items-center gap-3 px-4 py-2.5 text-sm transition-all
+        ${
+          active
+            ? "bg-accent text-white font-semibold shadow-lg shadow-cyan-900/30"
+            : "text-zinc-200 hover:bg-zinc-700/80 hover:text-white"
+        }`}
+    >
+      <span className="text-base leading-none">{item.icon}</span>
+      {item.label}
+    </Link>
+  );
+}
+
+function NavGroupSection({
+  group,
+  expanded,
+  onToggle,
+  currentPath,
+}: {
+  group: SidebarNavGroup;
+  expanded: boolean;
+  onToggle: () => void;
+  currentPath: string;
+}) {
+  const groupActive = groupContainsActivePath(group, currentPath);
+
+  return (
+    <div className="mb-1">
+      <button
+        type="button"
+        onClick={onToggle}
+        className={`mx-2 w-[calc(100%-1rem)] rounded-lg flex items-center gap-3 px-4 py-2.5 text-sm transition-all text-left
+          ${
+            groupActive && !expanded
+              ? "bg-zinc-700/60 text-white font-medium"
+              : "text-zinc-300 hover:bg-zinc-700/50 hover:text-white"
+          }`}
+        aria-expanded={expanded}
+      >
+        <span className="text-base leading-none">{group.icon}</span>
+        <span className="flex-1 font-medium">{group.label}</span>
+        <span
+          className={`text-xs text-zinc-400 transition-transform ${expanded ? "rotate-90" : ""}`}
+          aria-hidden
+        >
+          ›
+        </span>
+      </button>
+      {expanded && (
+        <div className="mt-0.5 ml-2 border-l border-zinc-700/80 pl-1 space-y-0.5">
+          {group.children.map((child) => (
+            <NavLink
+              key={child.path}
+              item={child}
+              active={isPathActive(currentPath, child.path)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Sidebar() {
   const location = useLocation();
   const [logoFailed, setLogoFailed] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
+    loadExpandedGroups
+  );
 
-  const platformItems: NavItem[] = isPlatformAdmin()
-    ? [{ label: "Clientes", path: "/admin/platform/tenants", icon: "🏢", permission: "platform_tenants" }]
-    : [];
+  const standaloneItems = useMemo(
+    () => filterVisibleNavItems(SIDEBAR_STANDALONE),
+    []
+  );
+  const groups = useMemo(() => filterVisibleNavGroups(SIDEBAR_GROUPS), []);
+  const footerItem = useMemo(() => {
+    const items = filterVisibleNavItems([SIDEBAR_FOOTER]);
+    return items[0] ?? null;
+  }, []);
 
-  const navItems = [...platformItems, ...baseNavItems].filter((item) => {
-    if (item.path === "/admin/insights") {
-      return hasPermission("reports") || hasPermission("ai");
-    }
-    if (!item.permission) return true;
-    return hasPermission(item.permission);
-  });
+  useEffect(() => {
+    setExpandedGroups((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const group of groups) {
+        if (groupContainsActivePath(group, location.pathname) && !next[group.id]) {
+          next[group.id] = true;
+          changed = true;
+        }
+      }
+      if (changed) {
+        localStorage.setItem(EXPANDED_STORAGE_KEY, JSON.stringify(next));
+      }
+      return changed ? next : prev;
+    });
+  }, [location.pathname, groups]);
+
+  const toggleGroup = (groupId: string) => {
+    setExpandedGroups((prev) => {
+      const next = { ...prev, [groupId]: !prev[groupId] };
+      localStorage.setItem(EXPANDED_STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
 
   return (
     <aside className="w-60 bg-gradient-to-b from-zinc-800 to-zinc-900 min-h-screen flex flex-col border-r border-zinc-700/80 shadow-2xl">
-      {/* Logo */}
       <div className="px-4 py-5 border-b border-zinc-700/80 bg-zinc-200/95">
         {logoFailed ? (
           <div className="w-full h-14 mb-2 rounded-md bg-zinc-800 text-zinc-100 flex items-center justify-center font-semibold tracking-wide text-xl">
@@ -64,29 +156,35 @@ export default function Sidebar() {
         </p>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 py-4">
-        {navItems.map((item) => {
-          const isActive = location.pathname === item.path;
-          return (
-            <Link
-              key={item.path}
-              to={item.path}
-              className={`mx-2 rounded-lg flex items-center gap-3 px-4 py-3 text-sm transition-all
-                ${
-                  isActive
-                    ? "bg-accent text-white font-semibold shadow-lg shadow-cyan-900/30"
-                    : "text-zinc-200 hover:bg-zinc-700/80 hover:text-white"
-                }`}
-            >
-              <span>{item.icon}</span>
-              {item.label}
-            </Link>
-          );
-        })}
+      <nav className="flex-1 py-4 overflow-y-auto">
+        {standaloneItems.map((item) => (
+          <NavLink
+            key={item.path}
+            item={item}
+            active={isPathActive(location.pathname, item.path)}
+          />
+        ))}
+
+        {groups.map((group) => (
+          <NavGroupSection
+            key={group.id}
+            group={group}
+            expanded={expandedGroups[group.id] ?? false}
+            onToggle={() => toggleGroup(group.id)}
+            currentPath={location.pathname}
+          />
+        ))}
       </nav>
 
-      {/* Footer */}
+      {footerItem && (
+        <div className="border-t border-zinc-700/80 pt-2 pb-2">
+          <NavLink
+            item={footerItem}
+            active={isPathActive(location.pathname, footerItem.path)}
+          />
+        </div>
+      )}
+
       <div className="px-6 py-4 text-xs text-zinc-400 border-t border-zinc-700">
         © 2026 ClientOn Tecnologia
       </div>

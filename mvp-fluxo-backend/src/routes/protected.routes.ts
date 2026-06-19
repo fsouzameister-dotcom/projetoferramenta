@@ -4112,7 +4112,11 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
 
   fastify.get("/roles/permissions-catalog", async (request, reply) => {
     ensureAdminAccess(request);
-    return sendSuccess(request, reply, getPermissionCatalog());
+    return sendSuccess(
+      request,
+      reply,
+      getPermissionCatalog(request.user?.role_name)
+    );
   });
 
   fastify.get("/roles", async (request, reply) => {

@@ -8,11 +8,21 @@ import {
 } from "../src/auth-permissions";
 
 describe("auth-permissions", () => {
-  test("admin_local recebe permissões padrão completas exceto plataforma", () => {
+  test("admin_local recebe permissões padrão exceto plataforma e canais técnicos", () => {
     const perms = defaultPermissionsForRole("admin_local");
     assert.ok(perms.includes("users"));
     assert.ok(perms.includes("roles"));
+    assert.ok(perms.includes("campaigns"));
     assert.ok(!perms.includes("platform_tenants"));
+    assert.ok(!perms.includes("whatsapp"));
+    assert.ok(!perms.includes("inbound"));
+  });
+
+  test("admin_local não obtém whatsapp mesmo com permissão salva no perfil", () => {
+    assert.strictEqual(
+      hasPermission(["whatsapp", "flows"], "whatsapp", "admin_local"),
+      false
+    );
   });
 
   test("supervisor padrão não gerencia usuários nem campanhas", () => {

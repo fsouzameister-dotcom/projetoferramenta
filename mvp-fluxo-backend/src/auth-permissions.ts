@@ -20,6 +20,17 @@ export const APP_PERMISSIONS = [
 
 export type AppPermission = (typeof APP_PERMISSIONS)[number];
 
+/** Somente platform_admin — config técnica / multi-tenant. */
+export const PLATFORM_ONLY_PERMISSIONS: AppPermission[] = [
+  "platform_tenants",
+  "whatsapp",
+  "inbound",
+];
+
+export function isPlatformOnlyPermission(permission: AppPermission): boolean {
+  return PLATFORM_ONLY_PERMISSIONS.includes(permission);
+}
+
 export type PermissionMeta = {
   key: AppPermission;
   label: string;
@@ -30,17 +41,37 @@ export type PermissionMeta = {
 export const PERMISSION_CATALOG: PermissionMeta[] = [
   { key: "dashboard", label: "Painel", group: "Geral", description: "Visão geral e indicadores." },
   { key: "flows", label: "Fluxos", group: "Automação", description: "Listar, criar e editar fluxos." },
-  { key: "users", label: "Usuários", group: "Administração", description: "Gerenciar usuários do tenant." },
-  { key: "roles", label: "Perfis e permissões", group: "Administração", description: "Criar perfis e definir o que cada um acessa." },
-  { key: "ai", label: "IA", group: "Canais", description: "Personas, scripts e provedores de IA." },
-  { key: "whatsapp", label: "WhatsApp", group: "Canais", description: "Canais e templates WhatsApp." },
-  { key: "inbound", label: "Entrada", group: "Canais", description: "Rotas de entrada e gatilhos." },
-  { key: "campaigns", label: "Campanhas", group: "Canais", description: "Disparos em massa e relatórios." },
-  { key: "monitoring", label: "Monitoramento", group: "Operação", description: "Acompanhar conversas em tempo real." },
-  { key: "operations", label: "Operação", group: "Operação", description: "Filas, tabulações e configurações de atendimento." },
-  { key: "reports", label: "Relatórios", group: "Operação", description: "Relatórios e exportações." },
-  { key: "platform_tenants", label: "Clientes (plataforma)", group: "Plataforma", description: "Gerenciar tenants de clientes." },
+  { key: "users", label: "Usuários", group: "Acessos", description: "Gerenciar usuários do tenant." },
+  { key: "roles", label: "Perfis e permissões", group: "Acessos", description: "Criar perfis e definir o que cada um acessa." },
+  { key: "ai", label: "IA", group: "Inteligência", description: "Personas, scripts e provedores de IA." },
+  {
+    key: "whatsapp",
+    label: "WhatsApp",
+    group: "Plataforma",
+    description: "Canais e credenciais WhatsApp (somente operador plataforma).",
+  },
+  {
+    key: "inbound",
+    label: "Entrada",
+    group: "Plataforma",
+    description: "Rotas de entrada e gatilhos (somente operador plataforma).",
+  },
+  { key: "campaigns", label: "Campanhas", group: "Automação", description: "Disparos em massa e relatórios." },
+  { key: "monitoring", label: "Monitoramento", group: "Operacional", description: "Acompanhar conversas em tempo real." },
+  { key: "operations", label: "Operação", group: "Operacional", description: "Filas, tabulações e configurações de atendimento." },
+  { key: "reports", label: "Relatórios", group: "Operacional", description: "Relatórios e exportações." },
+  {
+    key: "platform_tenants",
+    label: "Clientes (plataforma)",
+    group: "Plataforma",
+    description: "Gerenciar tenants de clientes.",
+  },
 ];
+
+export function getPermissionCatalog(roleName?: string): PermissionMeta[] {
+  if (isPlatformAdmin(roleName)) return PERMISSION_CATALOG;
+  return PERMISSION_CATALOG.filter((item) => !isPlatformOnlyPermission(item.key));
+}
 
 const PERMISSION_SET = new Set<string>(APP_PERMISSIONS);
 
@@ -61,7 +92,9 @@ export function normalizePermissions(raw: unknown): AppPermission[] {
 
 export const DEFAULT_ROLE_PERMISSIONS: Record<AppRole, AppPermission[]> = {
   platform_admin: [...APP_PERMISSIONS],
-  admin_local: APP_PERMISSIONS.filter((p) => p !== "platform_tenants"),
+  admin_local: APP_PERMISSIONS.filter(
+    (p) => !isPlatformOnlyPermission(p)
+  ),
   supervisor: ["dashboard", "flows", "monitoring", "operations", "reports"],
   agente: [],
 };
@@ -80,7 +113,9 @@ export function resolveEffectivePermissions(input: {
   if (isPlatformAdmin(input.roleName)) {
     return [...APP_PERMISSIONS];
   }
-  const stored = normalizePermissions(input.storedPermissions);
+  const stored = normalizePermissions(input.storedPermissions).filter(
+    (p) => !isPlatformOnlyPermission(p)
+  );
   if (stored.length > 0) {
     return stored;
   }
@@ -93,6 +128,7 @@ export function hasPermission(
   roleName?: string
 ): boolean {
   if (isPlatformAdmin(roleName)) return true;
+  if (isPlatformOnlyPermission(permission)) return false;
   const effective =
     permissions && permissions.length > 0
       ? permissions
@@ -130,5 +166,5 @@ export function hasAdminUiPermissions(
 }
 
 export function sanitizePermissionsInput(raw: unknown): AppPermission[] {
-  return normalizePermissions(raw);
+  return normalizePermissions(raw).filter((p) => !isPlatformOnlyPermission(p));
 }

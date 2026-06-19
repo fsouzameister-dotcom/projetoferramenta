@@ -3,7 +3,7 @@ import type { AppRole } from "./auth-roles";
 import {
   type AppPermission,
   DEFAULT_ROLE_PERMISSIONS,
-  PERMISSION_CATALOG,
+  getPermissionCatalog as buildPermissionCatalog,
   normalizePermissions,
   resolveEffectivePermissions,
   sanitizePermissionsInput,
@@ -307,8 +307,8 @@ export async function deleteCustomRole(
   return (deleted.rowCount ?? 0) > 0;
 }
 
-export function getPermissionCatalog() {
-  return PERMISSION_CATALOG;
+export function getPermissionCatalog(roleName?: string) {
+  return buildPermissionCatalog(roleName);
 }
 
 export { normalizePermissions };

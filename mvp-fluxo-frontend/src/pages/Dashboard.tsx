@@ -315,8 +315,8 @@ export default function Dashboard() {
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
         <h2 className="text-lg font-semibold text-primary mb-2">Resumo do Painel</h2>
         <p className="text-sm text-gray-600">
-          A criacao e gerenciamento de fluxos fica centralizada no menu lateral em{" "}
-          <strong>Fluxos</strong>.
+          A criacao e gerenciamento de fluxos fica em{" "}
+          <strong>Automação → Fluxos</strong> no menu lateral.
         </p>
       </div>
     </div>
