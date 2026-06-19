@@ -1,6 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import api, { getApiErrorMessage, unwrapApiData } from "../api/client";
 import InfoTooltip from "~components/InfoTooltip";
+import {
+  adminBtnDangerClass,
+  adminBtnLinkClass,
+  adminBtnPrimaryClass,
+  adminBtnSecondaryClass,
+  adminErrorClass,
+  adminInputClass,
+  adminInputInlineClass,
+  adminLabelClass,
+  adminNoticeClass,
+  adminPageShellClass,
+  adminPanelClass,
+  adminSectionClass,
+  adminTableHeadClass,
+  adminTableRowClass,
+} from "~lib/admin-ui";
 
 type QueueRow = {
   id: string;
@@ -326,32 +342,25 @@ export default function OperationsAdmin() {
     });
   };
 
-  const inputClass =
-    "mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-gray-900 bg-white";
-  const cardClass =
-    "rounded-xl border border-gray-100 bg-white p-5 space-y-4 shadow-sm text-gray-900";
+  const checkboxClass = "rounded border-zinc-600 bg-zinc-900 accent-cyan-500";
+  const nestedPanelClass =
+    "space-y-2 rounded-lg border border-zinc-600/60 bg-zinc-900/50 p-3";
+  const listPanelClass =
+    "max-h-40 overflow-y-auto rounded-lg border border-zinc-600/60 bg-zinc-900/50 p-2 space-y-1";
 
   return (
-    <div className="p-8 max-w-6xl space-y-6">
-      <div>
+    <div className={adminPageShellClass(true)}>
+      <header>
         <h1 className="text-2xl font-bold text-white">Operação</h1>
         <p className="text-sm text-gray-300 mt-1">
           Filas, tabulações de encerramento e mensagens automáticas ao cliente.
         </p>
-      </div>
+      </header>
 
-      {error ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 text-red-800 px-4 py-3 text-sm">
-          {error}
-        </div>
-      ) : null}
-      {notice ? (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 px-4 py-3 text-sm">
-          {notice}
-        </div>
-      ) : null}
+      {error ? <div className={adminErrorClass}>{error}</div> : null}
+      {notice ? <div className={adminNoticeClass}>{notice}</div> : null}
 
-      <div className="flex gap-2 border-b border-gray-600/60">
+      <div className="flex gap-2 border-b border-zinc-600/60">
         {(
           [
             ["queues", "Filas"],
@@ -378,63 +387,65 @@ export default function OperationsAdmin() {
 
       {activeTab === "queues" ? (
         <div className="grid gap-6 lg:grid-cols-2">
-          <form onSubmit={onSaveQueue} className={cardClass}>
-            <h2 className="font-semibold text-gray-900">
+          <form onSubmit={onSaveQueue} className={`${adminSectionClass} space-y-4`}>
+            <h2 className="text-lg font-semibold text-white">
               {editingQueueId ? "Editar fila" : "Nova fila"}
             </h2>
-            <label className="block text-sm text-gray-800">
-              <span className="text-gray-700">Nome</span>
+            <label className={adminLabelClass}>
+              Nome
               <input
-                className={inputClass}
+                className={adminInputClass}
                 value={queueForm.label}
                 onChange={(e) => setQueueForm((p) => ({ ...p, label: e.target.value }))}
                 required
               />
             </label>
-            <label className="block text-sm text-gray-800">
-              <span className="text-gray-700">Chave (opcional)</span>
+            <label className={adminLabelClass}>
+              Chave (opcional)
               <input
-                className={inputClass}
+                className={adminInputClass}
                 value={queueForm.key}
                 onChange={(e) => setQueueForm((p) => ({ ...p, key: e.target.value }))}
                 placeholder="ex.: suporte"
               />
             </label>
-            <label className="block text-sm text-gray-800">
-              <span className="text-gray-700">Descrição</span>
+            <label className={adminLabelClass}>
+              Descrição
               <input
-                className={inputClass}
+                className={adminInputClass}
                 value={queueForm.description}
                 onChange={(e) => setQueueForm((p) => ({ ...p, description: e.target.value }))}
               />
             </label>
-            <label className="flex items-center gap-2 text-sm text-gray-800">
+            <label className="flex items-center gap-2 text-sm text-gray-300">
               <input
                 type="checkbox"
+                className={checkboxClass}
                 checked={queueForm.active}
                 onChange={(e) => setQueueForm((p) => ({ ...p, active: e.target.checked }))}
               />
               Fila ativa
             </label>
-            <label className="flex items-start gap-2 text-sm text-gray-800">
+            <label className="flex items-start gap-2 text-sm text-gray-300">
               <input
                 type="checkbox"
-                className="mt-1"
+                className={`mt-1 ${checkboxClass}`}
                 checked={queueForm.agentAiHintsEnabled}
                 onChange={(e) =>
                   setQueueForm((p) => ({ ...p, agentAiHintsEnabled: e.target.checked }))
                 }
               />
               <span>
-                <span className="text-gray-700 flex items-center gap-1">
+                <span className="flex items-center gap-1">
                   Dicas de IA nesta fila
                   <InfoTooltip text="Só vale se o interruptor geral em Configurações estiver ativo. Desative para filas em que os agentes não devem receber sugestões." />
                 </span>
               </span>
             </label>
-            <label className="flex items-center gap-2 text-sm text-gray-800">
+            <label className="flex items-center gap-2 text-sm text-gray-300">
               <input
                 type="checkbox"
+                className={checkboxClass}
                 checked={queueForm.hoursEnabled}
                 onChange={(e) => setQueueForm((p) => ({ ...p, hoursEnabled: e.target.checked }))}
               />
@@ -442,20 +453,20 @@ export default function OperationsAdmin() {
               <InfoTooltip text="Usado para relatórios e regras futuras de roteamento fora do expediente." />
             </label>
             {queueForm.hoursEnabled ? (
-              <div className="space-y-2 border border-gray-200 rounded-lg p-3 bg-gray-50">
+              <div className={nestedPanelClass}>
                 {WEEKDAYS.map((day) => (
-                  <div key={day.key} className="flex items-center gap-2 text-sm text-gray-800">
-                    <span className="w-16 text-gray-600">{day.label}</span>
+                  <div key={day.key} className="flex items-center gap-2 text-sm text-gray-300">
+                    <span className="w-16 text-gray-400">{day.label}</span>
                     <input
                       type="time"
-                      className="border border-gray-300 rounded px-2 py-1 text-gray-900 bg-white"
+                      className={adminInputInlineClass}
                       value={queueForm.schedule?.schedule[day.key]?.[0]?.start ?? "09:00"}
                       onChange={(e) => updateDaySlot(day.key, "start", e.target.value)}
                     />
-                    <span className="text-gray-600">—</span>
+                    <span className="text-gray-500">—</span>
                     <input
                       type="time"
-                      className="border border-gray-300 rounded px-2 py-1 text-gray-900 bg-white"
+                      className={adminInputInlineClass}
                       value={queueForm.schedule?.schedule[day.key]?.[0]?.end ?? "18:00"}
                       onChange={(e) => updateDaySlot(day.key, "end", e.target.value)}
                     />
@@ -464,14 +475,13 @@ export default function OperationsAdmin() {
               </div>
             ) : null}
             <div>
-              <p className="text-sm font-medium text-gray-700 mb-2">
-                Agentes com acesso à fila
-              </p>
-              <div className="max-h-40 overflow-y-auto border border-gray-200 rounded-lg p-2 space-y-1">
+              <p className="text-sm font-medium text-gray-300 mb-2">Agentes com acesso à fila</p>
+              <div className={listPanelClass}>
                 {users.map((u) => (
-                  <label key={u.id} className="flex items-center gap-2 text-sm text-gray-800">
+                  <label key={u.id} className="flex items-center gap-2 text-sm text-gray-300">
                     <input
                       type="checkbox"
+                      className={checkboxClass}
                       checked={queueForm.userIds.includes(u.id)}
                       onChange={() => toggleQueueUser(u.id)}
                     />
@@ -481,49 +491,45 @@ export default function OperationsAdmin() {
               </div>
             </div>
             <div className="flex gap-2">
-              <button
-                type="submit"
-                disabled={saving}
-                className="px-4 py-2 rounded-lg bg-cyan-600 text-white text-sm font-medium disabled:opacity-50"
-              >
+              <button type="submit" disabled={saving} className={adminBtnPrimaryClass}>
                 {saving ? "Salvando…" : "Salvar fila"}
               </button>
               {editingQueueId ? (
-                <button type="button" className="text-sm text-gray-600" onClick={resetQueueForm}>
+                <button type="button" className={adminBtnSecondaryClass} onClick={resetQueueForm}>
                   Cancelar
                 </button>
               ) : null}
             </div>
           </form>
-          <div className="rounded-xl border border-gray-100 bg-white shadow-sm overflow-hidden text-gray-900">
+          <div className={adminPanelClass}>
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-gray-600">
+              <thead className={adminTableHeadClass}>
                 <tr>
                   <th className="text-left px-4 py-2">Fila</th>
                   <th className="text-left px-4 py-2">Chave</th>
                   <th className="px-4 py-2" />
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="text-gray-200">
                 {queues.map((q) => (
-                  <tr key={q.id} className="border-t border-gray-100">
-                    <td className="px-4 py-2 text-gray-900">
+                  <tr key={q.id} className={adminTableRowClass}>
+                    <td className="px-4 py-2 text-white">
                       {q.label}
                       {!q.active ? (
-                        <span className="ml-2 text-xs text-amber-600">inativa</span>
+                        <span className="ml-2 text-xs text-amber-300">inativa</span>
                       ) : null}
                       {q.agentAiHintsEnabled === false ? (
                         <span className="ml-2 text-xs text-gray-500">sem dicas IA</span>
                       ) : null}
                     </td>
-                    <td className="px-4 py-2 text-gray-600">{q.key}</td>
+                    <td className="px-4 py-2 text-gray-400">{q.key}</td>
                     <td className="px-4 py-2 text-right space-x-2">
-                      <button type="button" className="text-cyan-700" onClick={() => onEditQueue(q)}>
+                      <button type="button" className={adminBtnLinkClass} onClick={() => onEditQueue(q)}>
                         Editar
                       </button>
                       <button
                         type="button"
-                        className="text-red-600"
+                        className={adminBtnDangerClass}
                         onClick={() => void onDeleteQueue(q.id)}
                       >
                         Excluir
@@ -539,45 +545,46 @@ export default function OperationsAdmin() {
 
       {activeTab === "tabulacoes" ? (
         <div className="grid gap-6 lg:grid-cols-2">
-          <form onSubmit={onSaveTab} className={cardClass}>
-            <h2 className="font-semibold text-gray-900">
+          <form onSubmit={onSaveTab} className={`${adminSectionClass} space-y-4`}>
+            <h2 className="text-lg font-semibold text-white">
               {editingTabId ? "Editar tabulação" : "Nova tabulação"}
             </h2>
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-gray-400">
               Sem filas vinculadas = disponível em todas. Com filas = só atendimentos dessas filas.
             </p>
-            <label className="block text-sm text-gray-800">
-              <span className="text-gray-700">Rótulo</span>
+            <label className={adminLabelClass}>
+              Rótulo
               <input
-                className={inputClass}
+                className={adminInputClass}
                 value={tabForm.label}
                 onChange={(e) => setTabForm((p) => ({ ...p, label: e.target.value }))}
                 required
               />
             </label>
-            <label className="block text-sm text-gray-800">
-              <span className="text-gray-700">Chave (opcional)</span>
+            <label className={adminLabelClass}>
+              Chave (opcional)
               <input
-                className={inputClass}
+                className={adminInputClass}
                 value={tabForm.key}
                 onChange={(e) => setTabForm((p) => ({ ...p, key: e.target.value }))}
               />
             </label>
-            <label className="block text-sm text-gray-800">
-              <span className="text-gray-700">Descrição</span>
+            <label className={adminLabelClass}>
+              Descrição
               <input
-                className={inputClass}
+                className={adminInputClass}
                 value={tabForm.description}
                 onChange={(e) => setTabForm((p) => ({ ...p, description: e.target.value }))}
               />
             </label>
             <div>
-              <p className="text-sm font-medium text-gray-700 mb-2">Filas</p>
-              <div className="border border-gray-200 rounded-lg p-2 space-y-1 max-h-36 overflow-y-auto">
+              <p className="text-sm font-medium text-gray-300 mb-2">Filas</p>
+              <div className={`${listPanelClass} max-h-36`}>
                 {queues.map((q) => (
-                  <label key={q.id} className="flex items-center gap-2 text-sm text-gray-800">
+                  <label key={q.id} className="flex items-center gap-2 text-sm text-gray-300">
                     <input
                       type="checkbox"
+                      className={checkboxClass}
                       checked={tabForm.queueIds.includes(q.id)}
                       onChange={() => toggleTabQueue(q.id)}
                     />
@@ -587,45 +594,41 @@ export default function OperationsAdmin() {
               </div>
             </div>
             <div className="flex gap-2">
-              <button
-                type="submit"
-                disabled={saving}
-                className="px-4 py-2 rounded-lg bg-cyan-600 text-white text-sm font-medium disabled:opacity-50"
-              >
+              <button type="submit" disabled={saving} className={adminBtnPrimaryClass}>
                 {saving ? "Salvando…" : "Salvar tabulação"}
               </button>
               {editingTabId ? (
-                <button type="button" className="text-sm text-gray-600" onClick={resetTabForm}>
+                <button type="button" className={adminBtnSecondaryClass} onClick={resetTabForm}>
                   Cancelar
                 </button>
               ) : null}
             </div>
           </form>
-          <div className="rounded-xl border border-gray-100 bg-white shadow-sm overflow-hidden text-gray-900">
+          <div className={adminPanelClass}>
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-gray-600">
+              <thead className={adminTableHeadClass}>
                 <tr>
                   <th className="text-left px-4 py-2">Tabulação</th>
                   <th className="text-left px-4 py-2">Filas</th>
                   <th className="px-4 py-2" />
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="text-gray-200">
                 {tabulacoes.map((t) => (
-                  <tr key={t.id} className="border-t border-gray-100">
-                    <td className="px-4 py-2 text-gray-900">{t.label}</td>
-                    <td className="px-4 py-2 text-gray-600 text-xs">
+                  <tr key={t.id} className={adminTableRowClass}>
+                    <td className="px-4 py-2 text-white">{t.label}</td>
+                    <td className="px-4 py-2 text-gray-400 text-xs">
                       {!t.queueIds?.length
                         ? "Todas"
                         : t.queueIds.map((id) => queueLabelById.get(id) ?? id).join(", ")}
                     </td>
                     <td className="px-4 py-2 text-right space-x-2">
-                      <button type="button" className="text-cyan-700" onClick={() => onEditTab(t)}>
+                      <button type="button" className={adminBtnLinkClass} onClick={() => onEditTab(t)}>
                         Editar
                       </button>
                       <button
                         type="button"
-                        className="text-red-600"
+                        className={adminBtnDangerClass}
                         onClick={() => void onDeleteTab(t.id)}
                       >
                         Excluir
@@ -640,15 +643,15 @@ export default function OperationsAdmin() {
       ) : null}
 
       {activeTab === "settings" ? (
-        <form onSubmit={onSaveSettings} className={`${cardClass} max-w-2xl`}>
-          <h2 className="font-semibold text-gray-900">Encerramento e retorno</h2>
-          <label className="block text-sm text-gray-800">
-            <span className="text-gray-700 flex items-center gap-1">
+        <form onSubmit={onSaveSettings} className={`${adminSectionClass} max-w-2xl space-y-4`}>
+          <h2 className="text-lg font-semibold text-white">Encerramento e retorno</h2>
+          <label className={adminLabelClass}>
+            <span className="flex items-center gap-1">
               Mensagem de encerramento
               <InfoTooltip text="Placeholders: {{protocolo}}, {{nome_cliente}}, {{resumo_tabulacao}}, {{data}}. Enviada na janela 24h; fora dela fica registrado nos relatórios." />
             </span>
             <textarea
-              className={`${inputClass} min-h-[120px]`}
+              className={`${adminInputClass} min-h-[120px]`}
               value={settingsForm.closureMessageTemplate}
               onChange={(e) =>
                 setSettingsForm((p) => ({ ...p, closureMessageTemplate: e.target.value }))
@@ -656,13 +659,13 @@ export default function OperationsAdmin() {
               required
             />
           </label>
-          <label className="block text-sm text-gray-800">
-            <span className="text-gray-700">Dias para oferecer “continuar atendimento”</span>
+          <label className={adminLabelClass}>
+            Dias para oferecer “continuar atendimento”
             <input
               type="number"
               min={1}
               max={365}
-              className="mt-1 w-32 border border-gray-300 rounded-lg px-3 py-2 text-gray-900 bg-white"
+              className={`${adminInputClass} w-32`}
               value={settingsForm.returnLookupDays}
               onChange={(e) =>
                 setSettingsForm((p) => ({
@@ -672,17 +675,17 @@ export default function OperationsAdmin() {
               }
             />
           </label>
-          <label className="flex items-start gap-2 text-sm text-gray-800">
+          <label className="flex items-start gap-2 text-sm text-gray-300">
             <input
               type="checkbox"
-              className="mt-1"
+              className={`mt-1 ${checkboxClass}`}
               checked={settingsForm.agentAiHintsEnabled}
               onChange={(e) =>
                 setSettingsForm((p) => ({ ...p, agentAiHintsEnabled: e.target.checked }))
               }
             />
             <span>
-              <span className="text-gray-700 flex items-center gap-1">
+              <span className="flex items-center gap-1">
                 Dicas de IA para agentes
                 <InfoTooltip text="Interruptor geral do tenant. Quando desligado, nenhuma fila exibe dicas. Quando ligado, cada fila pode desativar individualmente na aba Filas." />
               </span>
@@ -692,13 +695,11 @@ export default function OperationsAdmin() {
             </span>
           </label>
           {settings ? (
-            <p className="text-xs text-gray-500">Última atualização: {settings.closureMessageTemplate ? "ok" : "—"}</p>
+            <p className="text-xs text-gray-500">
+              Última atualização: {settings.closureMessageTemplate ? "ok" : "—"}
+            </p>
           ) : null}
-          <button
-            type="submit"
-            disabled={saving}
-            className="px-4 py-2 rounded-lg bg-cyan-600 text-white text-sm font-medium disabled:opacity-50"
-          >
+          <button type="submit" disabled={saving} className={adminBtnPrimaryClass}>
             {saving ? "Salvando…" : "Salvar configurações"}
           </button>
         </form>

@@ -1,5 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import api, { getApiErrorMessage, unwrapApiData } from "../api/client";
+import {
+  adminBtnDangerClass,
+  adminBtnPrimaryClass,
+  adminBtnSecondaryClass,
+  adminErrorClass,
+  adminInputInlineClass,
+  adminModalClass,
+  adminModalOverlayClass,
+  adminPageShellClass,
+  adminPanelClass,
+  adminSectionCompactClass,
+  adminSelectClass,
+} from "~lib/admin-ui";
 
 type MonitoringConversation = {
   id: string;
@@ -46,11 +59,17 @@ function sourceLabel(source?: string) {
 }
 
 function sourceClass(source?: string) {
-  if (source === "bot") return "bg-violet-100 text-violet-800";
-  if (source === "agente") return "bg-blue-100 text-blue-800";
-  if (source === "sistema") return "bg-gray-100 text-gray-700";
-  if (source === "cliente") return "bg-emerald-100 text-emerald-800";
-  return "bg-gray-100 text-gray-600";
+  if (source === "bot") return "bg-violet-500/20 text-violet-200";
+  if (source === "agente") return "bg-blue-500/20 text-blue-200";
+  if (source === "sistema") return "bg-zinc-600/50 text-gray-300";
+  if (source === "cliente") return "bg-emerald-500/20 text-emerald-200";
+  return "bg-zinc-700/50 text-gray-400";
+}
+
+function statusBadgeClass(status: MonitoringConversation["status"]) {
+  if (status === "em_espera") return "bg-amber-500/20 text-amber-200";
+  if (status === "em_andamento") return "bg-blue-500/20 text-blue-200";
+  return "bg-zinc-600/50 text-gray-400";
 }
 
 function isConversationOpen(conv: MonitoringConversation): boolean {
@@ -155,25 +174,21 @@ export default function MonitoringAdmin() {
   const canCloseSelected = selected ? isConversationOpen(selected) : false;
 
   return (
-    <div className="p-8 max-w-7xl">
-      <div className="mb-6">
+    <div className={adminPageShellClass(true)}>
+      <header>
         <h1 className="text-2xl font-bold text-white">Monitoramento</h1>
         <p className="text-sm text-gray-300 mt-1">
           Acompanhe conversas do bot e do agente em tempo quase real.
         </p>
-      </div>
+      </header>
 
-      {error ? (
-        <div className="mb-4 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
-          {error}
-        </div>
-      ) : null}
+      {error ? <div className={adminErrorClass}>{error}</div> : null}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-          <div className="p-4 border-b border-gray-100 flex flex-wrap gap-2">
+        <div className={adminPanelClass}>
+          <div className="p-4 border-b border-zinc-700/80 flex flex-wrap gap-2">
             <select
-              className="border rounded-lg px-3 py-2 text-sm text-gray-900"
+              className={`${adminSelectClass} mt-0 w-auto min-w-[140px]`}
               value={status}
               onChange={(e) => setStatus(e.target.value)}
             >
@@ -184,53 +199,43 @@ export default function MonitoringAdmin() {
               ))}
             </select>
             <input
-              className="border rounded-lg px-3 py-2 text-sm text-gray-900 flex-1 min-w-[180px]"
+              className={`${adminInputInlineClass} flex-1 min-w-[180px]`}
               placeholder="Buscar nome ou telefone"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
-            <button
-              type="button"
-              onClick={() => void load()}
-              className="px-3 py-2 rounded-lg bg-accent text-white text-sm hover:bg-accent-dark"
-            >
+            <button type="button" onClick={() => void load()} className={adminBtnPrimaryClass}>
               Atualizar
             </button>
           </div>
 
           <div className="max-h-[70vh] overflow-y-auto">
             {loading ? (
-              <p className="p-6 text-sm text-gray-500">Carregando...</p>
+              <p className="p-6 text-sm text-gray-400">Carregando...</p>
             ) : items.length === 0 ? (
-              <p className="p-6 text-sm text-gray-500">Nenhuma conversa encontrada.</p>
+              <p className="p-6 text-sm text-gray-400">Nenhuma conversa encontrada.</p>
             ) : (
               <ul>
                 {items.map((conv) => (
-                  <li key={conv.id} className="border-b border-gray-50">
+                  <li key={conv.id} className="border-b border-zinc-700/60">
                     <button
                       type="button"
                       onClick={() => void openConversation(conv.id)}
-                      className={`w-full text-left px-4 py-3 hover:bg-gray-50 ${
-                        selectedId === conv.id ? "bg-teal-50" : ""
+                      className={`w-full text-left px-4 py-3 hover:bg-zinc-700/30 transition-colors ${
+                        selectedId === conv.id ? "bg-cyan-500/10" : ""
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-medium text-gray-900">{conv.contactName}</span>
+                        <span className="font-medium text-white">{conv.contactName}</span>
                         <span
-                          className={`text-xs px-2 py-0.5 rounded-full ${
-                            conv.status === "em_espera"
-                              ? "bg-amber-100 text-amber-800"
-                              : conv.status === "em_andamento"
-                                ? "bg-blue-100 text-blue-800"
-                                : "bg-gray-100 text-gray-600"
-                          }`}
+                          className={`text-xs px-2 py-0.5 rounded-full ${statusBadgeClass(conv.status)}`}
                         >
                           {conv.status.replace("_", " ")}
                         </span>
                       </div>
-                      <p className="text-xs text-gray-500 mt-1">{conv.phone}</p>
+                      <p className="text-xs text-gray-400 mt-1">{conv.phone}</p>
                       {conv.lastMessagePreview ? (
-                        <p className="text-sm text-gray-700 mt-1 line-clamp-2">
+                        <p className="text-sm text-gray-300 mt-1 line-clamp-2">
                           {conv.lastMessagePreview}
                         </p>
                       ) : null}
@@ -249,18 +254,18 @@ export default function MonitoringAdmin() {
               </ul>
             )}
           </div>
-          <p className="px-4 py-2 text-xs text-gray-500 border-t">{total} conversa(s)</p>
+          <p className="px-4 py-2 text-xs text-gray-500 border-t border-zinc-700/80">{total} conversa(s)</p>
         </div>
 
-        <div className="bg-white rounded-xl border border-gray-100 p-4 min-h-[400px]">
+        <div className={`${adminSectionCompactClass} min-h-[400px]`}>
           {!selected ? (
-            <p className="text-sm text-gray-500">Selecione uma conversa para ver o histórico.</p>
+            <p className="text-sm text-gray-400">Selecione uma conversa para ver o histórico.</p>
           ) : (
             <>
-              <div className="mb-4 pb-3 border-b border-gray-100 flex flex-wrap items-start justify-between gap-3">
+              <div className="mb-4 pb-3 border-b border-zinc-700/80 flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <h2 className="font-semibold text-gray-900">{selected.contactName}</h2>
-                  <p className="text-sm text-gray-600">{selected.phone}</p>
+                  <h2 className="font-semibold text-white">{selected.contactName}</h2>
+                  <p className="text-sm text-gray-300">{selected.phone}</p>
                   {selected.protocolNumber ? (
                     <p className="text-xs text-gray-500 mt-1">Protocolo: {selected.protocolNumber}</p>
                   ) : null}
@@ -272,23 +277,23 @@ export default function MonitoringAdmin() {
                   <button
                     type="button"
                     onClick={() => void openCloseModal()}
-                    className="px-3 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-500"
+                    className="rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500"
                   >
                     Encerrar contato
                   </button>
                 ) : null}
               </div>
               {loadingMessages ? (
-                <p className="text-sm text-gray-500">Carregando mensagens...</p>
+                <p className="text-sm text-gray-400">Carregando mensagens...</p>
               ) : (
                 <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
                   {messages.map((msg) => (
                     <div
                       key={msg.id}
-                      className={`rounded-lg px-3 py-2 text-sm ${
+                      className={`rounded-lg px-3 py-2 text-sm border ${
                         msg.direction === "in"
-                          ? "bg-emerald-50 border border-emerald-100"
-                          : "bg-slate-50 border border-slate-100"
+                          ? "bg-emerald-500/10 border-emerald-500/30"
+                          : "bg-zinc-900/60 border-zinc-600/60"
                       }`}
                     >
                       <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
@@ -297,7 +302,7 @@ export default function MonitoringAdmin() {
                         </span>
                         <span>{new Date(msg.createdAt).toLocaleString("pt-BR")}</span>
                       </div>
-                      <p className="text-gray-800 whitespace-pre-wrap">{msg.text || "(mídia)"}</p>
+                      <p className="text-gray-200 whitespace-pre-wrap">{msg.text || "(mídia)"}</p>
                     </div>
                   ))}
                 </div>
@@ -308,10 +313,10 @@ export default function MonitoringAdmin() {
       </div>
 
       {showCloseModal ? (
-        <div className="fixed inset-0 z-[75] bg-black/45 flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-white border border-gray-200 rounded-xl p-5 shadow-xl">
-            <h2 className="text-lg font-semibold text-gray-900 mb-1">Encerrar contato</h2>
-            <p className="text-sm text-gray-600 mb-4">
+        <div className={adminModalOverlayClass}>
+          <div className={adminModalClass}>
+            <h2 className="text-lg font-semibold text-white mb-1">Encerrar contato</h2>
+            <p className="text-sm text-gray-400 mb-4">
               O cliente receberá a mensagem de encerramento configurada. A sessão do bot também será
               encerrada.
             </p>
@@ -321,27 +326,27 @@ export default function MonitoringAdmin() {
               </p>
             ) : null}
             {loadingCloseTabulacoes ? (
-              <p className="text-sm text-gray-500">Carregando tabulações…</p>
+              <p className="text-sm text-gray-400">Carregando tabulações…</p>
             ) : closeTabulacoes.length === 0 ? (
-              <p className="text-sm text-amber-700">
+              <p className="text-sm text-amber-300">
                 Nenhuma tabulação disponível para esta fila. Configure em Operação → Tabulações.
               </p>
             ) : (
               <ul className="space-y-2 max-h-64 overflow-y-auto">
                 {closeTabulacoes.map((tab) => (
                   <li key={tab.id}>
-                    <label className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 bg-gray-50 cursor-pointer hover:border-teal-400">
+                    <label className="flex items-start gap-3 p-3 rounded-lg border border-zinc-600 bg-zinc-900/60 cursor-pointer hover:border-cyan-500/50 transition-colors">
                       <input
                         type="radio"
                         name="monitoring-close-tabulacao"
-                        className="mt-1"
+                        className="mt-1 accent-cyan-500"
                         checked={selectedTabulacaoId === tab.id}
                         onChange={() => setSelectedTabulacaoId(tab.id)}
                       />
                       <span>
-                        <span className="text-sm font-medium text-gray-900 block">{tab.label}</span>
+                        <span className="text-sm font-medium text-white block">{tab.label}</span>
                         {tab.description ? (
-                          <span className="text-xs text-gray-500 block mt-0.5">{tab.description}</span>
+                          <span className="text-xs text-gray-400 block mt-0.5">{tab.description}</span>
                         ) : null}
                       </span>
                     </label>
@@ -353,7 +358,7 @@ export default function MonitoringAdmin() {
               <button
                 type="button"
                 onClick={() => setShowCloseModal(false)}
-                className="px-4 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 text-sm"
+                className={adminBtnSecondaryClass}
               >
                 Cancelar
               </button>
@@ -366,7 +371,7 @@ export default function MonitoringAdmin() {
                   closeTabulacoes.length === 0
                 }
                 onClick={() => void confirmCloseConversation()}
-                className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-500 disabled:opacity-60 disabled:cursor-not-allowed"
+                className={`${adminBtnDangerClass} rounded-lg bg-red-600 px-4 py-2 text-white hover:no-underline hover:bg-red-500 disabled:opacity-60 disabled:cursor-not-allowed`}
               >
                 {closingConversation ? "Encerrando…" : "Confirmar encerramento"}
               </button>

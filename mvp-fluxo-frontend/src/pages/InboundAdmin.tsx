@@ -1,6 +1,24 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import api, { getApiErrorMessage, getApiOrigin, unwrapApiData } from "../api/client";
 import InfoTooltip from "~components/InfoTooltip";
+import {
+  adminBtnDangerClass,
+  adminBtnLinkClass,
+  adminBtnPrimaryClass,
+  adminBtnSecondaryClass,
+  adminCodeClass,
+  adminErrorClass,
+  adminInputClass,
+  adminLabelClass,
+  adminNoticeClass,
+  adminPageShellClass,
+  adminPanelClass,
+  adminPreClass,
+  adminSectionClass,
+  adminSelectClass,
+  adminTableHeadClass,
+  adminTableRowClass,
+} from "~lib/admin-ui";
 
 type FlowRow = { id: string; name: string; channel: string };
 
@@ -184,174 +202,175 @@ export default function InboundAdmin() {
   };
 
   return (
-    <div className="p-8 max-w-6xl">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            Canais de entrada
-            <InfoTooltip text="Defina qual origem (site, landing, WhatsApp, anúncios) dispara qual fluxo de atendimento." />
-          </h1>
-          <p className="text-sm text-gray-300 mt-1">
-            Mapeie origens para fluxos: se o contato vier de X, encaminhe para o fluxo Y.
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-4 bg-white rounded-xl p-4 border border-gray-100 text-sm text-gray-800">
-        <p className="font-semibold text-gray-900">Webhook unificado (LP, site, leads)</p>
-        <p className="mt-1 text-gray-600">
-          POST com headers <code className="text-xs bg-gray-100 px-1 rounded">x-tenant-id</code> e{" "}
-          <code className="text-xs bg-gray-100 px-1 rounded">x-inbound-secret</code>
+    <div className={adminPageShellClass()}>
+      <header>
+        <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+          Canais de entrada
+          <InfoTooltip text="Defina qual origem (site, landing, WhatsApp, anúncios) dispara qual fluxo de atendimento." />
+        </h1>
+        <p className="text-sm text-gray-300 mt-1">
+          Mapeie origens para fluxos: se o contato vier de X, encaminhe para o fluxo Y.
         </p>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <code className="text-xs bg-gray-50 border rounded px-2 py-1 break-all">{webhookUrl}</code>
-          <button
-            type="button"
-            onClick={() => void copyWebhook()}
-            className="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-50"
-          >
+      </header>
+
+      <section className={`${adminSectionClass} text-sm`}>
+        <h2 className="text-lg font-semibold text-white">Webhook unificado (LP, site, leads)</h2>
+        <p className="mt-1 text-gray-400">
+          POST com headers{" "}
+          <code className={`${adminCodeClass} px-1.5 py-0.5`}>x-tenant-id</code> e{" "}
+          <code className={`${adminCodeClass} px-1.5 py-0.5`}>x-inbound-secret</code>
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <code className={adminCodeClass}>{webhookUrl}</code>
+          <button type="button" onClick={() => void copyWebhook()} className={adminBtnSecondaryClass}>
             Copiar URL
           </button>
         </div>
-        <pre className="mt-3 text-xs bg-gray-50 border rounded p-3 overflow-x-auto">{`{
+        <pre className={adminPreClass}>{`{
   "sourceType": "landing_page",
   "sourceKey": "lp_consorcio",
   "message": "Quero simular",
   "phone": "+5511999999999",
   "name": "Maria"
 }`}</pre>
-      </div>
+      </section>
 
-      {error ? (
-        <div className="mt-4 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
-          {error}
-        </div>
-      ) : null}
-      {notice ? (
-        <div className="mt-4 bg-teal-50 border border-teal-200 text-teal-800 rounded-lg px-4 py-3 text-sm">
-          {notice}
-        </div>
-      ) : null}
+      {error ? <div className={adminErrorClass}>{error}</div> : null}
+      {notice ? <div className={adminNoticeClass}>{notice}</div> : null}
 
-      <form
-        onSubmit={onSubmit}
-        className="mt-6 bg-white rounded-xl p-6 grid grid-cols-1 md:grid-cols-2 gap-3"
-      >
-        <input
-          className="border rounded-lg px-3 py-2 text-gray-900 md:col-span-2"
-          placeholder="Nome da regra (ex.: LP Consórcio → Qualificação)"
-          value={form.label}
-          onChange={(e) => setForm((p) => ({ ...p, label: e.target.value }))}
-          required
-        />
-        <select
-          className="border rounded-lg px-3 py-2 text-gray-900"
-          value={form.sourceType}
-          onChange={(e) => setForm((p) => ({ ...p, sourceType: e.target.value }))}
-        >
-          {SOURCE_TYPE_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-        {form.sourceType === "twilio_whatsapp" && twilioKeyOptions.length > 0 ? (
-          <select
-            className="border rounded-lg px-3 py-2 text-gray-900"
-            value={form.sourceKey}
-            onChange={(e) => setForm((p) => ({ ...p, sourceKey: e.target.value }))}
-            required
-          >
-            <option value="">Selecione o número Twilio</option>
-            {twilioKeyOptions.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <input
-            className="border rounded-lg px-3 py-2 text-gray-900"
-            placeholder={sourceKeyPlaceholder}
-            value={form.sourceKey}
-            onChange={(e) => setForm((p) => ({ ...p, sourceKey: e.target.value }))}
-            required
-          />
-        )}
-        {form.sourceType === "twilio_whatsapp" ? (
-          <p className="text-xs text-gray-500 md:col-span-2">
-            A chave deve seguir o formato <code className="bg-gray-100 px-1 rounded">twilio:ACxxxx:5511...</code>.
-            O webhook Twilio envia essa chave completa; só o número sem prefixo não casa com a rota.
-          </p>
-        ) : null}
-        <select
-          className="border rounded-lg px-3 py-2 text-gray-900 md:col-span-2"
-          value={form.flowId}
-          onChange={(e) => setForm((p) => ({ ...p, flowId: e.target.value }))}
-          required
-        >
-          <option value="">Selecione o fluxo de destino</option>
-          {flows.map((f) => (
-            <option key={f.id} value={f.id}>
-              {f.name} ({f.channel})
-            </option>
-          ))}
-        </select>
-        <label className="inline-flex items-center gap-2 text-sm text-gray-800 md:col-span-2">
-          <input
-            type="checkbox"
-            checked={form.active}
-            onChange={(e) => setForm((p) => ({ ...p, active: e.target.checked }))}
-          />
-          Rota ativa
-        </label>
-        <button
-          type="submit"
-          disabled={saving}
-          className="md:col-span-2 bg-accent text-white px-4 py-2 rounded-lg hover:bg-accent-dark disabled:opacity-50"
-        >
-          {saving ? "Salvando..." : "Adicionar rota"}
-        </button>
-      </form>
+      <section className={adminSectionClass}>
+        <h2 className="text-lg font-semibold text-white mb-4">Nova rota</h2>
+        <form onSubmit={onSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <label className={`${adminLabelClass} md:col-span-2`}>
+            Nome da regra
+            <input
+              className={adminInputClass}
+              placeholder="Ex.: LP Consórcio → Qualificação"
+              value={form.label}
+              onChange={(e) => setForm((p) => ({ ...p, label: e.target.value }))}
+              required
+            />
+          </label>
+          <label className={adminLabelClass}>
+            Tipo de origem
+            <select
+              className={adminSelectClass}
+              value={form.sourceType}
+              onChange={(e) => setForm((p) => ({ ...p, sourceType: e.target.value }))}
+            >
+              {SOURCE_TYPE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {form.sourceType === "twilio_whatsapp" && twilioKeyOptions.length > 0 ? (
+            <label className={adminLabelClass}>
+              Número Twilio
+              <select
+                className={adminSelectClass}
+                value={form.sourceKey}
+                onChange={(e) => setForm((p) => ({ ...p, sourceKey: e.target.value }))}
+                required
+              >
+                <option value="">Selecione o número Twilio</option>
+                {twilioKeyOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <label className={adminLabelClass}>
+              Chave de origem
+              <input
+                className={adminInputClass}
+                placeholder={sourceKeyPlaceholder}
+                value={form.sourceKey}
+                onChange={(e) => setForm((p) => ({ ...p, sourceKey: e.target.value }))}
+                required
+              />
+            </label>
+          )}
+          {form.sourceType === "twilio_whatsapp" ? (
+            <p className="text-xs text-gray-400 md:col-span-2">
+              A chave deve seguir o formato{" "}
+              <code className={`${adminCodeClass} px-1 py-0.5`}>twilio:ACxxxx:5511...</code>.
+            </p>
+          ) : null}
+          <label className={`${adminLabelClass} md:col-span-2`}>
+            Fluxo de destino
+            <select
+              className={adminSelectClass}
+              value={form.flowId}
+              onChange={(e) => setForm((p) => ({ ...p, flowId: e.target.value }))}
+              required
+            >
+              <option value="">Selecione o fluxo de destino</option>
+              {flows.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name} ({f.channel})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="inline-flex items-center gap-2 text-sm text-gray-300 md:col-span-2">
+            <input
+              type="checkbox"
+              className="rounded border-zinc-600 bg-zinc-900"
+              checked={form.active}
+              onChange={(e) => setForm((p) => ({ ...p, active: e.target.checked }))}
+            />
+            Rota ativa
+          </label>
+          <div className="md:col-span-2">
+            <button type="submit" disabled={saving} className={adminBtnPrimaryClass}>
+              {saving ? "Salvando..." : "Adicionar rota"}
+            </button>
+          </div>
+        </form>
+      </section>
 
-      <div className="mt-6 bg-white rounded-xl border border-gray-100 overflow-hidden">
+      <section className={adminPanelClass}>
         <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-600">
+          <thead className={adminTableHeadClass}>
             <tr>
-              <th className="px-4 py-3 text-left">Regra</th>
-              <th className="px-4 py-3 text-left">Origem</th>
-              <th className="px-4 py-3 text-left">Chave</th>
-              <th className="px-4 py-3 text-left">Fluxo</th>
-              <th className="px-4 py-3 text-left">Ações</th>
+              <th className="px-4 py-3">Regra</th>
+              <th className="px-4 py-3">Origem</th>
+              <th className="px-4 py-3">Chave</th>
+              <th className="px-4 py-3">Fluxo</th>
+              <th className="px-4 py-3">Ações</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="text-gray-200">
             {loading ? (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-gray-500">
+                <td colSpan={5} className="px-4 py-6 text-center text-gray-400">
                   Carregando...
                 </td>
               </tr>
             ) : routes.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-gray-500">
+                <td colSpan={5} className="px-4 py-6 text-center text-gray-400">
                   Nenhuma rota cadastrada.
                 </td>
               </tr>
             ) : (
               routes.map((route) => (
-                <tr key={route.id} className="border-t">
-                  <td className="px-4 py-3 text-gray-900">{route.label}</td>
-                  <td className="px-4 py-3 text-gray-700">{route.source_type}</td>
-                  <td className="px-4 py-3 text-gray-600 font-mono text-xs">{route.source_key}</td>
-                  <td className="px-4 py-3 text-gray-800">
+                <tr key={route.id} className={adminTableRowClass}>
+                  <td className="px-4 py-3 text-white">{route.label}</td>
+                  <td className="px-4 py-3 text-gray-300">{route.source_type}</td>
+                  <td className="px-4 py-3 text-gray-400 font-mono text-xs">{route.source_key}</td>
+                  <td className="px-4 py-3 text-gray-200">
                     {flowNameById.get(route.flow_id) ?? route.flow_id}
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex gap-2">
+                    <div className="flex gap-3">
                       <button
                         type="button"
-                        className="text-blue-600 hover:underline"
+                        className={adminBtnLinkClass}
                         disabled={saving}
                         onClick={() => void toggleActive(route)}
                       >
@@ -359,7 +378,7 @@ export default function InboundAdmin() {
                       </button>
                       <button
                         type="button"
-                        className="text-red-600 hover:underline"
+                        className={adminBtnDangerClass}
                         disabled={saving}
                         onClick={() => void removeRoute(route)}
                       >
@@ -372,7 +391,7 @@ export default function InboundAdmin() {
             )}
           </tbody>
         </table>
-      </div>
+      </section>
     </div>
   );
 }
