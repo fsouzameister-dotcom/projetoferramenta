@@ -306,6 +306,34 @@ type LlmOutput = {
 
 type ChatHistoryMessage = { role: "user" | "assistant"; content: string };
 
+const DEFAULT_AI_FETCH_TIMEOUT_MS = Math.max(
+  5_000,
+  Number(process.env.AI_FETCH_TIMEOUT_MS ?? 30_000) || 30_000
+);
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs = DEFAULT_AI_FETCH_TIMEOUT_MS
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new ApiError(
+        504,
+        ERROR_CODES.ai.AI_RESPONSE_FAILED,
+        `Provedor de IA não respondeu em ${Math.round(timeoutMs / 1000)}s`
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function callOpenAi(input: {
   apiKey: string;
   model: string;
@@ -315,7 +343,7 @@ async function callOpenAi(input: {
   temperature?: number;
 }): Promise<LlmOutput> {
   const history = input.history ?? [];
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const response = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${input.apiKey}`,
@@ -355,7 +383,7 @@ async function callGemini(input: {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     input.model
   )}:generateContent?key=${encodeURIComponent(input.apiKey)}`;
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({

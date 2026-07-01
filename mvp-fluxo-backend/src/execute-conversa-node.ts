@@ -52,6 +52,57 @@ function userMessageFromInput(
   return "";
 }
 
+function isStructuredFlowNode(type?: string): boolean {
+  return (
+    type === "mensagem" ||
+    type === "receber_mensagem" ||
+    type === "tabulacao" ||
+    type === "encerramento"
+  );
+}
+
+async function generateRigidStageMessage(input: {
+  tenantId: string;
+  personaId: string;
+  settings: Awaited<ReturnType<typeof loadFlowAiContext>>["settings"];
+  globalNodes: Awaited<ReturnType<typeof loadFlowAiContext>>["globalNodes"];
+  parsed: ReturnType<typeof parseConversaNodeConfig>;
+  currentNode: FlowNodeLite;
+  nodes: FlowNodeLite[];
+  variables: Record<string, unknown>;
+  conversationId?: string;
+  userAcknowledgment?: string;
+}): Promise<{ text: string; provider: string; model: string }> {
+  const systemPrompt = await buildFlowSystemPrompt({
+    settings: input.settings,
+    globalNodes: input.globalNodes,
+    nodeConfig: input.parsed,
+    nodeName: input.currentNode.name,
+    nodes: input.nodes,
+    variables: input.variables,
+    tenantId: input.tenantId,
+    userMessage: input.userAcknowledgment,
+  });
+  const instruction = input.userAcknowledgment
+    ? [
+        "Gere a mensagem de saudação desta etapa (primeira fala do bot nesta conversa).",
+        `O cliente já enviou: "${input.userAcknowledgment}" — apresente-se e acolha o contato de forma breve.`,
+        "Responda apenas com o texto da mensagem, sem JSON.",
+      ].join("\n")
+    : [
+        "Gere a mensagem ao cliente para esta etapa (primeira fala da etapa).",
+        "Responda apenas com o texto da mensagem, sem JSON.",
+      ].join("\n");
+  const ai = await generateFlowAiReply({
+    tenantId: input.tenantId,
+    personaId: input.personaId,
+    systemPrompt,
+    userMessage: instruction,
+    conversationId: input.conversationId,
+  });
+  return ai;
+}
+
 export async function executeConversaNode(
   input: ExecuteConversaInput
 ): Promise<ExecuteConversaResult> {
@@ -162,24 +213,15 @@ export async function executeConversaNode(
   }
 
   if (!userMsg) {
-    const systemPrompt = await buildFlowSystemPrompt({
-      settings,
-      globalNodes,
-      nodeConfig: parsed,
-      nodeName: input.currentNode.name,
-      nodes: input.nodes,
-      variables: input.variables,
-      tenantId: input.tenantId,
-    });
-    const instruction = [
-      "Gere a mensagem ao cliente para esta etapa (primeira fala da etapa).",
-      "Responda apenas com o texto da mensagem, sem JSON.",
-    ].join("\n");
-    const ai = await generateFlowAiReply({
+    const ai = await generateRigidStageMessage({
       tenantId: input.tenantId,
       personaId,
-      systemPrompt,
-      userMessage: instruction,
+      settings,
+      globalNodes,
+      parsed,
+      currentNode: input.currentNode,
+      nodes: input.nodes,
+      variables: input.variables,
       conversationId: input.conversationId,
     });
     const guarded = await applyFlowGuardrails({
@@ -221,7 +263,13 @@ export async function executeConversaNode(
     transition.nextNodeId !== input.currentNode.id &&
     transitionTarget?.type === "conversa";
 
-  if (deferReplyToConversaTarget) {
+  const deferToStructuredNode =
+    Boolean(transition.transitionId) &&
+    transition.nextNodeId !== null &&
+    transition.nextNodeId !== input.currentNode.id &&
+    isStructuredFlowNode(transitionTarget?.type);
+
+  if (deferToStructuredNode) {
     return {
       message: null,
       nextNodeId: transition.nextNodeId,
@@ -230,7 +278,43 @@ export async function executeConversaNode(
         executionMode: "rigid",
         transitionId: transition.transitionId,
         transitionReason: transition.reason,
+        deferredToStructured: true,
+      },
+    };
+  }
+
+  if (deferReplyToConversaTarget) {
+    let stageGreeting: string | null = null;
+    if (chatHistory.length === 0) {
+      const ai = await generateRigidStageMessage({
+        tenantId: input.tenantId,
+        personaId,
+        settings,
+        globalNodes,
+        parsed,
+        currentNode: input.currentNode,
+        nodes: input.nodes,
+        variables: input.variables,
+        conversationId: input.conversationId,
+        userAcknowledgment: userMsg,
+      });
+      const guarded = await applyFlowGuardrails({
+        tenantId: input.tenantId,
+        settings,
+        text: ai.text,
+      });
+      stageGreeting = input.resolveTemplate(guarded.text);
+    }
+    return {
+      message: stageGreeting,
+      nextNodeId: transition.nextNodeId,
+      awaitingInput: false,
+      details: {
+        executionMode: "rigid",
+        transitionId: transition.transitionId,
+        transitionReason: transition.reason,
         deferredReply: true,
+        stageGreetingSent: Boolean(stageGreeting),
       },
     };
   }

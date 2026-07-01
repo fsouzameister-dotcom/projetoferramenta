@@ -9,6 +9,7 @@ import {
   shouldRouteInboundToBot,
 } from "./agent-conversations";
 import { pool } from "./db";
+import { ApiError, ERROR_CODES } from "./http";
 import {
   clearInboundFlowSession,
   clearInboundFlowSessionForPhone,
@@ -256,6 +257,62 @@ async function runFlow(input: {
   return executeFlow(input.flowId, input.tenantId, execInput);
 }
 
+const AI_INBOUND_FALLBACK_MESSAGE =
+  "Desculpe, tive uma instabilidade momentânea para responder. Pode enviar sua mensagem novamente? Se preferir falar com uma pessoa, digite *humano*.";
+
+function isAiProviderFailure(err: unknown): boolean {
+  return (
+    err instanceof ApiError &&
+    (err.code === ERROR_CODES.ai.AI_RESPONSE_FAILED ||
+      err.code === ERROR_CODES.ai.AI_RESPONSE_INVALID)
+  );
+}
+
+async function runFlowWithAiFallback(input: {
+  tenantId: string;
+  flowId: string;
+  sourceType: string;
+  sourceKey: string;
+  messageText: string;
+  phone?: string;
+  contactName?: string;
+  email?: string;
+  conversationId?: string;
+  contactKey: string;
+  executeInput?: ExecuteFlowInput;
+  resumed?: boolean;
+}): Promise<ExecuteFlowResult> {
+  try {
+    return await runFlow(input);
+  } catch (err) {
+    if (!isAiProviderFailure(err) || !input.phone?.trim()) {
+      throw err;
+    }
+    const fallbackMessages = [AI_INBOUND_FALLBACK_MESSAGE];
+    await deliverOutboundIfWhatsApp({
+      tenantId: input.tenantId,
+      phone: input.phone,
+      conversationId: input.conversationId,
+      outboundMessages: [{ kind: "text", body: AI_INBOUND_FALLBACK_MESSAGE }],
+      messages: fallbackMessages,
+    });
+    console.warn(
+      `[inbound] fallback enviado após falha de IA tenant=${input.tenantId} phone=${input.phone}`
+    );
+    return {
+      flowId: input.flowId,
+      status: "stopped",
+      stopReason: "ai_provider_failure",
+      visitedNodeIds: [],
+      currentNodeId: null,
+      messages: fallbackMessages,
+      outboundMessages: [{ kind: "text", body: AI_INBOUND_FALLBACK_MESSAGE }],
+      variables: {},
+      trace: [],
+    };
+  }
+}
+
 /**
  * Roteia mensagem de entrada para fluxo configurado (origem -> fluxo).
  * Mantém sessão em Redis para retomar fluxos em `awaiting_input`.
@@ -435,7 +492,7 @@ export async function processInboundMessage(
       variables: existingSession.variables,
     };
 
-    const result = await runFlow({
+    const result = await runFlowWithAiFallback({
       tenantId: input.tenantId,
       flowId: existingSession.flowId,
       sourceType: existingSession.sourceType,
@@ -508,7 +565,7 @@ export async function processInboundMessage(
     return { routed: false, conversationId };
   }
 
-  const result = await runFlow({
+  const result = await runFlowWithAiFallback({
     tenantId: input.tenantId,
     flowId: route.flow_id,
     sourceType: route.source_type ?? input.sourceType,

@@ -630,8 +630,8 @@ Empresa: {{lead_empresa}}
 E-mail: {{lead_email}}
 Telefone: {{lead_telefone}}
 
-Vou repassar seus dados para o time da ClientOn. Um responsável vai entrar em contato com você para combinar os detalhes do teste.`,
-        next_node_id: IDS.tab_lead,
+Vou te encaminhar agora para o time comercial da ClientOn. Um responsável continuará o atendimento por aqui em instantes.`,
+        next_node_id: IDS.transf_comercial,
       },
     },
     {
