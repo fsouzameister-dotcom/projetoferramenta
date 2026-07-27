@@ -32,6 +32,13 @@ type CampaignReportRow = {
   transferAt: string | null;
   protocolNumber: string | null;
   tabulacaoLabel: string | null;
+  errorCode?: string | null;
+  errorDescription?: string | null;
+  failureKind?: string | null;
+  failureLabel?: string | null;
+  failureDetail?: string | null;
+  retrySafe?: boolean | null;
+  alreadyBilled?: boolean | null;
 };
 
 type AggregateRow = {
@@ -529,6 +536,9 @@ export default function Reports() {
                     <th className="px-3 py-2">Telefone</th>
                     <th className="px-3 py-2">Canal</th>
                     <th className="px-3 py-2">Entrega</th>
+                    <th className="px-3 py-2">Tipo falha</th>
+                    <th className="px-3 py-2">Detalhe falha</th>
+                    <th className="px-3 py-2">Retry</th>
                     <th className="px-3 py-2">1ª resposta</th>
                     <th className="px-3 py-2">Atendimento</th>
                     <th className="px-3 py-2">Fila transfer.</th>
@@ -542,6 +552,26 @@ export default function Reports() {
                       <td className="px-3 py-2 text-teal-300">{row.phone}</td>
                       <td className="px-3 py-2">{row.channelLabel || row.provider || "—"}</td>
                       <td className="px-3 py-2">{row.deliveryStatus}</td>
+                      <td className="px-3 py-2 text-xs text-amber-200 max-w-[10rem]">
+                        {row.deliveryStatus === "failed" ? row.failureLabel || "—" : "—"}
+                      </td>
+                      <td
+                        className="px-3 py-2 text-xs text-red-300 max-w-[14rem] truncate"
+                        title={row.failureDetail || row.errorDescription || undefined}
+                      >
+                        {row.deliveryStatus === "failed"
+                          ? row.failureDetail || row.errorDescription || "—"
+                          : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-xs">
+                        {row.deliveryStatus !== "failed"
+                          ? "—"
+                          : row.retrySafe
+                            ? <span className="text-emerald-300">seguro</span>
+                            : row.alreadyBilled
+                              ? <span className="text-amber-300">cobra de novo</span>
+                              : "—"}
+                      </td>
                       <td className="px-3 py-2 max-w-xs truncate">
                         {row.firstReply
                           ? `${row.firstReply}${row.firstReplyAt ? ` (${new Date(row.firstReplyAt).toLocaleString("pt-BR")})` : ""}`

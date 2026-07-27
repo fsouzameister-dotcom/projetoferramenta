@@ -173,6 +173,8 @@ export async function syncCampaignRecipientDeliveryStatus(input: {
   tenantId: string;
   providerMessageId: string;
   deliveryStatus: string;
+  errorCode?: string | null;
+  errorDescription?: string | null;
 }): Promise<void> {
   const status = input.deliveryStatus.trim().toLowerCase();
   if (!status || !input.providerMessageId.trim()) return;
@@ -180,6 +182,10 @@ export async function syncCampaignRecipientDeliveryStatus(input: {
   let mapped = status;
   if (status === "sending") mapped = "sent";
   if (!["sent", "delivered", "read", "failed"].includes(mapped)) return;
+
+  const errorCode = mapped === "failed" ? input.errorCode?.trim() || null : null;
+  const errorDescription =
+    mapped === "failed" ? input.errorDescription?.trim() || null : null;
 
   await pool.query(
     `UPDATE mailing_recipients
@@ -191,9 +197,23 @@ export async function syncCampaignRecipientDeliveryStatus(input: {
            WHEN $3 = 'sent' AND status IN ('pending', 'sending') THEN 'sent'
            ELSE status
          END,
+         error_code = CASE
+           WHEN $3 = 'failed' THEN COALESCE($4, error_code)
+           ELSE error_code
+         END,
+         error_description = CASE
+           WHEN $3 = 'failed' THEN COALESCE($5, error_description)
+           ELSE error_description
+         END,
          updated_at = now()
      WHERE tenant_id = $1::uuid
        AND provider_message_id = $2`,
-    [input.tenantId, input.providerMessageId.trim(), mapped]
+    [
+      input.tenantId,
+      input.providerMessageId.trim(),
+      mapped,
+      errorCode,
+      errorDescription,
+    ]
   );
 }

@@ -2898,6 +2898,8 @@ export async function updateAgentMessageStatusByProvider(input: {
     tenantId: input.tenantId,
     providerMessageId: input.providerMessageId,
     deliveryStatus: input.deliveryStatus,
+    errorCode: input.errorCode,
+    errorDescription: input.errorDescription,
   });
   return updated;
 }

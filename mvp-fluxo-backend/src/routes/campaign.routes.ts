@@ -248,12 +248,16 @@ const campaignRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.post("/admin/campaigns/:campaignId/retry-failed", async (request, reply) => {
     const { campaignId } = request.params as { campaignId: string };
-    const body = (request.body ?? {}) as { recipientIds?: string[] };
+    const body = (request.body ?? {}) as {
+      recipientIds?: string[];
+      mode?: "safe" | "force";
+    };
     try {
       const result = await retryFailedRecipients(
         request.tenant.id,
         campaignId,
-        body.recipientIds
+        body.recipientIds,
+        { mode: body.mode }
       );
       if (!result.campaign) {
         throw new ApiError(404, ERROR_CODES.campaigns.CAMPAIGN_NOT_FOUND, "Campanha não encontrada");

@@ -15,6 +15,11 @@ import {
   nextStatusAfterStaleSending,
   STALE_SENDING_MINUTES,
 } from "./campaign-utils";
+import {
+  classifyCampaignFailure,
+  formatFailureDetail,
+  type CampaignFailureKind,
+} from "./campaign-failure";
 
 export {
   buildTemplateParams,
@@ -147,6 +152,11 @@ export type CampaignRecipientRow = {
   conversation_id: string | null;
   created_at: string;
   updated_at: string;
+  failure_kind?: CampaignFailureKind | null;
+  failure_label?: string | null;
+  failure_detail?: string | null;
+  retry_safe?: boolean | null;
+  already_billed?: boolean | null;
 };
 
 async function attachStats(tenantId: string, campaigns: CampaignRow[]): Promise<CampaignRow[]> {
@@ -408,12 +418,23 @@ export async function cancelCampaign(
 export async function retryFailedRecipients(
   tenantId: string,
   campaignId: string,
-  recipientIds?: string[]
-): Promise<{ reset: number; campaign: CampaignRow | null }> {
+  recipientIds?: string[],
+  options?: { mode?: "safe" | "force" }
+): Promise<{
+  reset: number;
+  skippedBilled: number;
+  skippedOther: number;
+  mode: "safe" | "force";
+  campaign: CampaignRow | null;
+}> {
   await ensureCampaignSchema();
   const campaign = await getCampaign(tenantId, campaignId);
-  if (!campaign) return { reset: 0, campaign: null };
+  if (!campaign) {
+    return { reset: 0, skippedBilled: 0, skippedOther: 0, mode: "safe", campaign: null };
+  }
   if (campaign.status === "cancelled") throw new Error("CAMPAIGN_CANCELLED");
+
+  const mode = options?.mode === "force" ? "force" : "safe";
 
   const params: unknown[] = [tenantId, campaignId];
   let filterByIds = "";
@@ -422,16 +443,56 @@ export async function retryFailedRecipients(
     params.push(recipientIds);
   }
 
-  const result = await pool.query(
-    `UPDATE mailing_recipients
-     SET status = 'pending',
-         error_code = NULL,
-         error_description = NULL,
-         updated_at = now()
+  const failedRows = await pool.query<{
+    id: string;
+    provider_message_id: string | null;
+    error_code: string | null;
+    error_description: string | null;
+  }>(
+    `SELECT id::text,
+            provider_message_id,
+            error_code,
+            error_description
+     FROM mailing_recipients
      WHERE tenant_id = $1::uuid AND mailing_id = $2::uuid AND status = 'failed'${filterByIds}`,
     params
   );
-  const reset = result.rowCount ?? 0;
+
+  const toRetry: string[] = [];
+  let skippedBilled = 0;
+  let skippedOther = 0;
+  for (const row of failedRows.rows) {
+    const info = classifyCampaignFailure({
+      status: "failed",
+      providerMessageId: row.provider_message_id,
+      errorCode: row.error_code,
+      errorDescription: row.error_description,
+    });
+    if (mode === "force" || info?.retrySafe) {
+      toRetry.push(row.id);
+    } else if (info?.alreadyBilled) {
+      skippedBilled += 1;
+    } else {
+      skippedOther += 1;
+    }
+  }
+
+  let reset = 0;
+  if (toRetry.length > 0) {
+    const result = await pool.query(
+      `UPDATE mailing_recipients
+       SET status = 'pending',
+           error_code = NULL,
+           error_description = NULL,
+           updated_at = now()
+       WHERE tenant_id = $1::uuid
+         AND mailing_id = $2::uuid
+         AND status = 'failed'
+         AND id = ANY($3::uuid[])`,
+      [tenantId, campaignId, toRetry]
+    );
+    reset = result.rowCount ?? 0;
+  }
 
   if (reset > 0 && ["completed", "paused"].includes(campaign.status)) {
     await pool.query(
@@ -444,7 +505,13 @@ export async function retryFailedRecipients(
     );
   }
 
-  return { reset, campaign: await getCampaign(tenantId, campaignId) };
+  return {
+    reset,
+    skippedBilled,
+    skippedOther,
+    mode,
+    campaign: await getCampaign(tenantId, campaignId),
+  };
 }
 
 export async function recoverStaleSendingRecipients(): Promise<number> {
@@ -467,6 +534,7 @@ export async function recoverStaleSendingRecipients(): Promise<number> {
     await pool.query(
       `UPDATE mailing_recipients
        SET status = $2,
+           error_code = CASE WHEN $2 = 'failed' THEN 'STALE_SENDING' ELSE error_code END,
            error_description = COALESCE($3, error_description),
            metadata = metadata || jsonb_build_object(
              'staleRecoveries', COALESCE((metadata->>'staleRecoveries')::int, 0) + 1
@@ -504,8 +572,11 @@ export async function listCampaignRecipients(input: {
 
   const params: unknown[] = [input.tenantId, input.campaignId];
   let statusClause = "";
+  let statusClauseMr = "";
   if (input.status?.trim()) {
-    statusClause = ` AND status = $${params.length + 1}`;
+    const idx = params.length + 1;
+    statusClause = ` AND status = $${idx}`;
+    statusClauseMr = ` AND mr.status = $${idx}`;
     params.push(input.status.trim());
   }
 
@@ -517,28 +588,83 @@ export async function listCampaignRecipients(input: {
   );
 
   const listParams = [...params, limit, offset];
-  const result = await pool.query<CampaignRecipientRow>(
-    `SELECT id::text,
-            phone_e164,
-            status,
-            provider_message_id,
-            error_code,
-            error_description,
-            sent_at::text,
-            first_reply_at::text,
-            first_reply_text,
-            conversation_id::text,
-            created_at::text,
-            updated_at::text
-     FROM mailing_recipients
-     WHERE tenant_id = $1::uuid AND mailing_id = $2::uuid${statusClause}
-     ORDER BY created_at ASC
+  const result = await pool.query<{
+    id: string;
+    phone_e164: string;
+    status: string;
+    provider_message_id: string | null;
+    error_code: string | null;
+    error_description: string | null;
+    sent_at: string | null;
+    first_reply_at: string | null;
+    first_reply_text: string | null;
+    conversation_id: string | null;
+    created_at: string;
+    updated_at: string;
+    msg_error_code: string | null;
+    msg_error_description: string | null;
+  }>(
+    `SELECT mr.id::text,
+            mr.phone_e164,
+            mr.status,
+            mr.provider_message_id,
+            mr.error_code,
+            mr.error_description,
+            mr.sent_at::text,
+            mr.first_reply_at::text,
+            mr.first_reply_text,
+            mr.conversation_id::text,
+            mr.created_at::text,
+            mr.updated_at::text,
+            am.error_code AS msg_error_code,
+            am.error_description AS msg_error_description
+     FROM mailing_recipients mr
+     LEFT JOIN LATERAL (
+       SELECT error_code, error_description
+       FROM agent_messages
+       WHERE tenant_id = mr.tenant_id
+         AND provider_message_id = mr.provider_message_id
+       ORDER BY created_at DESC
+       LIMIT 1
+     ) am ON TRUE
+     WHERE mr.tenant_id = $1::uuid AND mr.mailing_id = $2::uuid${statusClauseMr}
+     ORDER BY mr.created_at ASC
      LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
     listParams
   );
 
+  const items: CampaignRecipientRow[] = result.rows.map((row) => {
+    const errorCode = row.error_code || row.msg_error_code;
+    const errorDescription = row.error_description || row.msg_error_description;
+    const failure = classifyCampaignFailure({
+      status: row.status,
+      providerMessageId: row.provider_message_id,
+      errorCode,
+      errorDescription,
+    });
+    return {
+      id: row.id,
+      phone_e164: row.phone_e164,
+      status: row.status,
+      provider_message_id: row.provider_message_id,
+      error_code: errorCode,
+      error_description: errorDescription,
+      sent_at: row.sent_at,
+      first_reply_at: row.first_reply_at,
+      first_reply_text: row.first_reply_text,
+      conversation_id: row.conversation_id,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      failure_kind: failure?.failureKind ?? null,
+      failure_label: failure?.failureLabel ?? null,
+      failure_detail: formatFailureDetail({ errorCode, errorDescription }),
+      retry_safe: failure?.retrySafe ?? null,
+      already_billed: failure?.alreadyBilled ?? null,
+    };
+  });
+
   return {
-    items: result.rows,
+    items,
     total: Number(countResult.rows[0]?.total ?? 0),
     page,
     limit,
@@ -636,7 +762,10 @@ export async function sendCampaignRecipient(input: {
   if (!waCtx) {
     await pool.query(
       `UPDATE mailing_recipients
-       SET status = 'failed', error_description = 'Canal WhatsApp indisponível', updated_at = now()
+       SET status = 'failed',
+           error_code = 'CHANNEL_UNAVAILABLE',
+           error_description = 'Canal WhatsApp indisponível',
+           updated_at = now()
        WHERE id = $1::uuid`,
       [row.id]
     );
@@ -648,6 +777,7 @@ export async function sendCampaignRecipient(input: {
   let sendOk = false;
   let messageId = "";
   let errorDescription = "";
+  let errorCode: string | null = null;
 
   if (waCtx.provider === WHATSAPP_PROVIDER_TWILIO) {
     const contentSid = template.contentSid ?? template.templateId;
@@ -661,7 +791,10 @@ export async function sendCampaignRecipient(input: {
     });
     sendOk = result.ok;
     if (result.ok) messageId = result.messageId;
-    else errorDescription = result.message;
+    else {
+      errorDescription = result.message;
+      errorCode = result.code != null ? String(result.code) : "TWILIO_API_ERROR";
+    }
   } else if (waCtx.provider === WHATSAPP_PROVIDER_CLOUD) {
     const templateName = template.templateName ?? template.displayName;
     const result = await sendWhatsAppTemplateMessage({
@@ -674,17 +807,21 @@ export async function sendCampaignRecipient(input: {
     });
     sendOk = result.ok;
     if (result.ok) messageId = result.messageId;
-    else errorDescription = result.message;
+    else {
+      errorDescription = result.message;
+      errorCode = result.code != null ? String(result.code) : "META_API_ERROR";
+    }
   }
 
   if (!sendOk) {
     await pool.query(
       `UPDATE mailing_recipients
        SET status = 'failed',
-           error_description = $2,
+           error_code = $2,
+           error_description = $3,
            updated_at = now()
        WHERE id = $1::uuid`,
-      [row.id, errorDescription.slice(0, 500)]
+      [row.id, errorCode, errorDescription.slice(0, 500)]
     );
     return "failed";
   }

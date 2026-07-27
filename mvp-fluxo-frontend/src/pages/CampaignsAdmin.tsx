@@ -54,10 +54,16 @@ type RecipientRow = {
   id: string;
   phone_e164: string;
   status: string;
+  error_code: string | null;
   error_description: string | null;
   sent_at: string | null;
   first_reply_text: string | null;
   first_reply_at: string | null;
+  failure_kind?: string | null;
+  failure_label?: string | null;
+  failure_detail?: string | null;
+  retry_safe?: boolean | null;
+  already_billed?: boolean | null;
 };
 
 const providerLabel = (p: string) =>
@@ -259,13 +265,29 @@ export default function CampaignsAdmin() {
   const runCampaignAction = async (
     campaignId: string,
     action: "dispatch" | "pause" | "resume" | "cancel" | "retry-failed",
-    successMsg: string
+    successMsg: string,
+    body?: Record<string, unknown>
   ) => {
     setSaving(true);
     setError(null);
     try {
-      await api.post(`/admin/campaigns/${campaignId}/${action}`);
-      setNotice(successMsg);
+      const res = await api.post(`/admin/campaigns/${campaignId}/${action}`, body ?? {});
+      if (action === "retry-failed") {
+        const data = unwrapApiData<{
+          reset: number;
+          skippedBilled: number;
+          mode: string;
+        }>(res.data);
+        const parts = [
+          `${data.reset} reenfileirado(s)`,
+          data.skippedBilled > 0
+            ? `${data.skippedBilled} ignorado(s) (já cobrados pelo provedor)`
+            : null,
+        ].filter(Boolean);
+        setNotice(`${successMsg} ${parts.join(" · ")}.`);
+      } else {
+        setNotice(successMsg);
+      }
       await loadBase();
       if (selectedCampaignId === campaignId) {
         await loadRecipients(campaignId);
@@ -275,6 +297,51 @@ export default function CampaignsAdmin() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const confirmRetryFailed = async (campaignId: string) => {
+    let failed: RecipientRow[] = [];
+    try {
+      const res = await api.get(`/admin/campaigns/${campaignId}/recipients`, {
+        params: { status: "failed", limit: 200 },
+      });
+      failed = unwrapApiData<{ items: RecipientRow[] }>(res.data).items ?? [];
+    } catch {
+      failed = [];
+    }
+    const billed = failed.filter((r) => r.already_billed).length;
+    const safe = failed.filter((r) => r.retry_safe).length;
+    const total = failed.length;
+    const msg =
+      total === 0
+        ? "Reenfileirar falhas seguras desta campanha? (sem SID / rejeitadas na API)"
+        : billed > 0
+          ? `Há ${total} falha(s): ${safe} seguras para reenvio e ${billed} já aceitas pelo provedor (nova cobrança).\n\nOK = só reenviar as ${safe} seguras.`
+          : `Reenfileirar ${safe || total} falha(s) segura(s)?`;
+    if (!window.confirm(msg)) return;
+    await runCampaignAction(campaignId, "retry-failed", "Retry seguro:", { mode: "safe" });
+  };
+
+  const confirmForceRetryFailed = async (campaignId: string) => {
+    let total = 0;
+    let billed = 0;
+    try {
+      const res = await api.get(`/admin/campaigns/${campaignId}/recipients`, {
+        params: { status: "failed", limit: 200 },
+      });
+      const items = unwrapApiData<{ items: RecipientRow[] }>(res.data).items ?? [];
+      total = items.length;
+      billed = items.filter((r) => r.already_billed).length;
+    } catch {
+      /* ignore */
+    }
+    const ok = window.confirm(
+      `ATENÇÃO: reenvio forçado de ${total || "todas as"} falha(s)` +
+        (billed > 0 ? ` (${billed} já cobradas pelo provedor)` : "") +
+        ".\nCada reenvio com SID gera nova cobrança.\n\nConfirma?"
+    );
+    if (!ok) return;
+    await runCampaignAction(campaignId, "retry-failed", "Retry forçado:", { mode: "force" });
   };
 
   const openRecipients = async (campaignId: string) => {
@@ -544,20 +611,26 @@ export default function CampaignsAdmin() {
                           </button>
                         ) : null}
                         {(c.stats?.failed ?? 0) > 0 && c.status !== "cancelled" ? (
-                          <button
-                            type="button"
-                            className="text-emerald-400 hover:underline disabled:opacity-40"
-                            disabled={saving}
-                            onClick={() =>
-                              void runCampaignAction(
-                                c.id,
-                                "retry-failed",
-                                "Falhas reenfileiradas para reenvio."
-                              )
-                            }
-                          >
-                            Retry falhas
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              className="text-emerald-400 hover:underline disabled:opacity-40"
+                              disabled={saving}
+                              title="Reenvia só falhas sem SID (sem nova cobrança típica)"
+                              onClick={() => void confirmRetryFailed(c.id)}
+                            >
+                              Retry seguro
+                            </button>
+                            <button
+                              type="button"
+                              className="text-amber-400 hover:underline disabled:opacity-40"
+                              disabled={saving}
+                              title="Inclui falhas já aceitas pelo provedor (gera nova cobrança)"
+                              onClick={() => void confirmForceRetryFailed(c.id)}
+                            >
+                              Retry forçado
+                            </button>
+                          </>
                         ) : null}
                         {["draft", "sending", "paused"].includes(c.status) ? (
                           <button
@@ -625,9 +698,11 @@ export default function CampaignsAdmin() {
                   <tr className="text-left text-gray-400 border-b border-zinc-700">
                     <th className="py-2 pr-3">Telefone</th>
                     <th className="py-2 pr-3">Status</th>
+                    <th className="py-2 pr-3">Tipo falha</th>
+                    <th className="py-2 pr-3">Detalhe</th>
+                    <th className="py-2 pr-3">Retry</th>
                     <th className="py-2 pr-3">Enviado em</th>
-                    <th className="py-2 pr-3">1ª resposta</th>
-                    <th className="py-2">Erro</th>
+                    <th className="py-2">1ª resposta</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -635,15 +710,29 @@ export default function CampaignsAdmin() {
                     <tr key={r.id} className="border-b border-zinc-800">
                       <td className="py-2 pr-3 text-cyan-300">{r.phone_e164}</td>
                       <td className="py-2 pr-3">{statusLabel[r.status] ?? r.status}</td>
+                      <td className="py-2 pr-3 text-xs text-amber-200 max-w-[12rem]">
+                        {r.status === "failed" ? r.failure_label ?? "—" : "—"}
+                      </td>
+                      <td className="py-2 pr-3 text-red-300 text-xs max-w-xs truncate" title={r.failure_detail ?? undefined}>
+                        {r.status === "failed" ? r.failure_detail ?? r.error_description ?? "—" : "—"}
+                      </td>
+                      <td className="py-2 pr-3 text-xs">
+                        {r.status !== "failed"
+                          ? "—"
+                          : r.retry_safe
+                            ? <span className="text-emerald-300">seguro</span>
+                            : r.already_billed
+                              ? <span className="text-amber-300">cobra de novo</span>
+                              : "—"}
+                      </td>
                       <td className="py-2 pr-3">
                         {r.sent_at ? new Date(r.sent_at).toLocaleString("pt-BR") : "—"}
                       </td>
-                      <td className="py-2 pr-3 max-w-xs truncate">
+                      <td className="py-2 max-w-xs truncate">
                         {r.first_reply_text
                           ? `${r.first_reply_text}${r.first_reply_at ? ` (${new Date(r.first_reply_at).toLocaleString("pt-BR")})` : ""}`
                           : "—"}
                       </td>
-                      <td className="py-2 text-red-300 text-xs">{r.error_description ?? "—"}</td>
                     </tr>
                   ))}
                 </tbody>

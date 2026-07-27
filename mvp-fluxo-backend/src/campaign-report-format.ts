@@ -14,6 +14,13 @@ export type CampaignReportRow = {
   transferAt: string | null;
   protocolNumber: string | null;
   tabulacaoLabel: string | null;
+  errorCode: string | null;
+  errorDescription: string | null;
+  failureKind: string | null;
+  failureLabel: string | null;
+  failureDetail: string | null;
+  retrySafe: boolean | null;
+  alreadyBilled: boolean | null;
 };
 
 export function campaignReportToCsv(rows: CampaignReportRow[]): string {
@@ -25,6 +32,10 @@ export function campaignReportToCsv(rows: CampaignReportRow[]): string {
     "Canal",
     "Provedor",
     "Status envio",
+    "Tipo falha",
+    "Detalhe falha",
+    "Retry seguro",
+    "Já cobrado",
     "Primeira resposta",
     "Data/Hora resposta",
     "Status atendimento",
@@ -44,6 +55,10 @@ export function campaignReportToCsv(rows: CampaignReportRow[]): string {
         r.channelLabel ?? "",
         r.provider ?? "",
         r.deliveryStatus,
+        r.failureLabel ?? "",
+        r.failureDetail ?? "",
+        r.retrySafe == null ? "" : r.retrySafe ? "sim" : "nao",
+        r.alreadyBilled == null ? "" : r.alreadyBilled ? "sim" : "nao",
         r.firstReply ?? "",
         r.firstReplyAt ?? "",
         r.attendanceStatus,
