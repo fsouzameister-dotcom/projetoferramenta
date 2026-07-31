@@ -4,6 +4,10 @@ import api, { getApiErrorMessage, getApiOrigin, unwrapApiData } from "../api/cli
 import BotSafeguardPanel from "../components/BotSafeguardPanel";
 import InfoTooltip from "~components/InfoTooltip";
 import {
+  launchWhatsAppEmbeddedSignup,
+  loadFacebookSdk,
+} from "../lib/meta-fb-sdk";
+import {
   adminBtnDangerClass,
   adminBtnLinkClass,
   adminBtnPrimaryClass,
@@ -65,7 +69,7 @@ const CHANNEL_OPTIONS: {
   {
     id: "whatsapp_cloud_api",
     label: "WhatsApp — Meta (Cloud API)",
-    hint: "Conexão direta com a Graph API (opção B): WABA, Phone Number ID e token.",
+    hint: "Manual (Opção B): WABA, Phone Number ID e token — ou use Embedded Signup acima.",
   },
   {
     id: "twilio_whatsapp",
@@ -122,11 +126,20 @@ type ServerWhatsAppSettings = {
   meta: {
     webhookVerifyTokenConfigured: boolean;
     appSecretConfigured: boolean;
+    appId: string | null;
+    embeddedSignupConfigId: string | null;
   };
   flags: {
     whatsappSkipSignatureVerify: boolean;
     twilioSkipSignatureVerify: boolean;
   };
+};
+
+type EmbeddedSignupConfig = {
+  enabled: boolean;
+  appId: string | null;
+  configId: string | null;
+  graphVersion: string;
 };
 
 export default function WhatsAppAdmin() {
@@ -159,10 +172,16 @@ export default function WhatsAppAdmin() {
   const [savingServerSettings, setSavingServerSettings] = useState(false);
   const [serverMetaVerifyToken, setServerMetaVerifyToken] = useState("");
   const [serverMetaAppSecret, setServerMetaAppSecret] = useState("");
+  const [serverMetaAppId, setServerMetaAppId] = useState("");
+  const [serverMetaConfigId, setServerMetaConfigId] = useState("");
   const [flagSkipMetaSig, setFlagSkipMetaSig] = useState(false);
   const [flagSkipTwilioSig, setFlagSkipTwilioSig] = useState(false);
   const [showTour, setShowTour] = useState(false);
   const [tourStepIndex, setTourStepIndex] = useState(0);
+
+  const [embeddedConfig, setEmbeddedConfig] = useState<EmbeddedSignupConfig | null>(null);
+  const [embeddedLabel, setEmbeddedLabel] = useState("");
+  const [embeddedBusy, setEmbeddedBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -185,6 +204,8 @@ export default function WhatsAppAdmin() {
       setServerSettings(data);
       setFlagSkipMetaSig(data.flags.whatsappSkipSignatureVerify);
       setFlagSkipTwilioSig(data.flags.twilioSkipSignatureVerify);
+      setServerMetaAppId(data.meta.appId ?? "");
+      setServerMetaConfigId(data.meta.embeddedSignupConfigId ?? "");
     } catch (err) {
       setError(getApiErrorMessage(err, "Erro ao carregar configurações globais do WhatsApp"));
     } finally {
@@ -192,10 +213,20 @@ export default function WhatsAppAdmin() {
     }
   }, []);
 
+  const loadEmbeddedConfig = useCallback(async () => {
+    try {
+      const res = await api.get("/whatsapp/embedded-signup/config");
+      setEmbeddedConfig(unwrapApiData<EmbeddedSignupConfig>(res.data));
+    } catch {
+      setEmbeddedConfig(null);
+    }
+  }, []);
+
   useEffect(() => {
     void load();
     void loadServerSettings();
-  }, [load, loadServerSettings]);
+    void loadEmbeddedConfig();
+  }, [load, loadServerSettings, loadEmbeddedConfig]);
 
   useEffect(() => {
     const el = document.querySelector('script[type="module"][src]') as HTMLScriptElement | null;
@@ -227,6 +258,8 @@ export default function WhatsAppAdmin() {
       await api.patch("/whatsapp/server-settings", {
         metaWebhookVerifyToken: serverMetaVerifyToken.trim() || undefined,
         metaAppSecret: serverMetaAppSecret.trim() || undefined,
+        metaAppId: serverMetaAppId.trim(),
+        metaEmbeddedSignupConfigId: serverMetaConfigId.trim(),
         whatsappSkipSignatureVerify: flagSkipMetaSig,
         twilioSkipSignatureVerify: flagSkipTwilioSig,
       });
@@ -234,10 +267,44 @@ export default function WhatsAppAdmin() {
       setServerMetaAppSecret("");
       setNotice("Configurações globais salvas no servidor.");
       await loadServerSettings();
+      await loadEmbeddedConfig();
     } catch (err) {
       setError(getApiErrorMessage(err, "Erro ao salvar configurações globais"));
     } finally {
       setSavingServerSettings(false);
+    }
+  };
+
+  const onEmbeddedSignup = async () => {
+    setError(null);
+    setNotice(null);
+    const cfg = embeddedConfig;
+    if (!cfg?.enabled || !cfg.appId || !cfg.configId) {
+      setError(
+        "Embedded Signup não está habilitado. Configure App ID, Config ID e App Secret na seção global."
+      );
+      return;
+    }
+    const labelTrim = embeddedLabel.trim() || "WhatsApp Meta";
+    setEmbeddedBusy(true);
+    try {
+      await loadFacebookSdk(cfg.appId, cfg.graphVersion);
+      const { code, session } = await launchWhatsAppEmbeddedSignup(cfg.configId);
+      await api.post("/whatsapp/channels/embedded-signup", {
+        code,
+        wabaId: session.waba_id,
+        phoneNumberId: session.phone_number_id,
+        label: labelTrim,
+      });
+      setEmbeddedLabel("");
+      setNotice(
+        "WhatsApp conectado via Embedded Signup. Número registrado e webhooks inscritos na WABA."
+      );
+      await load();
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Erro no Embedded Signup"));
+    } finally {
+      setEmbeddedBusy(false);
     }
   };
 
@@ -451,6 +518,30 @@ export default function WhatsAppAdmin() {
                 onChange={(e) => setServerMetaAppSecret(e.target.value)}
               />
             </label>
+            <label className={adminLabelClass} htmlFor="srv-app-id">
+              Meta App ID (Embedded Signup)
+              <input
+                id="srv-app-id"
+                type="text"
+                autoComplete="off"
+                className={`${adminInputClass} font-mono text-xs`}
+                placeholder="ID do app Meta da ClientOn"
+                value={serverMetaAppId}
+                onChange={(e) => setServerMetaAppId(e.target.value)}
+              />
+            </label>
+            <label className={adminLabelClass} htmlFor="srv-config-id">
+              Embedded Signup Config ID
+              <input
+                id="srv-config-id"
+                type="text"
+                autoComplete="off"
+                className={`${adminInputClass} font-mono text-xs`}
+                placeholder="Config ID do Login for Business"
+                value={serverMetaConfigId}
+                onChange={(e) => setServerMetaConfigId(e.target.value)}
+              />
+            </label>
             <div className="space-y-2 border-t border-zinc-700/80 pt-3">
               <p className="text-xs text-amber-300 font-medium">Apenas desenvolvimento / diagnóstico</p>
               <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
@@ -477,6 +568,46 @@ export default function WhatsAppAdmin() {
             </button>
           </form>
         )}
+      </section>
+
+      <section className={`${adminSectionClass} text-sm`}>
+        <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+          Conectar com Meta (Embedded Signup)
+          <InfoTooltip text="Fluxo Tech Provider: o cliente cria/vincula WABA e número no popup da Meta; o ClientOn troca o code por token e registra o canal." />
+        </h2>
+        <p className="text-xs text-gray-400 mt-1 max-w-3xl">
+          Recomendado para novos clientes. Exige App Review das permissões{" "}
+          <span className="font-mono">whatsapp_business_management</span> e{" "}
+          <span className="font-mono">whatsapp_business_messaging</span>, além de domínio allowlisted (
+          <span className="font-mono">app.clienton.com.br</span>).
+        </p>
+        {embeddedConfig && !embeddedConfig.enabled ? (
+          <p className="mt-3 text-amber-300 text-xs">
+            Embedded Signup desabilitado até configurar App ID, Config ID e App Secret (acima ou via env).
+          </p>
+        ) : null}
+        <div className="mt-4 flex flex-col sm:flex-row gap-3 items-stretch sm:items-end max-w-xl">
+          <label className={`${adminLabelClass} flex-1`} htmlFor="es-label">
+            Nome da conexão
+            <input
+              id="es-label"
+              type="text"
+              className={adminInputClass}
+              placeholder="Ex.: WhatsApp Fox"
+              value={embeddedLabel}
+              onChange={(e) => setEmbeddedLabel(e.target.value)}
+              disabled={embeddedBusy}
+            />
+          </label>
+          <button
+            type="button"
+            className={adminBtnPrimaryClass}
+            disabled={embeddedBusy || !embeddedConfig?.enabled}
+            onClick={() => void onEmbeddedSignup()}
+          >
+            {embeddedBusy ? "Conectando…" : "Conectar WhatsApp (Meta)"}
+          </button>
+        </div>
       </section>
 
       <section className={`${adminSectionClass} text-sm`}>

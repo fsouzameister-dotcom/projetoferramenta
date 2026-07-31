@@ -19,6 +19,14 @@ async function ensureSchema() {
       )
     `);
     await client.query(`
+      ALTER TABLE server_whatsapp_settings
+      ADD COLUMN IF NOT EXISTS meta_app_id text
+    `);
+    await client.query(`
+      ALTER TABLE server_whatsapp_settings
+      ADD COLUMN IF NOT EXISTS meta_embedded_signup_config_id text
+    `);
+    await client.query(`
       INSERT INTO server_whatsapp_settings (id) VALUES (1)
       ON CONFLICT (id) DO NOTHING
     `);
@@ -32,6 +40,8 @@ export type ServerWhatsAppSettingsPublic = {
   meta: {
     webhookVerifyTokenConfigured: boolean;
     appSecretConfigured: boolean;
+    appId: string | null;
+    embeddedSignupConfigId: string | null;
   };
   flags: {
     whatsappSkipSignatureVerify: boolean;
@@ -44,18 +54,36 @@ export async function getServerWhatsAppSettingsPublic(): Promise<ServerWhatsAppS
   const r = await pool.query<{
     meta_webhook_verify_token_encrypted: string | null;
     meta_app_secret_encrypted: string | null;
+    meta_app_id: string | null;
+    meta_embedded_signup_config_id: string | null;
     whatsapp_skip_signature_verify: boolean;
     twilio_skip_signature_verify: boolean;
   }>(
     `SELECT meta_webhook_verify_token_encrypted, meta_app_secret_encrypted,
+            meta_app_id, meta_embedded_signup_config_id,
             whatsapp_skip_signature_verify, twilio_skip_signature_verify
      FROM server_whatsapp_settings WHERE id = 1`
   );
   const row = r.rows[0];
+  const appId =
+    row?.meta_app_id?.trim() ||
+    process.env.META_APP_ID?.trim() ||
+    process.env.WHATSAPP_APP_ID?.trim() ||
+    null;
+  const configId =
+    row?.meta_embedded_signup_config_id?.trim() ||
+    process.env.META_EMBEDDED_SIGNUP_CONFIG_ID?.trim() ||
+    null;
   return {
     meta: {
       webhookVerifyTokenConfigured: Boolean(row?.meta_webhook_verify_token_encrypted?.trim()),
-      appSecretConfigured: Boolean(row?.meta_app_secret_encrypted?.trim()),
+      appSecretConfigured: Boolean(
+        row?.meta_app_secret_encrypted?.trim() ||
+          process.env.WHATSAPP_APP_SECRET?.trim() ||
+          process.env.META_APP_SECRET?.trim()
+      ),
+      appId: appId || null,
+      embeddedSignupConfigId: configId || null,
     },
     flags: {
       whatsappSkipSignatureVerify: row?.whatsapp_skip_signature_verify ?? false,
@@ -67,6 +95,8 @@ export async function getServerWhatsAppSettingsPublic(): Promise<ServerWhatsAppS
 export type UpsertServerWhatsAppSettingsInput = {
   metaWebhookVerifyToken?: string;
   metaAppSecret?: string;
+  metaAppId?: string;
+  metaEmbeddedSignupConfigId?: string;
   whatsappSkipSignatureVerify?: boolean;
   twilioSkipSignatureVerify?: boolean;
 };
@@ -77,6 +107,8 @@ export async function upsertServerWhatsAppSettings(
   await ensureSchema();
   const v = input.metaWebhookVerifyToken?.trim();
   const s = input.metaAppSecret?.trim();
+  const appId = input.metaAppId?.trim();
+  const configId = input.metaEmbeddedSignupConfigId?.trim();
   const wSkip = input.whatsappSkipSignatureVerify;
   const tSkip = input.twilioSkipSignatureVerify;
 
@@ -90,6 +122,14 @@ export async function upsertServerWhatsAppSettings(
   if (s !== undefined && s.length > 0) {
     fragments.push(`meta_app_secret_encrypted = $${n++}`);
     params.push(encryptSecret(s));
+  }
+  if (appId !== undefined) {
+    fragments.push(`meta_app_id = $${n++}`);
+    params.push(appId.length > 0 ? appId : null);
+  }
+  if (configId !== undefined) {
+    fragments.push(`meta_embedded_signup_config_id = $${n++}`);
+    params.push(configId.length > 0 ? configId : null);
   }
   if (wSkip !== undefined) {
     fragments.push(`whatsapp_skip_signature_verify = $${n++}`);
@@ -146,6 +186,26 @@ export async function resolveMetaAppSecret(): Promise<string | undefined> {
     process.env.WHATSAPP_APP_SECRET?.trim() ||
     process.env.META_APP_SECRET?.trim()
   );
+}
+
+export async function resolveMetaAppId(): Promise<string | undefined> {
+  await ensureSchema();
+  const r = await pool.query<{ v: string | null }>(
+    `SELECT meta_app_id AS v FROM server_whatsapp_settings WHERE id = 1`
+  );
+  const fromDb = r.rows[0]?.v?.trim();
+  if (fromDb) return fromDb;
+  return process.env.META_APP_ID?.trim() || process.env.WHATSAPP_APP_ID?.trim();
+}
+
+export async function resolveMetaEmbeddedSignupConfigId(): Promise<string | undefined> {
+  await ensureSchema();
+  const r = await pool.query<{ v: string | null }>(
+    `SELECT meta_embedded_signup_config_id AS v FROM server_whatsapp_settings WHERE id = 1`
+  );
+  const fromDb = r.rows[0]?.v?.trim();
+  if (fromDb) return fromDb;
+  return process.env.META_EMBEDDED_SIGNUP_CONFIG_ID?.trim();
 }
 
 export async function resolveShouldSkipWhatsAppSignatureVerify(): Promise<boolean> {

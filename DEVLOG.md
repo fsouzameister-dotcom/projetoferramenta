@@ -504,7 +504,7 @@ Implementar no executor (ou ocultar da paleta até lá). Exemplos de uso por ver
 ### Fora do escopo (até nova decisão)
 
 - **SMS** como canal.
-- **Embedded Signup Meta** (Fase 2) — manter Opção B até demanda.
+- **Embedded Signup Meta** — implementado no produto (`/admin/whatsapp` + `POST /whatsapp/channels/embedded-signup`); falta plugar App ID / Config ID / App Review. Ver [`docs/partners/META-EMBEDDED-SIGNUP.md`](docs/partners/META-EMBEDDED-SIGNUP.md).
 - **BSPs** além Meta/Twilio (exceto sob contrato específico).
 - **Seleção de número outbound** por conversa (múltiplos números no tenant) — desejável, não bloqueia piloto.
 - **Upload persistente** de mídia — importante, mas após núcleo pesquisa WhatsApp.
@@ -1246,7 +1246,7 @@ Objetivo: avançar em paralelo nas trilhas de operação, WhatsApp Meta e IA, se
 - Adotada abordagem de adapter unificado por canal de mensageria, começando por **WhatsApp Cloud API direto** (sem broker/BSP).
 - Sequência aprovada:
   1. Fase 1 (entregue): adapter `whatsapp_cloud_api` + Opção B (credenciais coladas pelo admin do tenant).
-  2. Fase 2 (futuro): mesmo adapter, onboarding via Embedded Signup.
+  2. Embedded Signup (Tech Provider): onboarding self-service — ver `docs/partners/META-EMBEDDED-SIGNUP.md`.
   3. Fase 3 (sob demanda): adapters Twilio / Zenvia / 360dialog apenas se cliente exigir.
 
 ### Entregas concluídas nesta sessão (Fase 1)
@@ -1293,7 +1293,7 @@ Objetivo: avançar em paralelo nas trilhas de operação, WhatsApp Meta e IA, se
 - Envio real apenas para `type: "text"`. Contact / location continuam mock.
 - Templates Meta e mídia (upload via `/media`) ainda não conectados ao fluxo de reabertura/UI.
 - Tenant com múltiplos números: outbound usa o primeiro número cadastrado (sem seleção por conversa ainda).
-- Embedded Signup permanece para Fase 2.
+- Embedded Signup: código pronto; configurar App Meta + App Review para produção.
 
 ### Próxima sessão (roteiro rápido)
 

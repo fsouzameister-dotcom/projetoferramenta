@@ -119,6 +119,11 @@ import {
   upsertServerWhatsAppSettings,
 } from "../server-whatsapp-settings";
 import {
+  EmbeddedSignupError,
+  getEmbeddedSignupConfig,
+  onboardEmbeddedSignup,
+} from "../whatsapp-embedded-signup";
+import {
   AgentConversationRuleError,
   appendAgentAttachmentMessage,
   appendAgentAudioMessage,
@@ -1005,10 +1010,17 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
       meta: {
         type: "object",
         additionalProperties: false,
-        required: ["webhookVerifyTokenConfigured", "appSecretConfigured"],
+        required: [
+          "webhookVerifyTokenConfigured",
+          "appSecretConfigured",
+          "appId",
+          "embeddedSignupConfigId",
+        ],
         properties: {
           webhookVerifyTokenConfigured: { type: "boolean" },
           appSecretConfigured: { type: "boolean" },
+          appId: { type: ["string", "null"] },
+          embeddedSignupConfigId: { type: ["string", "null"] },
         },
       },
       flags: {
@@ -1054,6 +1066,8 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
     Body: {
       metaWebhookVerifyToken?: string;
       metaAppSecret?: string;
+      metaAppId?: string;
+      metaEmbeddedSignupConfigId?: string;
       whatsappSkipSignatureVerify?: boolean;
       twilioSkipSignatureVerify?: boolean;
     };
@@ -1067,6 +1081,8 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           properties: {
             metaWebhookVerifyToken: { type: "string" },
             metaAppSecret: { type: "string" },
+            metaAppId: { type: "string" },
+            metaEmbeddedSignupConfigId: { type: "string" },
             whatsappSkipSignatureVerify: { type: "boolean" },
             twilioSkipSignatureVerify: { type: "boolean" },
           },
@@ -1092,6 +1108,8 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
         await upsertServerWhatsAppSettings({
           metaWebhookVerifyToken: body.metaWebhookVerifyToken,
           metaAppSecret: body.metaAppSecret,
+          metaAppId: body.metaAppId,
+          metaEmbeddedSignupConfigId: body.metaEmbeddedSignupConfigId,
           whatsappSkipSignatureVerify: body.whatsappSkipSignatureVerify,
           twilioSkipSignatureVerify: body.twilioSkipSignatureVerify,
         });
@@ -1102,6 +1120,122 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
           500,
           ERROR_CODES.whatsapp.WHATSAPP_SERVER_SETTINGS_UPDATE_FAILED,
           "Erro ao salvar configurações globais do WhatsApp"
+        );
+      }
+    }
+  );
+
+  fastify.get(
+    "/whatsapp/embedded-signup/config",
+    {
+      schema: {
+        response: {
+          200: successEnvelopeSchema({
+            type: "object",
+            additionalProperties: false,
+            required: ["enabled", "appId", "configId", "graphVersion"],
+            properties: {
+              enabled: { type: "boolean" },
+              appId: { type: ["string", "null"] },
+              configId: { type: ["string", "null"] },
+              graphVersion: { type: "string" },
+            },
+          }),
+          403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+          500: errorEnvelopeSchema([ERROR_CODES.whatsapp.WHATSAPP_EMBEDDED_SIGNUP_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      ensureAdminAccess(request);
+      try {
+        const data = await getEmbeddedSignupConfig();
+        return sendSuccess(request, reply, data);
+      } catch (error) {
+        request.log.error(error);
+        throw new ApiError(
+          500,
+          ERROR_CODES.whatsapp.WHATSAPP_EMBEDDED_SIGNUP_FAILED,
+          "Erro ao carregar config Embedded Signup"
+        );
+      }
+    }
+  );
+
+  fastify.post<{
+    Body: {
+      code: string;
+      wabaId: string;
+      phoneNumberId: string;
+      label?: string;
+      displayPhoneNumber?: string;
+    };
+  }>(
+    "/whatsapp/channels/embedded-signup",
+    {
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["code", "wabaId", "phoneNumberId"],
+          properties: {
+            code: { type: "string", minLength: 1 },
+            wabaId: { type: "string", minLength: 1 },
+            phoneNumberId: { type: "string", minLength: 1 },
+            label: { type: "string" },
+            displayPhoneNumber: { type: "string" },
+          },
+        },
+        response: {
+          201: successEnvelopeSchema({
+            type: "object",
+            additionalProperties: false,
+            required: ["channelId", "phoneNumberId", "wabaId"],
+            properties: {
+              channelId: { type: "string" },
+              phoneNumberId: { type: "string" },
+              wabaId: { type: "string" },
+            },
+          }),
+          400: errorEnvelopeSchema([
+            ERROR_CODES.common.VALIDATION_ERROR,
+            ERROR_CODES.whatsapp.WHATSAPP_EMBEDDED_SIGNUP_FAILED,
+            ERROR_CODES.whatsapp.WHATSAPP_EMBEDDED_SIGNUP_NOT_CONFIGURED,
+          ]),
+          403: errorEnvelopeSchema([ERROR_CODES.users.FORBIDDEN_ROLE]),
+          500: errorEnvelopeSchema([ERROR_CODES.whatsapp.WHATSAPP_EMBEDDED_SIGNUP_FAILED]),
+        },
+      },
+    },
+    async (request, reply) => {
+      ensureAdminAccess(request);
+      const body = request.body;
+      try {
+        const created = await onboardEmbeddedSignup({
+          tenantId: request.tenant.id,
+          code: body.code,
+          wabaId: body.wabaId,
+          phoneNumberId: body.phoneNumberId,
+          label: body.label,
+          displayPhoneNumber: body.displayPhoneNumber,
+        });
+        return sendSuccess(request, reply, created, 201);
+      } catch (error) {
+        request.log.error(error);
+        if (error instanceof EmbeddedSignupError) {
+          const code =
+            error.step === "config"
+              ? ERROR_CODES.whatsapp.WHATSAPP_EMBEDDED_SIGNUP_NOT_CONFIGURED
+              : ERROR_CODES.whatsapp.WHATSAPP_EMBEDDED_SIGNUP_FAILED;
+          throw new ApiError(400, code, error.message, error.details);
+        }
+        if (error instanceof ApiError) throw error;
+        const msg =
+          error instanceof Error ? error.message : "Erro no Embedded Signup";
+        throw new ApiError(
+          400,
+          ERROR_CODES.whatsapp.WHATSAPP_EMBEDDED_SIGNUP_FAILED,
+          msg
         );
       }
     }

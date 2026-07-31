@@ -86,6 +86,10 @@ async function ensureSchema() {
       ALTER TABLE whatsapp_channel_secrets
       ADD COLUMN IF NOT EXISTS twilio_auth_token_encrypted text
     `);
+    await client.query(`
+      ALTER TABLE whatsapp_channel_secrets
+      ADD COLUMN IF NOT EXISTS two_step_pin_encrypted text
+    `);
 
     schemaReady = true;
   } finally {
@@ -100,6 +104,8 @@ export type CreateWhatsAppChannelOptionBInput = {
   accessToken: string;
   phoneNumberId: string;
   displayPhoneNumber?: string;
+  /** PIN de verificação em 2 etapas (Cloud API register); armazenado cifrado. */
+  twoStepPin?: string;
 };
 
 export async function createWhatsAppChannelOptionB(
@@ -117,6 +123,9 @@ export async function createWhatsAppChannelOptionB(
   const client = await pool.connect();
   try {
     const enc = encryptSecret(token);
+    const pinEnc = input.twoStepPin?.trim()
+      ? encryptSecret(input.twoStepPin.trim())
+      : null;
     const created = await client.query<{ id: string }>(
       `INSERT INTO whatsapp_channel_accounts (tenant_id, label, provider)
        VALUES ($1, $2, $3)
@@ -125,9 +134,10 @@ export async function createWhatsAppChannelOptionB(
     );
     const channelId = created.rows[0].id;
     await client.query(
-      `INSERT INTO whatsapp_channel_secrets (channel_account_id, waba_id, access_token_encrypted)
-       VALUES ($1, $2, $3)`,
-      [channelId, wabaId, enc]
+      `INSERT INTO whatsapp_channel_secrets
+         (channel_account_id, waba_id, access_token_encrypted, two_step_pin_encrypted)
+       VALUES ($1, $2, $3, $4)`,
+      [channelId, wabaId, enc, pinEnc]
     );
     await client.query(
       `INSERT INTO whatsapp_phone_numbers (channel_account_id, phone_number_id, display_phone_number)
