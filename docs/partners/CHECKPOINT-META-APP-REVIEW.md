@@ -27,7 +27,7 @@ Não versionar neste arquivo: App Secret, verify token, senhas, access tokens `E
 | Instruções para analista (web) | Em ajuste — precisa **e-mail real** de login (não o nome “Meta App Review”) |
 | URLs Termos / exclusão de dados | **Corrigir** se ainda apontam para `facebook.com` |
 | Config ID Embedded Signup | **Pendente** (após Advanced Access) |
-| Deploy código Embedded Signup na VPS | Conferir no retomada (commit `2f80c0b` local; deploy sob demanda) |
+| Deploy código Embedded Signup na VPS | Feito (2026-08-04, deploy local + push `91d8fae`) |
 | App Review enviado / aprovado | **Pendente** |
 
 ---
