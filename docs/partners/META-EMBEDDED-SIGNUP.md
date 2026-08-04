@@ -4,7 +4,9 @@ Onboarding self-service de números WhatsApp Cloud API via popup da Meta, sem co
 
 ## Retomada (fazer depois)
 
-**Código:** implementado no repo (UI `/admin/whatsapp` + APIs). Falta **deploy** se ainda não foi para a VPS.
+**Checkpoint detalhado da sessão Meta (2026-08-04):** ver [`CHECKPOINT-META-APP-REVIEW.md`](CHECKPOINT-META-APP-REVIEW.md).
+
+**Código:** implementado no repo (UI `/admin/whatsapp` + APIs). Conferir **deploy** na VPS.
 
 **Manual na Meta (obrigatório antes de usar o botão):**
 
