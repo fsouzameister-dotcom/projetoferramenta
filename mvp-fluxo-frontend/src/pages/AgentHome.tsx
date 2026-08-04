@@ -73,6 +73,42 @@ type Conversation = {
   messages: ChatMessage[];
 };
 
+function lastConversationMessage(conv: Conversation): ChatMessage | undefined {
+  return conv.messages.length > 0 ? conv.messages[conv.messages.length - 1] : undefined;
+}
+
+/** Cliente falou por último — agente ainda precisa responder. */
+function conversationNeedsAgentReply(conv: Conversation): boolean {
+  return lastConversationMessage(conv)?.direction === "in";
+}
+
+function parseConversationTs(value?: string): number {
+  if (!value) return 0;
+  const t = Date.parse(value);
+  return Number.isNaN(t) ? 0 : t;
+}
+
+function conversationSortTs(conv: Conversation): number {
+  const fromField = parseConversationTs(conv.last_customer_message_at);
+  if (fromField > 0) return fromField;
+  const last = lastConversationMessage(conv);
+  return Math.max(parseConversationTs(last?.created_at), parseConversationTs(last?.createdAt));
+}
+
+function lastInboundMessageId(conv: Conversation): string | null {
+  for (let i = conv.messages.length - 1; i >= 0; i -= 1) {
+    if (conv.messages[i]?.direction === "in") return conv.messages[i]!.id;
+  }
+  return null;
+}
+
+function compareConversationsForAgentList(a: Conversation, b: Conversation): number {
+  const aNeeds = conversationNeedsAgentReply(a) ? 1 : 0;
+  const bNeeds = conversationNeedsAgentReply(b) ? 1 : 0;
+  if (aNeeds !== bNeeds) return bNeeds - aNeeds;
+  return conversationSortTs(b) - conversationSortTs(a);
+}
+
 type MasterClientPhone = {
   id: string;
   phoneE164: string;
@@ -325,6 +361,8 @@ export default function AgentHome() {
     lng: "-46.633308",
   });
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const lastInboundByConversationRef = useRef<Record<string, string>>({});
+  const [pulsingConversationIds, setPulsingConversationIds] = useState<Record<string, true>>({});
 
   const mergeWithPendingMedia = (apiConversations: Conversation[]) => {
     return apiConversations.map((conv) => {
@@ -461,15 +499,52 @@ export default function AgentHome() {
   }, [resolvedMode]);
 
   const filteredConversations = useMemo(() => {
-    return conversations.filter((conv) => {
-      const byStatus = conv.status === activeStatus;
-      const bySearch =
-        !searchTerm ||
-        conv.contactName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        conv.phone.includes(searchTerm);
-      return byStatus && bySearch;
-    });
+    return conversations
+      .filter((conv) => {
+        const byStatus = conv.status === activeStatus;
+        const bySearch =
+          !searchTerm ||
+          conv.contactName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          conv.phone.includes(searchTerm);
+        return byStatus && bySearch;
+      })
+      .sort(compareConversationsForAgentList);
   }, [activeStatus, conversations, searchTerm]);
+
+  useEffect(() => {
+    const newlyReplied: string[] = [];
+    for (const conv of conversations) {
+      const inboundId = lastInboundMessageId(conv);
+      if (!inboundId) continue;
+      const previousId = lastInboundByConversationRef.current[conv.id];
+      if (previousId && previousId !== inboundId && conversationNeedsAgentReply(conv)) {
+        newlyReplied.push(conv.id);
+      }
+      lastInboundByConversationRef.current[conv.id] = inboundId;
+    }
+    if (newlyReplied.length === 0) return;
+
+    setPulsingConversationIds((prev) => {
+      const next = { ...prev };
+      for (const id of newlyReplied) next[id] = true;
+      return next;
+    });
+
+    const timers = newlyReplied.map((id) =>
+      window.setTimeout(() => {
+        setPulsingConversationIds((prev) => {
+          if (!prev[id]) return prev;
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+      }, 6500)
+    );
+
+    return () => {
+      for (const timer of timers) window.clearTimeout(timer);
+    };
+  }, [conversations]);
 
   const activeConversation =
     conversations.find((conv) => conv.id === activeConversationId) ?? null;
@@ -1177,8 +1252,8 @@ export default function AgentHome() {
 
   return (
     <div className="h-screen overflow-hidden bg-gradient-to-br from-primary-dark via-[#132a55] to-[#0f1e3d] text-gray-100 p-4 md:p-6">
-      <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-4 h-[calc(100vh-2rem)]">
-        <aside className="bg-[#1b2540] rounded-xl border border-[#2f3d63] p-4 flex flex-col shadow-xl">
+      <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-4 h-[calc(100vh-2rem)] min-h-0">
+        <aside className="bg-[#1b2540] rounded-xl border border-[#2f3d63] p-4 flex flex-col min-h-0 overflow-hidden shadow-xl">
           <Link
             to="/agent"
             className="mb-4 rounded-lg border border-[#314263] bg-[#101b34] px-3 py-2 inline-flex w-fit transition-all duration-200 hover:border-cyan-300/60 hover:bg-[#142142] hover:shadow-[0_0_0_1px_rgba(103,232,249,0.25)] focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70"
@@ -1239,26 +1314,76 @@ export default function AgentHome() {
             ))}
           </div>
 
-          <div className="overflow-hidden space-y-2 pr-1">
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-1">
             {filteredConversations.length === 0 ? (
               <div className="text-center text-cyan-300 mt-10">
                 <p className="text-4xl mb-3">💬</p>
                 <p className="font-semibold">Não encontramos mensagens</p>
               </div>
             ) : (
-              filteredConversations.map((conv) => (
+              filteredConversations.map((conv) => {
+                const needsReply = conversationNeedsAgentReply(conv);
+                const isActive = activeConversationId === conv.id;
+                const isPulsing = Boolean(pulsingConversationIds[conv.id]);
+                const lastMsg = lastConversationMessage(conv);
+                const preview =
+                  lastMsg?.type === "text"
+                    ? lastMsg.text?.trim() || ""
+                    : lastMsg
+                      ? lastMsg.type === "image"
+                        ? "Imagem"
+                        : lastMsg.type === "audio"
+                          ? "Áudio"
+                          : lastMsg.type === "attachment"
+                            ? "Anexo"
+                            : lastMsg.type === "location"
+                              ? "Localização"
+                              : lastMsg.type === "contact"
+                                ? "Contato"
+                                : ""
+                      : "";
+                return (
                 <button
                   key={conv.id}
                   type="button"
-                  onClick={() => setActiveConversationId(conv.id)}
-                  className={`w-full text-left p-3 rounded-lg border ${
-                    activeConversationId === conv.id
-                      ? "bg-[#0f1f3f] border-cyan-400"
-                      : "bg-[#121d37] border-[#2d3d63]"
-                  }`}
+                  onClick={() => {
+                    setActiveConversationId(conv.id);
+                    setPulsingConversationIds((prev) => {
+                      if (!prev[conv.id]) return prev;
+                      const next = { ...prev };
+                      delete next[conv.id];
+                      return next;
+                    });
+                  }}
+                  className={`w-full text-left p-3 rounded-lg border transition-colors ${
+                    isActive
+                      ? needsReply
+                        ? "bg-[#1a2410] border-amber-300 ring-1 ring-amber-400/50"
+                        : "bg-[#0f1f3f] border-cyan-400"
+                      : needsReply
+                        ? "bg-[#1a2214] border-amber-400/90 hover:border-amber-300"
+                        : "bg-[#121d37] border-[#2d3d63]"
+                  } ${isPulsing ? "animate-agent-reply-pulse" : ""}`}
                 >
-                  <p className="font-semibold text-sm text-gray-100">{conv.contactName}</p>
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="font-semibold text-sm text-gray-100 min-w-0 truncate">{conv.contactName}</p>
+                    {needsReply ? (
+                      <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-amber-400/20 border border-amber-300/50 text-amber-100">
+                        {isPulsing ? "Nova resposta" : "Aguardando você"}
+                      </span>
+                    ) : null}
+                  </div>
                   <p className="text-xs text-gray-400">{getConversationDisplayPhone(conv)}</p>
+                  {preview ? (
+                    <p
+                      className={`mt-1 text-[11px] line-clamp-1 ${
+                        needsReply ? "text-amber-100/90" : "text-gray-400"
+                      }`}
+                    >
+                      {needsReply ? "Cliente: " : "Você: "}
+                      {preview}
+                    </p>
+                  ) : null}
                   {isConversationUsingMasterClient(conv) ? (
                     <span className="mt-1 inline-flex text-[10px] px-2 py-0.5 rounded border bg-cyan-900/30 border-cyan-500/40 text-cyan-200">
                       Cadastro mestre
@@ -1274,13 +1399,14 @@ export default function AgentHome() {
                     </div>
                   ) : null}
                 </button>
-              ))
+                );
+              })
             )}
           </div>
         </aside>
 
         <section className="bg-[#1b2540] rounded-xl border border-[#2f3d63] p-3 flex flex-col min-h-0 overflow-hidden shadow-xl">
-          <div className="flex items-center justify-between border-b border-[#33466f] pb-2 mb-2">
+          <div className="flex items-center justify-between border-b border-[#33466f] pb-2 mb-2 shrink-0">
             <div>
               <h1 className="text-[20px] font-bold text-white tracking-tight">Central do Agente</h1>
               <p className="text-xs text-gray-300">Atendente: {userName}</p>
@@ -1328,8 +1454,8 @@ export default function AgentHome() {
             </div>
           ) : !loadingConversations ? (
             <div className="flex-1 min-h-0 flex flex-col">
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <div>
+              <div className="mb-2 flex items-center justify-between gap-3 shrink-0">
+                <div className="min-w-0">
                   <p className="font-semibold text-sm text-gray-100">{activeConversation?.contactName}</p>
                   <p className="text-[11px] text-gray-400">{activeConversation?.phone}</p>
                   {activeConversation &&
