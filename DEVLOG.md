@@ -2,9 +2,10 @@
 
 ## Checkpoint atual
 
-- Data: 2026-06-08
+- Data: 2026-08-20
 - Escopo vigente: **[Escopo vigente — maio/2026](#escopo-vigente--maio2026)** (prioridades atuais)
-- Retomada rápida: **[Checkpoint sessão 2026-06-08 — Campanhas, Instagram e bugs](#checkpoint-de-sessão-2026-06-08--campanhas-instagram-e-bugs)**
+- Retomada rápida: **[Checkpoint sessão 2026-08-20 — Agendamentos e campanhas agendadas](#checkpoint-de-sessão-2026-08-20--agendamentos-e-campanhas-agendadas)**
+- Sessão anterior: **[Checkpoint sessão 2026-06-08 — Campanhas, Instagram e bugs](#checkpoint-de-sessão-2026-06-08--campanhas-instagram-e-bugs)**
 - Sessão anterior: **[Checkpoint sessão 2026-06-03 — Motor IA no fluxo](#checkpoint-de-sessão-2026-06-03--motor-ia-no-fluxo)**
 - Sessão anterior: **[Checkpoint sessão 2026-05-28 — Operação (filas, tabulações, encerramento)](#checkpoint-de-sessão-2026-05-28--operação-filas-tabulações-encerramento)**
 - Sessão anterior: **[Checkpoint sessão 2026-05-22 — alinhamento produto](#checkpoint-de-sessão-2026-05-22--alinhamento-produto)**
@@ -2080,3 +2081,79 @@ python scripts/deploy-vps-remote.py   # a partir da pasta do projeto; VPS_ROOT_P
 - Envio real `ContentSid` ao criar conversa.
 - Menu `/settings` sem rota.
 - Push dos commits de documentação desta sessão se ainda não publicados.
+
+---
+
+## Checkpoint de sessão (2026-08-20) — Agendamentos e campanhas agendadas
+
+Use este bloco para retomar **sem depender do histórico do chat**.
+
+### O que foi entregue nesta sessão
+
+**1) Campanhas — agendamento de disparo (`scheduled_at`)**
+
+- Commit: `0192ea4` — `feat(campaigns): agendamento de disparo (scheduled_at)`.
+- `campaign-schedule.ts` (parse/validação de data agendada, lead mínimo 30s), status `scheduled` em `campaigns.ts`, `scheduleCampaign` / `unscheduleCampaign` / `activateDueScheduledCampaigns` (chamada pelo `campaign-dispatcher.ts`).
+- Rotas: `POST /admin/campaigns/:id/schedule` e `.../unschedule`.
+- `ensureCampaignSchema()` ganhou `ALTER TABLE mailings ADD COLUMN IF NOT EXISTS scheduled_at timestamptz` (garante coluna mesmo se a tabela já existia em produção).
+- Frontend (`CampaignsAdmin.tsx`): seletor de data/hora, status "Agendada", botões Agendar/Reagendar/Tirar agendamento.
+- **Deploy:** feito e validado em produção nesta sessão (antes da feature de agendamentos abaixo).
+
+**2) Agendamentos — Fase 1 (estrutura + admin) e Fase 2 (node de fluxo)**
+
+- Commit: `11c263a` — `feat(appointments): estrutura de agendamentos + node de fluxo`.
+- **Motivação de produto:** bot/IA no fluxo agenda compromissos (ex.: exame, visita, consulta) checando disponibilidade real e evitando conflito de horário; útil para múltiplos segmentos (pesquisas, imobiliárias, clínicas etc. — decisão registrada: multi-negócio, não é vertical única).
+- **Modelo de dados** (`migrations/011_appointments.sql`): `appointment_services` (o que se agenda; `capacity_mode`: `pool` | `resource`), `appointment_resources` (quem/onde, modo `resource`), `appointment_availability_rules` (grade semanal), `appointment_blocks` (bloqueios pontuais), `appointments` (reserva). Todas com `tenant_id`.
+- **Disponibilidade** (`appointment-availability.ts`): cálculo puro de slots por dia, com fuso (`zonedWallTimeToUtc`, padrão `America/Sao_Paulo`), respeita duração do serviço, capacidade (pool) ou recursos livres, bloqueios e lead mínimo. Testado em `test/appointment-availability.test.ts`.
+- **Backend de negócio** (`appointments.ts`): `ensureAppointmentSchema()` (bootstrap idempotente), CRUD de services/resources/regras/bloqueios, `getAvailableSlots`, `createAppointment`/`rescheduleAppointment`/`cancelAppointment`/`markAppointmentCompleted` com transação + `FOR UPDATE` (evita corrida de reserva dupla).
+- **Rotas** (`routes/appointment.routes.ts`, prefixo `/admin/appointments/...`) registradas em `protected.routes.ts`; permissão dedicada `appointments` (`auth-permissions.ts`, `route-permissions.ts`, e espelho no frontend `lib/permissions.ts` + `lib/sidebar-nav.ts`, item "Agendamentos" no grupo Automação).
+- **Admin** (`AppointmentsAdmin.tsx`, rota `/admin/appointments`): aba **Configuração** (services, resources, regras semanais, bloqueios) e aba **Agenda** (lista com filtros, modal de novo agendamento com slots disponíveis, reagendar/cancelar/concluir/no-show).
+- **Node de fluxo "Agendamento"** (Fase 2 — conecta ao bot):
+  - `agendamento-node.ts`: máquina de 2 fases reaproveitando o **mesmo formato `awaiting_input` do `capturar_entrada`** (por isso não tocou em sessão inbound / scheduler de timeout / entrega WhatsApp):
+    1. pergunta a data (aceita `hoje`, `amanhã`, `DD/MM`, `DD/MM/AAAA`, ISO) e calcula horários livres via `appointment-availability`;
+    2. mostra os horários como lista numerada; ao escolher, chama `createAppointment` (transação com lock). Se o horário for ocupado entre a oferta e a confirmação, recalcula e reoferece automaticamente.
+  - Ao confirmar, grava variáveis `{prefixo}_id/_start/_end/_data/_hora/_recurso` para uso em mensagens seguintes.
+  - Integrado em `flow-executor.ts` como novo `currentNode.type === "agendamento"`.
+  - Editor (`FlowEditor.tsx` + `flownodes.tsx`): paleta "Agendamento" (📅), painel com seleção do serviço (busca `GET /admin/appointments/services`), prefixo de variáveis, mensagens customizáveis, duas saídas no canvas (**Confirmado** = `next_node_id`; **Sem horários** opcional = `noSlotsNextNodeId`). Aviso de validação (`flow-editor-validation.ts`) se nenhum serviço for selecionado.
+  - Testes: `test/agendamento-node.test.ts` (parsing de data, formatação, config) — 11 casos, todos verdes.
+- **Documentação:** `DOCUMENTO_NODES_FLUXO.md` atualizado — node `agendamento` como `Implementado`.
+
+### Validação feita nesta sessão
+
+- `tsc --noEmit` e `npm run build` OK em backend e frontend.
+- `npx tsx --test` OK (agendamento-node, appointment-availability, campaign-schedule, flow-field-validators — 30 testes, 0 falhas).
+- Deploy em produção via `python scripts/deploy-vps-remote.py` — `DEPLOY_OK`, migração `011_appointments.sql` aplicada, `mvp-backend` reiniciado e `active`, health check `200`.
+- Confirmado pós-deploy: `https://api.clienton.com.br/health` → `{"status":"ok"}`; `https://app.clienton.com.br/` carregando tela de login.
+
+### Não feito ainda (Fase 2b / Fase 3 — retomar aqui)
+
+1. **Teste ponta a ponta manual não realizado:** criar 1 `appointment_service` de teste em `/admin/appointments` (Configuração) e montar um fluxo simples `Início → Agendamento → Mensagem` no editor para validar a experiência real do bot perguntando data/horário e confirmando.
+2. **Lembretes automáticos** (decisão já tomada: sim) — falta job em background parecido com `campaign-dispatcher.ts` que varra `appointments` próximos do horário e dispare mensagem de lembrete (marcar `reminder_sent_at`, coluna já existe na tabela).
+3. **Integração Google Calendar** — decisão já tomada: **Fase 2/3**, não implementada (requer OAuth por tenant + sync de evento ao criar/cancelar/reagendar).
+4. **Nome do cliente no agendamento via fluxo:** hoje depende de `clientNameVariable` configurada manualmente no node (variável já capturada por um node anterior); não há captura automática de nome dentro do próprio node de agendamento.
+5. Nenhuma alteração de UX ainda para exibir, na tela do agente ou dashboard, agendamentos futuros do cliente que está sendo atendido (era uma das ideias discutidas — "gerenciamento posterior").
+
+### Comandos de retomada
+
+```powershell
+cd c:\projetoferramenta
+git pull origin master
+git log -3 --oneline
+```
+
+Testar local (sem deploy):
+
+```powershell
+cd mvp-fluxo-backend
+npx tsx --test test/agendamento-node.test.ts test/appointment-availability.test.ts
+npm run dev
+```
+
+Deploy (quando houver código novo):
+
+```powershell
+cd c:\projetoferramenta
+python scripts\deploy-vps-remote.py
+```
+
+Ler antes de continuar: `DOCUMENTO_NODES_FLUXO.md` (seção `agendamento`) e esta seção do `DEVLOG.md`.
