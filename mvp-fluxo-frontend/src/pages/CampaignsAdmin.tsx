@@ -34,6 +34,7 @@ type CampaignRow = {
   name: string;
   status: string;
   flow_id: string | null;
+  scheduled_at: string | null;
   metadata: {
     channelAccountId: string;
     template: TemplateOption;
@@ -71,6 +72,7 @@ const providerLabel = (p: string) =>
 
 const statusLabel: Record<string, string> = {
   draft: "Rascunho",
+  scheduled: "Agendada",
   sending: "Enviando",
   paused: "Pausada",
   completed: "Concluída",
@@ -83,6 +85,33 @@ const statusLabel: Record<string, string> = {
   responded: "Respondido",
   skipped: "Ignorado",
 };
+
+function toDatetimeLocalValue(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function datetimeLocalToIso(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error("Data/hora inválida");
+  }
+  return parsed.toISOString();
+}
+
+function formatScheduledAt(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return iso;
+  return new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(parsed);
+}
 
 export default function CampaignsAdmin() {
   const [activeTab, setActiveTab] = useState<"disparos" | "dashboard">("disparos");
@@ -100,6 +129,9 @@ export default function CampaignsAdmin() {
   const [channelAccountId, setChannelAccountId] = useState("");
   const [templateId, setTemplateId] = useState("");
   const [sendIntervalSeconds, setSendIntervalSeconds] = useState(3);
+  const [scheduledLocal, setScheduledLocal] = useState("");
+  const [rescheduleCampaignId, setRescheduleCampaignId] = useState<string | null>(null);
+  const [rescheduleLocal, setRescheduleLocal] = useState("");
   const [sheet, setSheet] = useState<ParsedSheet | null>(null);
   const [columnMapping, setColumnMapping] = useState<Record<string, string>>({});
   const [phoneColumn, setPhoneColumn] = useState("Telefone");
@@ -200,41 +232,83 @@ export default function CampaignsAdmin() {
     }
   };
 
-  const handleCreateAndDispatch = async () => {
+  const createCampaignPayload = () => {
     if (!name.trim() || !flowId || !channelAccountId || !selectedTemplate || !sheet?.rows.length) {
       setError("Preencha nome, fluxo, canal, template e planilha.");
-      return;
+      return null;
     }
     for (const slot of selectedTemplate.variables) {
       if (!columnMapping[slot]?.trim()) {
         setError(`Selecione a coluna para a variável {{${slot}}}.`);
-        return;
+        return null;
       }
+    }
+    return {
+      name: name.trim(),
+      flowId,
+      channelAccountId,
+      channelLabel: selectedChannel?.label,
+      provider: selectedChannel?.provider,
+      template: selectedTemplate,
+      columnMapping,
+      phoneColumn,
+      sendIntervalSeconds,
+      spreadsheetHeaders: sheet.headers,
+      rows: sheet.rows,
+    };
+  };
+
+  const resetCreateForm = () => {
+    setName("");
+    setSheet(null);
+    setScheduledLocal("");
+  };
+
+  const handleCreateAndDispatch = async () => {
+    const payload = createCampaignPayload();
+    if (!payload) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const createRes = await api.post("/admin/campaigns", payload);
+      const created = unwrapApiData<CampaignRow>(createRes.data);
+      await api.post(`/admin/campaigns/${created.id}/dispatch`);
+      setNotice(`Campanha "${created.name}" criada e disparo iniciado.`);
+      resetCreateForm();
+      await loadBase();
+    } catch (e) {
+      setError(getApiErrorMessage(e, "Erro ao criar/disparar campanha"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCreateAndSchedule = async () => {
+    const payload = createCampaignPayload();
+    if (!payload) return;
+    if (!scheduledLocal) {
+      setError("Informe data e hora para agendar o disparo (horário deste computador).");
+      return;
+    }
+    let scheduledAt: string;
+    try {
+      scheduledAt = datetimeLocalToIso(scheduledLocal);
+    } catch {
+      setError("Data/hora inválida para o agendamento.");
+      return;
     }
     setSaving(true);
     setError(null);
     try {
-      const createRes = await api.post("/admin/campaigns", {
-        name: name.trim(),
-        flowId,
-        channelAccountId,
-        channelLabel: selectedChannel?.label,
-        provider: selectedChannel?.provider,
-        template: selectedTemplate,
-        columnMapping,
-        phoneColumn,
-        sendIntervalSeconds,
-        spreadsheetHeaders: sheet.headers,
-        rows: sheet.rows,
-      });
+      const createRes = await api.post("/admin/campaigns", { ...payload, scheduledAt });
       const created = unwrapApiData<CampaignRow>(createRes.data);
-      await api.post(`/admin/campaigns/${created.id}/dispatch`);
-      setNotice(`Campanha "${created.name}" criada e disparo iniciado.`);
-      setName("");
-      setSheet(null);
+      setNotice(
+        `Campanha "${created.name}" agendada para ${formatScheduledAt(created.scheduled_at)}.`
+      );
+      resetCreateForm();
       await loadBase();
     } catch (e) {
-      setError(getApiErrorMessage(e, "Erro ao criar/disparar campanha"));
+      setError(getApiErrorMessage(e, "Erro ao agendar campanha"));
     } finally {
       setSaving(false);
     }
@@ -264,7 +338,7 @@ export default function CampaignsAdmin() {
 
   const runCampaignAction = async (
     campaignId: string,
-    action: "dispatch" | "pause" | "resume" | "cancel" | "retry-failed",
+    action: "dispatch" | "pause" | "resume" | "cancel" | "retry-failed" | "schedule" | "unschedule",
     successMsg: string,
     body?: Record<string, unknown>
   ) => {
@@ -470,6 +544,19 @@ export default function CampaignsAdmin() {
             />
           </label>
           <label className="block text-sm">
+            <span className="text-gray-400 mb-1 block">Agendar disparo (opcional)</span>
+            <input
+              type="datetime-local"
+              className="w-full rounded-lg bg-zinc-800 border border-zinc-600 px-3 py-2"
+              value={scheduledLocal}
+              min={toDatetimeLocalValue(new Date(Date.now() + 60_000))}
+              onChange={(e) => setScheduledLocal(e.target.value)}
+            />
+            <span className="text-xs text-gray-500 mt-1 block">
+              Horário deste computador. Sem data, use “Salvar e disparar” para enviar agora.
+            </span>
+          </label>
+          <label className="block text-sm">
             <span className="text-gray-400 mb-1 block">Planilha (CSV ou Excel)</span>
             <input
               type="file"
@@ -524,6 +611,14 @@ export default function CampaignsAdmin() {
         <div className="mt-6 flex justify-end gap-2">
           <button
             type="button"
+            disabled={saving || !scheduledLocal}
+            onClick={() => void handleCreateAndSchedule()}
+            className="px-4 py-2 rounded-lg border border-cyan-500/70 text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50 font-medium"
+          >
+            {saving ? "Processando…" : "Salvar e agendar"}
+          </button>
+          <button
+            type="button"
             disabled={saving}
             onClick={() => void handleCreateAndDispatch()}
             className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white font-medium"
@@ -546,6 +641,7 @@ export default function CampaignsAdmin() {
                 <tr className="text-left text-gray-400 border-b border-zinc-700">
                   <th className="py-2 pr-3">Nome</th>
                   <th className="py-2 pr-3">Status</th>
+                  <th className="py-2 pr-3">Agendado</th>
                   <th className="py-2 pr-3">Total</th>
                   <th className="py-2 pr-3">Enviados</th>
                   <th className="py-2 pr-3">Falhas</th>
@@ -558,6 +654,11 @@ export default function CampaignsAdmin() {
                   <tr key={c.id} className="border-b border-zinc-800">
                     <td className="py-2 pr-3">{c.name}</td>
                     <td className="py-2 pr-3">{statusLabel[c.status] ?? c.status}</td>
+                    <td className="py-2 pr-3 text-xs text-gray-300">
+                      {c.status === "scheduled" || c.scheduled_at
+                        ? formatScheduledAt(c.scheduled_at)
+                        : "—"}
+                    </td>
                     <td className="py-2 pr-3">{c.stats?.total ?? 0}</td>
                     <td className="py-2 pr-3">{c.stats?.sent ?? 0}</td>
                     <td className="py-2 pr-3">{c.stats?.failed ?? 0}</td>
@@ -572,7 +673,11 @@ export default function CampaignsAdmin() {
                         >
                           Destinatários
                         </button>
-                        {(c.status === "draft" || (c.stats?.pending ?? 0) > 0) &&
+                        {(c.status === "draft" ||
+                          c.status === "scheduled" ||
+                          ((c.stats?.pending ?? 0) > 0 &&
+                            c.status !== "cancelled" &&
+                            c.status !== "sending")) &&
                         c.status !== "cancelled" &&
                         c.status !== "sending" ? (
                           <button
@@ -580,10 +685,49 @@ export default function CampaignsAdmin() {
                             className="text-cyan-400 hover:underline disabled:opacity-40"
                             disabled={saving}
                             onClick={() =>
-                              void runCampaignAction(c.id, "dispatch", "Disparo iniciado.")
+                              void runCampaignAction(
+                                c.id,
+                                "dispatch",
+                                c.status === "scheduled"
+                                  ? "Disparo iniciado agora (agendamento ignorado)."
+                                  : "Disparo iniciado."
+                              )
                             }
                           >
-                            Disparar
+                            {c.status === "scheduled" ? "Disparar agora" : "Disparar"}
+                          </button>
+                        ) : null}
+                        {c.status === "draft" || c.status === "scheduled" ? (
+                          <button
+                            type="button"
+                            className="text-cyan-400 hover:underline disabled:opacity-40"
+                            disabled={saving}
+                            onClick={() => {
+                              setRescheduleCampaignId(c.id);
+                              setRescheduleLocal(
+                                c.scheduled_at
+                                  ? toDatetimeLocalValue(new Date(c.scheduled_at))
+                                  : toDatetimeLocalValue(new Date(Date.now() + 60 * 60 * 1000))
+                              );
+                            }}
+                          >
+                            {c.status === "scheduled" ? "Reagendar" : "Agendar"}
+                          </button>
+                        ) : null}
+                        {c.status === "scheduled" ? (
+                          <button
+                            type="button"
+                            className="text-amber-400 hover:underline disabled:opacity-40"
+                            disabled={saving}
+                            onClick={() =>
+                              void runCampaignAction(
+                                c.id,
+                                "unschedule",
+                                "Agendamento cancelado. Campanha voltou a rascunho."
+                              )
+                            }
+                          >
+                            Tirar agendamento
                           </button>
                         ) : null}
                         {c.status === "sending" ? (
@@ -632,7 +776,7 @@ export default function CampaignsAdmin() {
                             </button>
                           </>
                         ) : null}
-                        {["draft", "sending", "paused"].includes(c.status) ? (
+                        {["draft", "scheduled", "sending", "paused"].includes(c.status) ? (
                           <button
                             type="button"
                             className="text-red-400 hover:underline disabled:opacity-40"
@@ -743,6 +887,52 @@ export default function CampaignsAdmin() {
       ) : null}
         </>
       )}
+
+      {rescheduleCampaignId ? (
+        <div className="fixed inset-0 z-50 bg-black/55 flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-xl border border-zinc-600 bg-zinc-900 p-5">
+            <h3 className="text-lg font-medium text-white mb-3">Agendar disparo</h3>
+            <p className="text-sm text-gray-400 mb-3">
+              Informe data e hora neste computador. A campanha dispara sozinha quando chegar o horário.
+            </p>
+            <input
+              type="datetime-local"
+              className="w-full rounded-lg bg-zinc-800 border border-zinc-600 px-3 py-2 mb-4"
+              value={rescheduleLocal}
+              min={toDatetimeLocalValue(new Date(Date.now() + 60_000))}
+              onChange={(e) => setRescheduleLocal(e.target.value)}
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                className="px-3 py-2 text-sm text-gray-300 hover:text-white"
+                onClick={() => setRescheduleCampaignId(null)}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={saving || !rescheduleLocal}
+                className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-sm"
+                onClick={() => {
+                  let scheduledAt: string;
+                  try {
+                    scheduledAt = datetimeLocalToIso(rescheduleLocal);
+                  } catch {
+                    setError("Data/hora inválida para o agendamento.");
+                    return;
+                  }
+                  const id = rescheduleCampaignId;
+                  setRescheduleCampaignId(null);
+                  void runCampaignAction(id, "schedule", "Disparo agendado.", { scheduledAt });
+                }}
+              >
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

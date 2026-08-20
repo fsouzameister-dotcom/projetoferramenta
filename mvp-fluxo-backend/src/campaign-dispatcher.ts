@@ -5,6 +5,7 @@ import {
   pickNextPendingRecipient,
   recoverStaleSendingRecipients,
   sendCampaignRecipient,
+  activateDueScheduledCampaigns,
 } from "./campaigns";
 
 const lastSentAt = new Map<string, number>();
@@ -15,6 +16,7 @@ function campaignThrottleKey(tenantId: string, campaignId: string): string {
 
 export async function processCampaignDispatchTick(): Promise<void> {
   await recoverStaleSendingRecipients();
+  await activateDueScheduledCampaigns();
   const active = await listActiveSendingCampaigns();
   const now = Date.now();
 

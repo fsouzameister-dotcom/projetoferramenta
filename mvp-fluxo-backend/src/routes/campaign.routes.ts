@@ -19,7 +19,9 @@ import {
   pauseCampaign,
   resumeCampaign,
   retryFailedRecipients,
+  scheduleCampaign,
   startCampaignDispatch,
+  unscheduleCampaign,
 } from "../campaigns";
 import type { CampaignTemplateOption } from "../campaign-templates";
 import { buildCampaignReport, campaignReportToCsv } from "../campaign-reports";
@@ -39,6 +41,13 @@ function mapCampaignError(err: unknown): never {
   }
   if (code === "CAMPAIGN_NO_PENDING") {
     throw new ApiError(409, ERROR_CODES.campaigns.CAMPAIGN_NO_PENDING, "Não há destinatários pendentes para disparar");
+  }
+  if (code === "CAMPAIGN_INVALID_SCHEDULE") {
+    throw new ApiError(
+      400,
+      ERROR_CODES.campaigns.CAMPAIGN_INVALID_SCHEDULE,
+      "Informe data e hora futuras (pelo menos 30 segundos à frente, horário do servidor)"
+    );
   }
   if (code === "CAMPAIGN_NOT_FOUND") {
     throw new ApiError(404, ERROR_CODES.campaigns.CAMPAIGN_NOT_FOUND, "Campanha não encontrada");
@@ -129,6 +138,7 @@ const campaignRoutes: FastifyPluginAsync = async (fastify) => {
       sendIntervalSeconds?: number;
       spreadsheetHeaders?: string[];
       rows?: Record<string, string>[];
+      scheduledAt?: string | null;
     };
 
     if (!body.name?.trim() || !body.flowId?.trim() || !body.channelAccountId?.trim() || !body.template) {
@@ -160,21 +170,26 @@ const campaignRoutes: FastifyPluginAsync = async (fastify) => {
       provider: templateProvider,
     };
 
-    const created = await createCampaign({
-      tenantId: request.tenant.id,
-      name: body.name.trim(),
-      flowId: body.flowId.trim(),
-      channelAccountId: body.channelAccountId.trim(),
-      channelLabel: body.channelLabel,
-      provider: body.provider,
-      template,
-      columnMapping: body.columnMapping ?? {},
-      phoneColumn,
-      sendIntervalSeconds: body.sendIntervalSeconds ?? 3,
-      spreadsheetHeaders: body.spreadsheetHeaders ?? [],
-      rows: body.rows,
-    });
-    return sendSuccess(request, reply, created, 201);
+    try {
+      const created = await createCampaign({
+        tenantId: request.tenant.id,
+        name: body.name.trim(),
+        flowId: body.flowId.trim(),
+        channelAccountId: body.channelAccountId.trim(),
+        channelLabel: body.channelLabel,
+        provider: body.provider,
+        template,
+        columnMapping: body.columnMapping ?? {},
+        phoneColumn,
+        sendIntervalSeconds: body.sendIntervalSeconds ?? 3,
+        spreadsheetHeaders: body.spreadsheetHeaders ?? [],
+        rows: body.rows,
+        scheduledAt: body.scheduledAt,
+      });
+      return sendSuccess(request, reply, created, 201);
+    } catch (err) {
+      mapCampaignError(err);
+    }
   });
 
   fastify.get("/admin/campaigns/:campaignId/recipients", async (request, reply) => {
@@ -198,6 +213,40 @@ const campaignRoutes: FastifyPluginAsync = async (fastify) => {
     const { campaignId } = request.params as { campaignId: string };
     try {
       const updated = await startCampaignDispatch(request.tenant.id, campaignId);
+      if (!updated) {
+        throw new ApiError(404, ERROR_CODES.campaigns.CAMPAIGN_NOT_FOUND, "Campanha não encontrada");
+      }
+      return sendSuccess(request, reply, updated);
+    } catch (err) {
+      mapCampaignError(err);
+    }
+  });
+
+  fastify.post("/admin/campaigns/:campaignId/schedule", async (request, reply) => {
+    const { campaignId } = request.params as { campaignId: string };
+    const body = (request.body ?? {}) as { scheduledAt?: string };
+    if (!body.scheduledAt?.trim()) {
+      throw new ApiError(
+        400,
+        ERROR_CODES.campaigns.CAMPAIGN_INVALID_SCHEDULE,
+        "Informe data e hora futuras para agendar o disparo"
+      );
+    }
+    try {
+      const updated = await scheduleCampaign(request.tenant.id, campaignId, body.scheduledAt.trim());
+      if (!updated) {
+        throw new ApiError(404, ERROR_CODES.campaigns.CAMPAIGN_NOT_FOUND, "Campanha não encontrada");
+      }
+      return sendSuccess(request, reply, updated);
+    } catch (err) {
+      mapCampaignError(err);
+    }
+  });
+
+  fastify.post("/admin/campaigns/:campaignId/unschedule", async (request, reply) => {
+    const { campaignId } = request.params as { campaignId: string };
+    try {
+      const updated = await unscheduleCampaign(request.tenant.id, campaignId);
       if (!updated) {
         throw new ApiError(404, ERROR_CODES.campaigns.CAMPAIGN_NOT_FOUND, "Campanha não encontrada");
       }

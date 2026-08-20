@@ -20,6 +20,7 @@ import {
   formatFailureDetail,
   type CampaignFailureKind,
 } from "./campaign-failure";
+import { parseCampaignScheduledAt } from "./campaign-schedule";
 
 export {
   buildTemplateParams,
@@ -87,6 +88,10 @@ export async function ensureCampaignSchema(): Promise<void> {
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now()
     )
+  `);
+  await pool.query(`
+    ALTER TABLE mailings
+    ADD COLUMN IF NOT EXISTS scheduled_at timestamptz
   `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS mailing_recipients (
@@ -250,6 +255,7 @@ export async function createCampaign(input: {
   sendIntervalSeconds: number;
   spreadsheetHeaders: string[];
   rows: Record<string, string>[];
+  scheduledAt?: string | null;
 }): Promise<CampaignRow> {
   await ensureCampaignSchema();
   const metadata: CampaignMetadata = {
@@ -272,14 +278,26 @@ export async function createCampaign(input: {
     spreadsheetHeaders: input.spreadsheetHeaders,
   };
 
+  const scheduledAt = input.scheduledAt?.trim()
+    ? parseCampaignScheduledAt(input.scheduledAt)
+    : null;
+  const initialStatus = scheduledAt ? "scheduled" : "draft";
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
     const created = await client.query<{ id: string }>(
-      `INSERT INTO mailings (tenant_id, name, channel, status, flow_id, metadata)
-       VALUES ($1::uuid, $2, 'whatsapp', 'draft', $3::uuid, $4::jsonb)
+      `INSERT INTO mailings (tenant_id, name, channel, status, flow_id, scheduled_at, metadata)
+       VALUES ($1::uuid, $2, 'whatsapp', $3, $4::uuid, $5::timestamptz, $6::jsonb)
        RETURNING id::text`,
-      [input.tenantId, input.name.trim(), input.flowId, JSON.stringify(metadata)]
+      [
+        input.tenantId,
+        input.name.trim(),
+        initialStatus,
+        input.flowId,
+        scheduledAt ? scheduledAt.toISOString() : null,
+        JSON.stringify(metadata),
+      ]
     );
     const mailingId = created.rows[0].id;
 
@@ -307,7 +325,7 @@ export async function createCampaign(input: {
   }
 }
 
-const DISPATCHABLE_STATUSES = new Set(["draft", "paused", "sending", "completed"]);
+const DISPATCHABLE_STATUSES = new Set(["draft", "scheduled", "paused", "sending", "completed"]);
 
 export async function startCampaignDispatch(
   tenantId: string,
@@ -343,6 +361,84 @@ export async function startCampaignDispatch(
     [campaignId, tenantId]
   );
   return getCampaign(tenantId, campaignId);
+}
+
+export async function scheduleCampaign(
+  tenantId: string,
+  campaignId: string,
+  scheduledAtRaw: string
+): Promise<CampaignRow | null> {
+  await ensureCampaignSchema();
+  const campaign = await getCampaign(tenantId, campaignId);
+  if (!campaign) return null;
+  if (campaign.status === "cancelled") throw new Error("CAMPAIGN_CANCELLED");
+  if (campaign.status !== "draft" && campaign.status !== "scheduled") {
+    throw new Error("CAMPAIGN_INVALID_STATUS");
+  }
+  if (!campaign.flow_id) throw new Error("FLOW_REQUIRED");
+  if (!campaign.metadata.channelAccountId) throw new Error("CHANNEL_REQUIRED");
+
+  const pending = await pool.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM mailing_recipients
+     WHERE tenant_id = $1::uuid AND mailing_id = $2::uuid AND status = 'pending'`,
+    [tenantId, campaignId]
+  );
+  if (Number(pending.rows[0]?.n ?? 0) === 0) {
+    throw new Error("CAMPAIGN_NO_PENDING");
+  }
+
+  const scheduledAt = parseCampaignScheduledAt(scheduledAtRaw);
+  await pool.query(
+    `UPDATE mailings
+     SET status = 'scheduled',
+         scheduled_at = $3::timestamptz,
+         updated_at = now()
+     WHERE id = $1::uuid AND tenant_id = $2::uuid
+       AND status IN ('draft', 'scheduled')`,
+    [campaignId, tenantId, scheduledAt.toISOString()]
+  );
+  return getCampaign(tenantId, campaignId);
+}
+
+export async function unscheduleCampaign(
+  tenantId: string,
+  campaignId: string
+): Promise<CampaignRow | null> {
+  await ensureCampaignSchema();
+  const result = await pool.query(
+    `UPDATE mailings
+     SET status = 'draft',
+         scheduled_at = NULL,
+         updated_at = now()
+     WHERE id = $1::uuid AND tenant_id = $2::uuid AND status = 'scheduled'
+     RETURNING id`,
+    [campaignId, tenantId]
+  );
+  if (!result.rowCount) {
+    const existing = await getCampaign(tenantId, campaignId);
+    if (!existing) return null;
+    throw new Error("CAMPAIGN_INVALID_STATUS");
+  }
+  return getCampaign(tenantId, campaignId);
+}
+
+export async function activateDueScheduledCampaigns(): Promise<number> {
+  await ensureCampaignSchema();
+  const due = await pool.query<{ tenant_id: string; id: string }>(
+    `SELECT tenant_id::text, id::text
+     FROM mailings
+     WHERE status = 'scheduled'
+       AND scheduled_at IS NOT NULL
+       AND scheduled_at <= now()
+     ORDER BY scheduled_at ASC
+     LIMIT 25`
+  );
+  let started = 0;
+  for (const row of due.rows) {
+    await startCampaignDispatch(row.tenant_id, row.id);
+    started += 1;
+  }
+  return started;
 }
 
 export async function pauseCampaign(
@@ -388,7 +484,7 @@ export async function cancelCampaign(
       `UPDATE mailings
        SET status = 'cancelled', updated_at = now()
        WHERE id = $1::uuid AND tenant_id = $2::uuid
-         AND status IN ('draft', 'sending', 'paused')
+         AND status IN ('draft', 'sending', 'paused', 'scheduled')
        RETURNING id`,
       [campaignId, tenantId]
     );
