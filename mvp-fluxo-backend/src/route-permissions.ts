@@ -16,6 +16,7 @@ export function resolveRoutePermission(path: string): AppPermission | null {
   if (normalized.startsWith("/admin/campaigns/dashboard")) return "campaigns";
   if (normalized.startsWith("/admin/campaigns")) return "campaigns";
   if (normalized.startsWith("/reports/campaigns")) return "campaigns";
+  if (normalized.startsWith("/admin/appointments")) return "appointments";
   if (normalized.startsWith("/monitoring")) return "monitoring";
   if (
     normalized.startsWith("/queues") ||

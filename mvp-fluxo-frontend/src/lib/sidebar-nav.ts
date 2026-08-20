@@ -62,6 +62,12 @@ export const SIDEBAR_GROUPS: SidebarNavGroup[] = [
         icon: "📣",
         permission: "campaigns",
       },
+      {
+        label: "Agendamentos",
+        path: "/admin/appointments",
+        icon: "📅",
+        permission: "appointments",
+      },
     ],
   },
   {

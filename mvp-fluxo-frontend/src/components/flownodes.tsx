@@ -244,6 +244,42 @@ export const CapturarEntradaNode = ({ data }: { data: any }) => {
   );
 };
 
+export const AgendamentoNode = ({ data }: { data: any }) => {
+  const hasNoSlotsRoute = Boolean(data.config?.noSlotsNextNodeId);
+  return (
+    <div
+      className="px-4 py-3 shadow-lg rounded-lg bg-gray-900 border-2 border-emerald-500 min-w-[170px] cursor-pointer hover:shadow-xl transition-shadow relative"
+      onClick={() => data.onSelect?.(data.id)}
+    >
+      <div className="text-xs font-bold text-emerald-400 mb-1">📅 Agendamento</div>
+      <div className="text-sm font-semibold text-white">{data.label}</div>
+      {data.config?.serviceName ? (
+        <div className="text-xs text-emerald-300 mt-1 truncate max-w-[150px]">
+          {data.config.serviceName}
+        </div>
+      ) : (
+        <div className="text-[10px] text-amber-300 mt-1">Selecione um serviço</div>
+      )}
+      <Handle type="target" position={Position.Top} />
+      <Handle type="source" position={Position.Bottom} />
+      {hasNoSlotsRoute ? (
+        <>
+          <Handle
+            type="source"
+            position={Position.Right}
+            id="no_slots"
+            style={{ top: "70%", background: "#f87171" }}
+          />
+          <div className="absolute top-[62%] -right-16 text-[10px] text-red-300">
+            Sem horários
+          </div>
+        </>
+      ) : null}
+      <div className="absolute -bottom-5 left-2 text-[10px] text-emerald-300">Confirmado</div>
+    </div>
+  );
+};
+
 export const ContadorNode = ({ data }: { data: any }) => {
   const limite =
     data.config?.limite_passagens ?? data.config?.limitePassagens ?? 3;
@@ -434,6 +470,7 @@ export const nodeTypes = {
   receber_mensagem: ReceberMensagemNode,
   chamada_api: ChamadaApiNode,
   capturar_entrada: CapturarEntradaNode,
+  agendamento: AgendamentoNode,
   contador: ContadorNode,
   decisao: DecisaoNode,
   encerramento: EncerramentoNode,

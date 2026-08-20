@@ -202,6 +202,24 @@ Este documento consolida o que cada node faz hoje no projeto, considerando:
   - no executor, registra variável do fluxo (`variable_name`) e evento em `flow_response_events`;
   - agregável nos relatórios existentes (`/api/reports/flow-responses*`) via `question_key`.
 
+### `agendamento`
+
+- Status: `Implementado`
+- Frontend:
+  - painel com seleção do **serviço agendável** cadastrado em Agendamentos → Configuração;
+  - prefixo de variáveis do fluxo, variável opcional com nome do cliente;
+  - mensagens customizáveis (pergunta de data, data inválida, sem horários, escolha inválida, confirmação);
+  - máx. de horários exibidos por vez;
+  - duas saídas no canvas: **Confirmado** (`next_node_id`) e **Sem horários** (`noSlotsNextNodeId`, opcional — se vazia, o bot pede outra data).
+- Backend (`agendamento-node.ts`, reaproveita `appointments.ts` / `appointment-availability.ts`):
+  - fase 1: pergunta a data (aceita `hoje`, `amanhã`, `DD/MM`, `DD/MM/AAAA`, ISO) e calcula horários livres do serviço para o dia;
+  - fase 2: apresenta os horários como escolha numerada (`awaiting_input`, mesmo formato do `capturar_entrada`) e, ao escolher, cria o agendamento (`createAppointment`) dentro de transação com `FOR UPDATE` para evitar corrida;
+  - em caso de horário ocupado entre a oferta e a confirmação, recalcula e oferece novas opções automaticamente;
+  - ao confirmar, grava `{prefixo}_id`, `{prefixo}_start`, `{prefixo}_end`, `{prefixo}_data`, `{prefixo}_hora`, `{prefixo}_recurso` (quando houver) para uso em mensagens seguintes;
+  - reutiliza a sessão inbound do `capturar_entrada` (mesmo `awaitingInput`), sem exigir mudanças na entrega WhatsApp.
+- Retomada: `POST /api/flows/:flowId/execute` com `startNodeId` do node de agendamento + `userInput` (data ou número da opção).
+- Testes: `mvp-fluxo-backend/test/agendamento-node.test.ts` (parsing de data, formatação, config) e `mvp-fluxo-backend/test/appointment-availability.test.ts` (cálculo de disponibilidade).
+
 ### `sms`
 
 - Status: `Sem função de negócio`
@@ -222,6 +240,7 @@ Nodes com execução de negócio real hoje:
 - `transferir_agente`
 - `encerramento`
 - `tabulacao`
+- `agendamento`
 
 Todos os demais estão com foco principal em modelagem visual e ainda precisam de implementação dedicada no executor para refletirem o comportamento esperado de produto.
 
@@ -233,7 +252,7 @@ Escopo de produto e prioridades da release: **`DEVLOG.md` → [Escopo vigente �
 
 | Node | Status |
 |------|--------|
-| `inicio`, `mensagem`, `tabulacao`, `receber_mensagem`, `chamada_api`, `decisao`, `contador`, `capturar_entrada`, `transferir_agente`, `encerramento` | `Implementado` |
+| `inicio`, `mensagem`, `tabulacao`, `receber_mensagem`, `chamada_api`, `decisao`, `contador`, `capturar_entrada`, `transferir_agente`, `encerramento`, `agendamento` | `Implementado` |
 
 ### Fora da fase imediata (paleta / UI apenas)
 

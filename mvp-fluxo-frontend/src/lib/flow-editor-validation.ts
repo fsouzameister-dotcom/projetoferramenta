@@ -175,6 +175,14 @@ export function collectFlowEditorWarnings(nodes: FlowNodeLike[]): FlowEditorWarn
       }
     }
 
+    if (type === "agendamento" && !(typeof config.serviceId === "string" && config.serviceId.trim())) {
+      warnings.push({
+        nodeId: node.id,
+        nodeName: name,
+        message: "Nenhum serviço de agendamento selecionado neste node.",
+      });
+    }
+
     if (type === "decisao") {
       const mode = String(config.decisionMode || "simple");
       if (mode === "simple" || mode === "combined") {

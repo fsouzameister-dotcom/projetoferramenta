@@ -33,6 +33,7 @@ import { buildConversaAwaiting } from "./flow-conversa-node";
 import { parseJsonFromModel, normalizeFlowVariableName, normalizeMensagemTestUserInput } from "./flow-executor-utils";
 import { listNodesByFlow } from "./nodes";
 import { executeTabulacaoNode, parseTabulacaoNodeConfig } from "./tabulacao-node";
+import { executeAgendamentoNode, parseAgendamentoNodeConfig } from "./agendamento-node";
 import {
   applyResponseTimeoutVariables,
   isWaitTimeoutElapsed,
@@ -1136,6 +1137,47 @@ export async function executeFlow(
       if (captureResult.lastResponseEventId) {
         lastResponseEventId = captureResult.lastResponseEventId;
       }
+    } else if (currentNode.type === "agendamento") {
+      const parsedAgendamento = parseAgendamentoNodeConfig(config, currentNode.id);
+      const agendamentoResult = await executeAgendamentoNode(
+        currentNode,
+        parsedAgendamento,
+        variables,
+        tenantId,
+        {
+          userInput: captureInputConsumed ? undefined : flowUserInput,
+          phone: input.phone,
+        }
+      );
+      if (!agendamentoResult.awaitingInput && flowUserInput !== undefined) {
+        captureInputConsumed = true;
+        flowUserInput = undefined;
+      }
+      if (agendamentoResult.capturedMessage) {
+        messages.push(agendamentoResult.capturedMessage);
+      }
+      if (agendamentoResult.awaitingInput) {
+        trace.push({
+          nodeId: currentNode.id,
+          nodeType: currentNode.type,
+          nodeName: currentNode.name,
+          nextNodeId: null,
+          details: agendamentoResult.details,
+        });
+        return {
+          flowId,
+          status: "awaiting_input",
+          visitedNodeIds,
+          currentNodeId: currentNode.id,
+          messages,
+          outboundMessages,
+          variables,
+          trace,
+          awaitingInput: agendamentoResult.awaitingInput,
+        };
+      }
+      nextNodeId = agendamentoResult.nextNodeId;
+      details = agendamentoResult.details;
     } else if (currentNode.type === "contador") {
       const counterResult = executeContadorPassagensNode({
         config,

@@ -57,6 +57,13 @@ type TabulacaoOption = {
   active: boolean;
 };
 
+type AppointmentServiceOption = {
+  id: string;
+  name: string;
+  active: boolean;
+  durationMinutes: number;
+};
+
 type DecisionRule = {
   variable: string;
   operator: string;
@@ -76,6 +83,7 @@ const productionPaletteItems: PaletteItem[] = [
   { id: "tabulacao", name: "Tabulação", icon: "🏷️" },
   { id: "receber_mensagem", name: "Receber Mensagem", icon: "📩" },
   { id: "capturar_entrada", name: "Capturar Entrada", icon: "📥" },
+  { id: "agendamento", name: "Agendamento", icon: "📅" },
   { id: "contador", name: "Contador", icon: "🔢" },
   { id: "decisao", name: "Decisão", icon: "⚖️" },
   { id: "chamada_api", name: "Chamada API", icon: "🔌" },
@@ -149,6 +157,7 @@ export default function FlowEditor() {
   const [tabulacoes, setTabulacoes] = useState<TabulacaoOption[]>([]);
   const [newTabulacaoLabel, setNewTabulacaoLabel] = useState("");
   const [newTabulacaoKey, setNewTabulacaoKey] = useState("");
+  const [appointmentServices, setAppointmentServices] = useState<AppointmentServiceOption[]>([]);
   const [showTour, setShowTour] = useState(false);
   const [tourStepIndex, setTourStepIndex] = useState(0);
   const [showFlowTest, setShowFlowTest] = useState(false);
@@ -359,8 +368,9 @@ export default function FlowEditor() {
       api.get(`/flows`), // Rota para listar flows do tenant logado
       api.get(`/flows/${flowId}/nodes`),
       api.get("/tabulacoes").catch(() => null),
+      api.get("/admin/appointments/services").catch(() => null),
     ])
-      .then(([flowsRes, nodesRes, tabulacoesRes]) => {
+      .then(([flowsRes, nodesRes, tabulacoesRes, appointmentServicesRes]) => {
         const flows = unwrapApiData<FlowData[]>(flowsRes.data);
         const flow = Array.isArray(flows)
           ? flows.find((f: FlowData) => f.id === flowId)
@@ -378,6 +388,11 @@ export default function FlowEditor() {
             ? unwrapApiData<TabulacaoOption[]>(tabulacoesRes.data)
             : [];
         setTabulacoes(Array.isArray(tabRows) ? tabRows : []);
+        const appointmentServiceRows =
+          appointmentServicesRes && appointmentServicesRes.data
+            ? unwrapApiData<AppointmentServiceOption[]>(appointmentServicesRes.data)
+            : [];
+        setAppointmentServices(Array.isArray(appointmentServiceRows) ? appointmentServiceRows : []);
         const initialNodes = unwrapApiData<NodeDataType[]>(nodesRes.data).map(
           (node: NodeDataType) => ({
             id: node.id,
@@ -423,6 +438,19 @@ export default function FlowEditor() {
               label: "Timeout",
               style: { stroke: "#fbbf24" },
             });
+          }
+          if (node.data.type === "agendamento") {
+            if (node.data.config?.noSlotsNextNodeId) {
+              initialEdges.push({
+                id: `e${node.id}-no_slots-${node.data.config.noSlotsNextNodeId}`,
+                source: node.id,
+                sourceHandle: "no_slots",
+                target: node.data.config.noSlotsNextNodeId,
+                animated: true,
+                label: "Sem horários",
+                style: { stroke: "#f87171" },
+              });
+            }
           }
           // Lógica para nós de decisão ou divisão lógica com múltiplos next_node_id
           if (node.data.type === "contador") {
@@ -572,6 +600,20 @@ export default function FlowEditor() {
           { id: "opcao_2", label: "Opção 2" },
           { id: "opcao_3", label: "Opção 3" },
         ],
+      };
+    }
+    if (nodeType === "agendamento") {
+      return {
+        serviceId: "",
+        serviceName: "",
+        variableName: "agendamento",
+        askDatePrompt: "Para qual dia você deseja agendar? (ex.: 21/08 ou 21/08/2026)",
+        invalidDateMessage: "Não entendi a data. Envie no formato DD/MM (ex.: 21/08).",
+        noSlotsMessage: "Não há horários livres nesse dia. Envie outra data (DD/MM).",
+        invalidChoiceMessage: "Não entendi. Responda apenas com o número da opção desejada.",
+        confirmationMessage: "Agendamento confirmado para {{agendamento_data}} às {{agendamento_hora}}. ✅",
+        maxSlotsShown: 8,
+        clientNameVariable: "",
       };
     }
     if (nodeType === "contador") {
@@ -1196,6 +1238,11 @@ export default function FlowEditor() {
           (params.sourceHandle === "default" || !params.sourceHandle)
         ) {
           updatedConfig.next_node_id = params.target;
+        } else if (
+          sourceNode.type === "agendamento" &&
+          params.sourceHandle === "no_slots"
+        ) {
+          updatedConfig.noSlotsNextNodeId = params.target;
         } else {
           updatedConfig.next_node_id = params.target;
         }
@@ -1280,6 +1327,11 @@ export default function FlowEditor() {
             edge.sourceHandle === "timeout"
           ) {
             updatedConfig.next_node_id_on_timeout = undefined;
+          } else if (
+            sourceNode.type === "agendamento" &&
+            edge.sourceHandle === "no_slots"
+          ) {
+            updatedConfig.noSlotsNextNodeId = undefined;
           } else {
             updatedConfig.next_node_id = undefined;
           }
@@ -2794,6 +2846,180 @@ export default function FlowEditor() {
                     className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
                   />
                 </div>
+              </>
+            )}
+
+            {/* AGENDAMENTO */}
+            {selectedNodeType === "agendamento" && (
+              <>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Serviço agendável
+                  </label>
+                  <select
+                    value={editNodeConfig.serviceId || ""}
+                    onChange={(e) => {
+                      const selected = appointmentServices.find((s) => s.id === e.target.value);
+                      setEditNodeConfig({
+                        ...editNodeConfig,
+                        serviceId: selected?.id || "",
+                        serviceName: selected?.name || "",
+                      });
+                    }}
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg text-sm"
+                  >
+                    <option value="">Selecione...</option>
+                    {appointmentServices
+                      .filter((s) => s.active)
+                      .map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} ({s.durationMinutes} min)
+                        </option>
+                      ))}
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Configure os serviços em Agendamentos → Configuração.
+                  </p>
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Prefixo das variáveis do fluxo
+                  </label>
+                  <input
+                    type="text"
+                    value={editNodeConfig.variableName || "agendamento"}
+                    onChange={(e) =>
+                      setEditNodeConfig({ ...editNodeConfig, variableName: e.target.value })
+                    }
+                    placeholder="ex.: agendamento"
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Ao confirmar, cria variáveis {"{{"}"prefixo"_data{"}}"} e {"{{"}"prefixo"_hora{"}}"} para uso em
+                    mensagens seguintes.
+                  </p>
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Variável com nome do cliente (opcional)
+                  </label>
+                  <input
+                    type="text"
+                    value={editNodeConfig.clientNameVariable || ""}
+                    onChange={(e) =>
+                      setEditNodeConfig({ ...editNodeConfig, clientNameVariable: e.target.value })
+                    }
+                    placeholder="ex.: nome_cliente (capturado em node anterior)"
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg"
+                  />
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Pergunta da data
+                  </label>
+                  <textarea
+                    value={editNodeConfig.askDatePrompt || ""}
+                    onChange={(e) =>
+                      setEditNodeConfig({ ...editNodeConfig, askDatePrompt: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg h-20 resize-none"
+                  />
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Mensagem para data inválida
+                  </label>
+                  <input
+                    type="text"
+                    value={editNodeConfig.invalidDateMessage || ""}
+                    onChange={(e) =>
+                      setEditNodeConfig({ ...editNodeConfig, invalidDateMessage: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg"
+                  />
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Mensagem quando não há horários
+                  </label>
+                  <input
+                    type="text"
+                    value={editNodeConfig.noSlotsMessage || ""}
+                    onChange={(e) =>
+                      setEditNodeConfig({ ...editNodeConfig, noSlotsMessage: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Se a saída "Sem horários" (à direita do node) não estiver conectada, o bot pede outra data
+                    com esta mensagem. Se estiver conectada, o fluxo segue para o node conectado.
+                  </p>
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Mensagem para escolha inválida
+                  </label>
+                  <input
+                    type="text"
+                    value={editNodeConfig.invalidChoiceMessage || ""}
+                    onChange={(e) =>
+                      setEditNodeConfig({ ...editNodeConfig, invalidChoiceMessage: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg"
+                  />
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Mensagem de confirmação
+                  </label>
+                  <textarea
+                    value={editNodeConfig.confirmationMessage || ""}
+                    onChange={(e) =>
+                      setEditNodeConfig({ ...editNodeConfig, confirmationMessage: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg h-20 resize-none"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Placeholders disponíveis: {"{{"}"prefixo"_data{"}}"}, {"{{"}"prefixo"_hora{"}}"}
+                    {" "}(troque "prefixo" pelo valor do campo acima).
+                  </p>
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Máx. de horários exibidos por vez
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={editNodeConfig.maxSlotsShown ?? 8}
+                    onChange={(e) =>
+                      setEditNodeConfig({
+                        ...editNodeConfig,
+                        maxSlotsShown: Number(e.target.value),
+                      })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg"
+                  />
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Próximo node após confirmar (ID)
+                  </label>
+                  <input
+                    type="text"
+                    value={editNodeConfig.next_node_id || ""}
+                    onChange={(e) =>
+                      setEditNodeConfig({ ...editNodeConfig, next_node_id: e.target.value })
+                    }
+                    placeholder="conecte a saída inferior do node ou informe o ID"
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg"
+                  />
+                </div>
+                <p className="text-xs text-gray-500">
+                  O bot pergunta a data, mostra os horários livres do serviço escolhido, aguarda a
+                  seleção e cria o agendamento automaticamente ao confirmar.
+                </p>
               </>
             )}
 
