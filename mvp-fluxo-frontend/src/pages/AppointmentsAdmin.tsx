@@ -1,6 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import api, { getApiErrorMessage, unwrapApiData } from "../api/client";
 import InfoTooltip from "~components/InfoTooltip";
+import {
+  adminBtnLinkClass,
+  adminBtnPrimaryClass,
+  adminBtnSecondaryClass,
+  adminErrorClass,
+  adminInputClass,
+  adminLabelClass,
+  adminModalClass,
+  adminModalOverlayClass,
+  adminNoticeClass,
+  adminPageShellClass,
+  adminPanelClass,
+  adminSectionClass,
+  adminSelectClass,
+  adminTableHeadClass,
+  adminTableRowClass,
+} from "~lib/admin-ui";
 
 type CapacityMode = "pool" | "resource";
 
@@ -105,17 +122,19 @@ export default function AppointmentsAdmin() {
   }, [loadServices]);
 
   return (
-    <div className="p-6 max-w-6xl mx-auto text-gray-100">
-      <div className="flex items-center gap-2 mb-1">
-        <h1 className="text-2xl font-semibold text-white">Agendamentos</h1>
-        <InfoTooltip text="Serviços agendáveis (exames, visitas, pesquisas...), expediente/recursos e a agenda de horários marcados." />
-      </div>
-      <p className="text-sm text-gray-400 mb-4">
-        Configure o que pode ser agendado e o expediente disponível; acompanhe e gerencie os horários marcados
-        (inclusive os feitos pelo bot).
-      </p>
+    <div className={adminPageShellClass(true)}>
+      <header>
+        <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+          Agendamentos
+          <InfoTooltip text="Serviços agendáveis (exames, visitas, pesquisas...), expediente/recursos e a agenda de horários marcados." />
+        </h1>
+        <p className="text-sm text-gray-300 mt-1">
+          Configure o que pode ser agendado e o expediente disponível; acompanhe e gerencie os horários marcados
+          (inclusive os feitos pelo bot).
+        </p>
+      </header>
 
-      <div className="flex gap-2 mb-6 border-b border-zinc-700">
+      <div className="flex gap-2 border-b border-zinc-700">
         {(
           [
             { id: "agenda", label: "Agenda" },
@@ -137,16 +156,8 @@ export default function AppointmentsAdmin() {
         ))}
       </div>
 
-      {error ? (
-        <div className="mb-4 rounded-lg border border-red-500/40 bg-red-950/40 px-4 py-3 text-sm text-red-200">
-          {error}
-        </div>
-      ) : null}
-      {notice ? (
-        <div className="mb-4 rounded-lg border border-emerald-500/40 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-200">
-          {notice}
-        </div>
-      ) : null}
+      {error ? <div className={adminErrorClass}>{error}</div> : null}
+      {notice ? <div className={adminNoticeClass}>{notice}</div> : null}
 
       {activeTab === "config" ? (
         <ConfigTab
@@ -239,45 +250,39 @@ function ConfigTab(props: {
   };
 
   return (
-    <div className="space-y-8">
-      <section className="rounded-xl border border-zinc-700 bg-zinc-900/80 p-5">
-        <h2 className="text-lg font-medium text-white mb-4">Novo serviço agendável</h2>
-        <p className="text-xs text-gray-500 mb-4">
-          Ex.: "Exame de sangue", "Visita ao imóvel", "Pesquisa domiciliar". Cada serviço tem duração fixa e pode
-          funcionar com vagas simultâneas (pool) ou exigir um recurso específico (profissional, sala, imóvel...).
-        </p>
+    <div className="space-y-6">
+      <section className={`${adminSectionClass} space-y-4`}>
+        <div>
+          <h2 className="text-lg font-semibold text-white">Novo serviço agendável</h2>
+          <p className="text-xs text-gray-400 mt-1">
+            Ex.: "Exame de sangue", "Visita ao imóvel", "Pesquisa domiciliar". Cada serviço tem duração fixa e pode
+            funcionar com vagas simultâneas (pool) ou exigir um recurso específico (profissional, sala, imóvel...).
+          </p>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <label className="block text-sm">
-            <span className="text-gray-400 mb-1 block">Nome</span>
-            <input
-              className="w-full rounded-lg bg-zinc-800 border border-zinc-600 px-3 py-2"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
+          <label className={adminLabelClass}>
+            Nome
+            <input className={adminInputClass} value={name} onChange={(e) => setName(e.target.value)} />
           </label>
-          <label className="block text-sm">
-            <span className="text-gray-400 mb-1 block">Duração (minutos)</span>
+          <label className={adminLabelClass}>
+            Duração (minutos)
             <input
               type="number"
               min={5}
               step={5}
-              className="w-full rounded-lg bg-zinc-800 border border-zinc-600 px-3 py-2"
+              className={adminInputClass}
               value={durationMinutes}
               onChange={(e) => setDurationMinutes(Number(e.target.value) || 30)}
             />
           </label>
-          <label className="block text-sm md:col-span-2">
-            <span className="text-gray-400 mb-1 block">Descrição (opcional)</span>
-            <input
-              className="w-full rounded-lg bg-zinc-800 border border-zinc-600 px-3 py-2"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
+          <label className={`${adminLabelClass} md:col-span-2`}>
+            Descrição (opcional)
+            <input className={adminInputClass} value={description} onChange={(e) => setDescription(e.target.value)} />
           </label>
-          <label className="block text-sm">
-            <span className="text-gray-400 mb-1 block">Modo de capacidade</span>
+          <label className={adminLabelClass}>
+            Modo de capacidade
             <select
-              className="w-full rounded-lg bg-zinc-800 border border-zinc-600 px-3 py-2"
+              className={adminSelectClass}
               value={capacityMode}
               onChange={(e) => setCapacityMode(e.target.value as CapacityMode)}
             >
@@ -286,73 +291,66 @@ function ConfigTab(props: {
             </select>
           </label>
           {capacityMode === "pool" ? (
-            <label className="block text-sm">
-              <span className="text-gray-400 mb-1 block">Vagas simultâneas por horário</span>
+            <label className={adminLabelClass}>
+              Vagas simultâneas por horário
               <input
                 type="number"
                 min={1}
-                className="w-full rounded-lg bg-zinc-800 border border-zinc-600 px-3 py-2"
+                className={adminInputClass}
                 value={poolCapacity}
                 onChange={(e) => setPoolCapacity(Number(e.target.value) || 1)}
               />
             </label>
           ) : null}
         </div>
-        <div className="mt-4 flex justify-end">
-          <button
-            type="button"
-            disabled={saving}
-            onClick={() => void createService()}
-            className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-sm font-medium"
-          >
+        <div className="flex justify-end">
+          <button type="button" disabled={saving} onClick={() => void createService()} className={adminBtnPrimaryClass}>
             {saving ? "Salvando…" : "Criar serviço"}
           </button>
         </div>
       </section>
 
-      <section className="rounded-xl border border-zinc-700 bg-zinc-900/80 p-5">
-        <h2 className="text-lg font-medium text-white mb-4">Serviços cadastrados</h2>
+      <section className={adminSectionClass}>
+        <h2 className="text-lg font-semibold text-white mb-4">Serviços cadastrados</h2>
         {services.length === 0 ? (
-          <p className="text-sm text-gray-500">Nenhum serviço cadastrado ainda.</p>
+          <p className="text-sm text-gray-400">Nenhum serviço cadastrado ainda.</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className={adminPanelClass}>
             <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-gray-400 border-b border-zinc-700">
-                  <th className="py-2 pr-3">Nome</th>
-                  <th className="py-2 pr-3">Duração</th>
-                  <th className="py-2 pr-3">Modo</th>
-                  <th className="py-2 pr-3">Ativo</th>
-                  <th className="py-2 pr-3">Ações</th>
+              <thead className={adminTableHeadClass}>
+                <tr>
+                  <th className="text-left px-4 py-2">Nome</th>
+                  <th className="text-left px-4 py-2">Duração</th>
+                  <th className="text-left px-4 py-2">Modo</th>
+                  <th className="text-left px-4 py-2">Ativo</th>
+                  <th className="px-4 py-2" />
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="text-gray-200">
                 {services.map((s) => (
-                  <tr key={s.id} className="border-b border-zinc-800">
-                    <td className="py-2 pr-3">{s.name}</td>
-                    <td className="py-2 pr-3">{s.durationMinutes} min</td>
-                    <td className="py-2 pr-3">
+                  <tr key={s.id} className={adminTableRowClass}>
+                    <td className="px-4 py-2 text-white">{s.name}</td>
+                    <td className="px-4 py-2">{s.durationMinutes} min</td>
+                    <td className="px-4 py-2">
                       {s.capacityMode === "pool" ? `Pool (${s.poolCapacity} vagas)` : "Recurso específico"}
                     </td>
-                    <td className="py-2 pr-3">{s.active ? "Sim" : "Não"}</td>
-                    <td className="py-2 pr-3">
-                      <div className="flex gap-3">
-                        <button
-                          type="button"
-                          className="text-cyan-400 hover:underline"
-                          onClick={() => setSelectedServiceId(s.id === selectedServiceId ? null : s.id)}
-                        >
-                          {selectedServiceId === s.id ? "Fechar" : "Configurar"}
-                        </button>
-                        <button
-                          type="button"
-                          className="text-amber-400 hover:underline"
-                          disabled={saving}
-                          onClick={() => void toggleServiceActive(s)}
-                        >
-                          {s.active ? "Desativar" : "Ativar"}
-                        </button>
-                      </div>
+                    <td className="px-4 py-2">{s.active ? "Sim" : "Não"}</td>
+                    <td className="px-4 py-2 text-right space-x-3">
+                      <button
+                        type="button"
+                        className={adminBtnLinkClass}
+                        onClick={() => setSelectedServiceId(s.id === selectedServiceId ? null : s.id)}
+                      >
+                        {selectedServiceId === s.id ? "Fechar" : "Configurar"}
+                      </button>
+                      <button
+                        type="button"
+                        className="text-amber-300 hover:text-amber-200 hover:underline text-sm"
+                        disabled={saving}
+                        onClick={() => void toggleServiceActive(s)}
+                      >
+                        {s.active ? "Desativar" : "Ativar"}
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -537,37 +535,35 @@ function ServiceDetailPanel(props: {
   };
 
   return (
-    <section className="rounded-xl border border-cyan-700/40 bg-zinc-900/80 p-5 space-y-6">
-      <h2 className="text-lg font-medium text-white">Configurar: {service.name}</h2>
+    <section className={`${adminSectionClass} space-y-6`}>
+      <h2 className="text-lg font-semibold text-white">Configurar: {service.name}</h2>
 
       {service.capacityMode === "resource" ? (
         <div>
           <h3 className="text-sm font-medium text-gray-300 mb-2">Recursos (profissional, sala, imóvel...)</h3>
           <div className="flex gap-2 mb-3">
             <input
-              className="flex-1 rounded-lg bg-zinc-800 border border-zinc-600 px-3 py-2 text-sm"
+              className={`${adminInputClass} mt-0 flex-1`}
               placeholder="Nome do recurso"
               value={newResourceName}
               onChange={(e) => setNewResourceName(e.target.value)}
             />
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => void addResource()}
-              className="px-3 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-sm"
-            >
+            <button type="button" disabled={saving} onClick={() => void addResource()} className={adminBtnPrimaryClass}>
               Adicionar
             </button>
           </div>
           <ul className="space-y-1">
             {resources.map((r) => (
-              <li key={r.id} className="flex items-center justify-between text-sm bg-zinc-800/60 rounded-lg px-3 py-2">
+              <li
+                key={r.id}
+                className="flex items-center justify-between text-sm bg-zinc-900/60 border border-zinc-600/60 rounded-lg px-3 py-2"
+              >
                 <span>
                   {r.name} {!r.active ? <span className="text-gray-500">(inativo)</span> : null}
                 </span>
                 <button
                   type="button"
-                  className="text-amber-400 hover:underline text-xs"
+                  className="text-amber-300 hover:text-amber-200 hover:underline text-xs"
                   disabled={saving}
                   onClick={() => void toggleResourceActive(r)}
                 >
@@ -575,7 +571,7 @@ function ServiceDetailPanel(props: {
                 </button>
               </li>
             ))}
-            {resources.length === 0 ? <p className="text-xs text-gray-500">Nenhum recurso cadastrado.</p> : null}
+            {resources.length === 0 ? <p className="text-xs text-gray-400">Nenhum recurso cadastrado.</p> : null}
           </ul>
         </div>
       ) : null}
@@ -583,10 +579,10 @@ function ServiceDetailPanel(props: {
       <div>
         <h3 className="text-sm font-medium text-gray-300 mb-2">Expediente (horários disponíveis)</h3>
         {service.capacityMode === "resource" && resources.length > 0 ? (
-          <label className="block text-xs mb-3">
-            <span className="text-gray-400 mb-1 block">Aplicar a</span>
+          <label className={`${adminLabelClass} mb-3`}>
+            Aplicar a
             <select
-              className="w-full md:w-72 rounded-lg bg-zinc-800 border border-zinc-600 px-3 py-2 text-sm"
+              className={`${adminSelectClass} md:w-72`}
               value={ruleOwner}
               onChange={(e) => setRuleOwner(e.target.value)}
             >
@@ -644,12 +640,7 @@ function ServiceDetailPanel(props: {
           ))}
         </div>
         <div className="mt-3">
-          <button
-            type="button"
-            disabled={saving}
-            onClick={() => void saveWeekdayRules()}
-            className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-sm font-medium"
-          >
+          <button type="button" disabled={saving} onClick={() => void saveWeekdayRules()} className={adminBtnPrimaryClass}>
             Salvar expediente
           </button>
         </div>
@@ -660,40 +651,38 @@ function ServiceDetailPanel(props: {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mb-3">
           <input
             type="datetime-local"
-            className="rounded-lg bg-zinc-800 border border-zinc-600 px-2 py-2 text-sm"
+            className={`${adminInputClass} mt-0`}
             value={blockStart}
             onChange={(e) => setBlockStart(e.target.value)}
           />
           <input
             type="datetime-local"
-            className="rounded-lg bg-zinc-800 border border-zinc-600 px-2 py-2 text-sm"
+            className={`${adminInputClass} mt-0`}
             value={blockEnd}
             onChange={(e) => setBlockEnd(e.target.value)}
           />
           <input
-            className="rounded-lg bg-zinc-800 border border-zinc-600 px-2 py-2 text-sm"
+            className={`${adminInputClass} mt-0`}
             placeholder="Motivo (opcional)"
             value={blockReason}
             onChange={(e) => setBlockReason(e.target.value)}
           />
-          <button
-            type="button"
-            disabled={saving}
-            onClick={() => void addBlock()}
-            className="px-3 py-2 rounded-lg bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-white text-sm"
-          >
+          <button type="button" disabled={saving} onClick={() => void addBlock()} className={adminBtnSecondaryClass}>
             Bloquear
           </button>
         </div>
         <ul className="space-y-1">
           {blocks.map((b) => (
-            <li key={b.id} className="flex items-center justify-between text-sm bg-zinc-800/60 rounded-lg px-3 py-2">
+            <li
+              key={b.id}
+              className="flex items-center justify-between text-sm bg-zinc-900/60 border border-zinc-600/60 rounded-lg px-3 py-2"
+            >
               <span>
                 {fmtDateTime(b.startsAt)} → {fmtDateTime(b.endsAt)} {b.reason ? `— ${b.reason}` : ""}
               </span>
               <button
                 type="button"
-                className="text-red-400 hover:underline text-xs"
+                className="text-red-300 hover:text-red-200 hover:underline text-xs"
                 disabled={saving}
                 onClick={() => void removeBlock(b.id)}
               >
@@ -701,7 +690,7 @@ function ServiceDetailPanel(props: {
               </button>
             </li>
           ))}
-          {blocks.length === 0 ? <p className="text-xs text-gray-500">Nenhum bloqueio cadastrado.</p> : null}
+          {blocks.length === 0 ? <p className="text-xs text-gray-400">Nenhum bloqueio cadastrado.</p> : null}
         </ul>
       </div>
     </section>
@@ -760,13 +749,13 @@ function AgendaTab(props: {
 
   return (
     <div className="space-y-6">
-      <section className="rounded-xl border border-zinc-700 bg-zinc-900/80 p-5">
+      <section className={adminSectionClass}>
         <div className="flex flex-wrap items-end gap-3 justify-between">
           <div className="flex flex-wrap gap-3">
-            <label className="block text-sm">
-              <span className="text-gray-400 mb-1 block">Serviço</span>
+            <label className={adminLabelClass}>
+              Serviço
               <select
-                className="rounded-lg bg-zinc-800 border border-zinc-600 px-3 py-2 text-sm"
+                className={adminSelectClass}
                 value={filterServiceId}
                 onChange={(e) => setFilterServiceId(e.target.value)}
               >
@@ -778,10 +767,10 @@ function AgendaTab(props: {
                 ))}
               </select>
             </label>
-            <label className="block text-sm">
-              <span className="text-gray-400 mb-1 block">Status</span>
+            <label className={adminLabelClass}>
+              Status
               <select
-                className="rounded-lg bg-zinc-800 border border-zinc-600 px-3 py-2 text-sm"
+                className={adminSelectClass}
                 value={filterStatus}
                 onChange={(e) => setFilterStatus(e.target.value)}
               >
@@ -797,45 +786,45 @@ function AgendaTab(props: {
             type="button"
             disabled={services.length === 0}
             onClick={() => setShowNewModal(true)}
-            className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-sm font-medium"
+            className={adminBtnPrimaryClass}
           >
             Novo agendamento
           </button>
         </div>
       </section>
 
-      <section className="rounded-xl border border-zinc-700 bg-zinc-900/80 p-5">
+      <section className={adminSectionClass}>
         {appointments.length === 0 ? (
-          <p className="text-sm text-gray-500">Nenhum agendamento encontrado com esses filtros.</p>
+          <p className="text-sm text-gray-400">Nenhum agendamento encontrado com esses filtros.</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className={adminPanelClass}>
             <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-gray-400 border-b border-zinc-700">
-                  <th className="py-2 pr-3">Quando</th>
-                  <th className="py-2 pr-3">Serviço</th>
-                  <th className="py-2 pr-3">Recurso</th>
-                  <th className="py-2 pr-3">Cliente</th>
-                  <th className="py-2 pr-3">Telefone</th>
-                  <th className="py-2 pr-3">Status</th>
-                  <th className="py-2 pr-3">Ações</th>
+              <thead className={adminTableHeadClass}>
+                <tr>
+                  <th className="text-left px-4 py-2">Quando</th>
+                  <th className="text-left px-4 py-2">Serviço</th>
+                  <th className="text-left px-4 py-2">Recurso</th>
+                  <th className="text-left px-4 py-2">Cliente</th>
+                  <th className="text-left px-4 py-2">Telefone</th>
+                  <th className="text-left px-4 py-2">Status</th>
+                  <th className="px-4 py-2" />
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="text-gray-200">
                 {appointments.map((a) => (
-                  <tr key={a.id} className="border-b border-zinc-800">
-                    <td className="py-2 pr-3">{fmtDateTime(a.scheduledStart)}</td>
-                    <td className="py-2 pr-3">{a.serviceName ?? "—"}</td>
-                    <td className="py-2 pr-3">{a.resourceName ?? "—"}</td>
-                    <td className="py-2 pr-3">{a.clientName ?? "—"}</td>
-                    <td className="py-2 pr-3">{a.phoneE164 ?? "—"}</td>
-                    <td className="py-2 pr-3">{statusLabel[a.status] ?? a.status}</td>
-                    <td className="py-2 pr-3">
+                  <tr key={a.id} className={adminTableRowClass}>
+                    <td className="px-4 py-2 text-white">{fmtDateTime(a.scheduledStart)}</td>
+                    <td className="px-4 py-2">{a.serviceName ?? "—"}</td>
+                    <td className="px-4 py-2">{a.resourceName ?? "—"}</td>
+                    <td className="px-4 py-2">{a.clientName ?? "—"}</td>
+                    <td className="px-4 py-2">{a.phoneE164 ?? "—"}</td>
+                    <td className="px-4 py-2">{statusLabel[a.status] ?? a.status}</td>
+                    <td className="px-4 py-2 text-right">
                       {a.status === "booked" ? (
-                        <div className="flex gap-3">
+                        <div className="flex justify-end gap-3">
                           <button
                             type="button"
-                            className="text-cyan-400 hover:underline"
+                            className={adminBtnLinkClass}
                             disabled={saving}
                             onClick={() => setRescheduleTarget(a)}
                           >
@@ -843,7 +832,7 @@ function AgendaTab(props: {
                           </button>
                           <button
                             type="button"
-                            className="text-emerald-400 hover:underline"
+                            className="text-emerald-300 hover:text-emerald-200 hover:underline text-sm"
                             disabled={saving}
                             onClick={() => void runAction(a.id, "complete", { status: "completed" })}
                           >
@@ -851,7 +840,7 @@ function AgendaTab(props: {
                           </button>
                           <button
                             type="button"
-                            className="text-amber-400 hover:underline"
+                            className="text-amber-300 hover:text-amber-200 hover:underline text-sm"
                             disabled={saving}
                             onClick={() => void runAction(a.id, "complete", { status: "no_show" })}
                           >
@@ -859,7 +848,7 @@ function AgendaTab(props: {
                           </button>
                           <button
                             type="button"
-                            className="text-red-400 hover:underline"
+                            className="text-red-300 hover:text-red-200 hover:underline text-sm"
                             disabled={saving}
                             onClick={() => void runAction(a.id, "cancel")}
                           >
@@ -981,17 +970,17 @@ function BookingModal(props: {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/55 flex items-center justify-center p-4">
-      <div className="w-full max-w-lg rounded-xl border border-zinc-600 bg-zinc-900 p-5 max-h-[90vh] overflow-y-auto">
-        <h3 className="text-lg font-medium text-white mb-4">
+    <div className={adminModalOverlayClass}>
+      <div className={`${adminModalClass} max-w-lg max-h-[90vh] overflow-y-auto`}>
+        <h3 className="text-lg font-semibold text-white mb-4">
           {rescheduleAppointmentId ? "Reagendar" : "Novo agendamento"}
         </h3>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-          <label className="block text-sm">
-            <span className="text-gray-400 mb-1 block">Serviço</span>
+          <label className={adminLabelClass}>
+            Serviço
             <select
-              className="w-full rounded-lg bg-zinc-800 border border-zinc-600 px-3 py-2 text-sm disabled:opacity-60"
+              className={`${adminSelectClass} disabled:opacity-60`}
               value={serviceId}
               disabled={!!fixedServiceId}
               onChange={(e) => setServiceId(e.target.value)}
@@ -1003,11 +992,11 @@ function BookingModal(props: {
               ))}
             </select>
           </label>
-          <label className="block text-sm">
-            <span className="text-gray-400 mb-1 block">Data</span>
+          <label className={adminLabelClass}>
+            Data
             <input
               type="date"
-              className="w-full rounded-lg bg-zinc-800 border border-zinc-600 px-3 py-2 text-sm"
+              className={adminInputClass}
               value={dateStr}
               min={todayStr()}
               onChange={(e) => setDateStr(e.target.value)}
@@ -1017,18 +1006,14 @@ function BookingModal(props: {
 
         {!rescheduleAppointmentId ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-            <label className="block text-sm">
-              <span className="text-gray-400 mb-1 block">Nome do cliente</span>
-              <input
-                className="w-full rounded-lg bg-zinc-800 border border-zinc-600 px-3 py-2 text-sm"
-                value={clientName}
-                onChange={(e) => setClientName(e.target.value)}
-              />
+            <label className={adminLabelClass}>
+              Nome do cliente
+              <input className={adminInputClass} value={clientName} onChange={(e) => setClientName(e.target.value)} />
             </label>
-            <label className="block text-sm">
-              <span className="text-gray-400 mb-1 block">Telefone (E.164)</span>
+            <label className={adminLabelClass}>
+              Telefone (E.164)
               <input
-                className="w-full rounded-lg bg-zinc-800 border border-zinc-600 px-3 py-2 text-sm"
+                className={adminInputClass}
                 placeholder="+5511999999999"
                 value={phoneE164}
                 onChange={(e) => setPhoneE164(e.target.value)}
@@ -1038,11 +1023,11 @@ function BookingModal(props: {
         ) : null}
 
         <div className="mb-4">
-          <span className="text-gray-400 mb-2 block text-sm">Horários disponíveis</span>
+          <span className="text-gray-300 mb-2 block text-sm">Horários disponíveis</span>
           {loadingSlots ? (
-            <p className="text-xs text-gray-500">Buscando horários…</p>
+            <p className="text-xs text-gray-400">Buscando horários…</p>
           ) : slots.length === 0 ? (
-            <p className="text-xs text-gray-500">Nenhum horário livre nessa data.</p>
+            <p className="text-xs text-gray-400">Nenhum horário livre nessa data.</p>
           ) : (
             <div className="flex flex-wrap gap-2">
               {slots.map((slot, idx) => {
@@ -1072,14 +1057,14 @@ function BookingModal(props: {
         </div>
 
         <div className="flex justify-end gap-2">
-          <button type="button" className="px-3 py-2 text-sm text-gray-300 hover:text-white" onClick={onClose}>
+          <button type="button" className={adminBtnSecondaryClass} onClick={onClose}>
             Cancelar
           </button>
           <button
             type="button"
             disabled={saving || !selectedSlot}
             onClick={() => void confirm()}
-            className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-sm"
+            className={adminBtnPrimaryClass}
           >
             Confirmar
           </button>
