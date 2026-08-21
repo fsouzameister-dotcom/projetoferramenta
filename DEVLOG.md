@@ -2125,6 +2125,13 @@ Use este bloco para retomar **sem depender do histórico do chat**.
 - Deploy em produção via `python scripts/deploy-vps-remote.py` — `DEPLOY_OK`, migração `011_appointments.sql` aplicada, `mvp-backend` reiniciado e `active`, health check `200`.
 - Confirmado pós-deploy: `https://api.clienton.com.br/health` → `{"status":"ok"}`; `https://app.clienton.com.br/` carregando tela de login.
 
+**3) Fix de UI — padronização visual de `AppointmentsAdmin.tsx`**
+
+- Commit: `7d424c3` — `fix(appointments): padronizar UI da tela de Agendamentos com admin-ui`.
+- Motivo: a tela foi criada com classes Tailwind soltas (ad-hoc), diferente dos tokens compartilhados de `~lib/admin-ui.ts` usados nas demais telas admin (WhatsApp, Operação, Usuários, Monitoramento, Clientes/Tenants). Ficou com aparência destoante (relatado pelo usuário via print).
+- Migrado header, tabs, cards, formulários (services/resources/regras/bloqueios), tabela de serviços/agendamentos e o modal de novo agendamento/reagendamento para `adminPageShellClass` / `adminSectionClass` / `adminPanelClass` / `adminInputClass` / `adminSelectClass` / `adminLabelClass` / `adminBtnPrimaryClass` / `adminBtnSecondaryClass` / `adminBtnLinkClass` / `adminErrorClass` / `adminNoticeClass` / `adminTableHeadClass` / `adminTableRowClass` / `adminModalOverlayClass` / `adminModalClass`. Nenhuma mudança de lógica/funcionalidade.
+- Validado com `tsc --noEmit` e `npm run build` (frontend). Deploy feito e confirmado (`/health` → `ok`).
+
 ### Não feito ainda (Fase 2b / Fase 3 — retomar aqui)
 
 1. **Teste ponta a ponta manual não realizado:** criar 1 `appointment_service` de teste em `/admin/appointments` (Configuração) e montar um fluxo simples `Início → Agendamento → Mensagem` no editor para validar a experiência real do bot perguntando data/horário e confirmando.
