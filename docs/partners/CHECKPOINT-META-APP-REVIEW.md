@@ -1,15 +1,15 @@
 # Checkpoint — Meta Tech Provider / App Review (ClientOn)
 
-**Atualizado:** 2026-08-04  
+**Atualizado:** 2026-08-26  
 **App:** ClientOn appmessage  
 **App ID:** `4498853590386621`  
-**Business Portfolio:** ClientOn (RPS NEGOCIOS DIGITAIS LTDA) — **verificada**
+**Business Portfolio:** ClientOn (RPS NEGOCIOS DIGITAIS LTDA) — **verificada** (ID `1254823106416280`)
 
 Não versionar neste arquivo: App Secret, verify token, senhas, access tokens `EAA…`.
 
 ---
 
-## Status atual
+## Status atual (2026-08-26)
 
 | Item | Status |
 |------|--------|
@@ -21,14 +21,17 @@ Não versionar neste arquivo: App Secret, verify token, senhas, access tokens `E
 | Webhook Meta → `https://api.clienton.com.br/webhooks/whatsapp` | Feito (confirmar se verificado) |
 | Mensagem de teste Cloud API (Configuração da API) | Feito (200 / toast sucesso) |
 | Postman `GET /{WABA-ID}/phone_numbers` | Feito (**200**) — WABA `1783017749546414` |
-| Contador App Review `whatsapp_business_management` 0→1 | **Aguardando até 24h** |
-| Screencasts messaging + management | Enviados (conforme sessão) |
-| Formulário tratamento de dados / operadores | Em preenchimento / feito nesta sessão |
-| Instruções para analista (web) | Em ajuste — precisa **e-mail real** de login (não o nome “Meta App Review”) |
-| URLs Termos / exclusão de dados | **Corrigir** se ainda apontam para `facebook.com` |
-| Config ID Embedded Signup | **Pendente** (após Advanced Access) |
+| URL Termos de Serviço | **Corrigido** 2026-08-26 (`facebook.com` → `https://www.clienton.com.br/`) |
+| URL Exclusão de dados do usuário | **Corrigido** 2026-08-26 (`facebook.com` → `https://www.clienton.com.br/`) |
+| URL Política de Privacidade | Já estava correta (`https://www.clienton.com.br/`) |
+| Instruções para analista (web) | Já estava correta desde 2026-08-04 (e-mail real `meta-review@clienton.com.br` + senha) — **trocar a senha** por ter sido exposta em print nesta sessão |
+| Screencasts messaging + management | Enviados (conforme sessão 2026-08-04) |
+| Formulário tratamento de dados / operadores | Feito |
+| **Verificação do acesso** (empresa provedora de tecnologia) | **Enviada 2026-08-26** — status "Em análise", prazo ~5 dias. Prazo limite da Meta para concluir: **25/10/2026** (senão gera restrição no app) |
+| **App Review enviado** (`whatsapp_business_messaging`, `whatsapp_business_management`, `public_profile`) | **Enviado 2026-08-26** — status "Análise em andamento", prazo ~20 dias |
+| Config ID Embedded Signup | **Pendente** (só depois do Advanced Access ser aprovado) |
 | Deploy código Embedded Signup na VPS | Feito (2026-08-04, deploy local + push `91d8fae`) |
-| App Review enviado / aprovado | **Pendente** |
+| App em modo Live (hoje: "Em desenvolvimento") | **Pendente** — só após aprovação do App Review |
 
 ---
 
@@ -113,11 +116,12 @@ Token `EAA…` usado no chat foi **exposto** → **regenerar** na Configuração
 
 ## Próximos passos (quando retomar)
 
-1. Esperar contador **1 de 1** em `whatsapp_business_management` (até 24h); se não, repetir GET.  
-2. Corrigir URLs de **Termos** e **Exclusão de dados** no app (não usar `facebook.com`).  
-3. Finalizar instruções do analista com **e-mail real** + senha no cofre.  
-4. **Enviar** App Review completo.  
-5. Após Advanced Access: criar **Config ID** Embedded Signup → colar App ID + Config ID no ClientOn → deploy se faltar → testar botão **Conectar WhatsApp (Meta)**.  
+1. **Aguardar** resultado da Verificação do acesso (~5 dias) e do App Review (~20 dias) — ambos enviados em 2026-08-26. A Meta avisa por e-mail se aprovar, rejeitar ou pedir mais informação.
+2. Trocar a senha do usuário de teste `meta-review@clienton.com.br` (exposta em print durante a sessão de ajuste das instruções).
+3. Se a Verificação do acesso pedir mais dados (empresa provedora de tecnologia / SaaS), responder com base no modelo multi-tenant da ClientOn — respostas já registradas na sessão (site `https://clienton.com.br`, descrição do serviço SaaS de atendimento/automação WhatsApp).
+4. Após Advanced Access aprovado: criar **Config ID** Embedded Signup (Facebook Login for Business) → colar App ID + Config ID no ClientOn (Admin → WhatsApp) → deploy se faltar → testar botão **Conectar WhatsApp (Meta)**.
+5. Só depois disso promover o app de "Em desenvolvimento" para **Live**.
+6. Teste ponta a ponta (Etapa 7 do guia) com um tenant piloto real.
 
 Docs relacionados:
 - [`GUIA-META-TECH-PROVIDER.md`](GUIA-META-TECH-PROVIDER.md)
