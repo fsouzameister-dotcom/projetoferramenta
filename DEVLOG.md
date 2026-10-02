@@ -2203,6 +2203,16 @@ Use este bloco para retomar **sem depender do histórico do chat**. Substitui a 
 - **Ambiente gráfico (lightdm/Xorg) rodando no servidor** — consumo desnecessário; desligar antes de colocar voz.
 - Avaliação: 1 vCPU serve para a prova de conceito; **apertado para 10–20 chamadas** com conversão Opus↔G.711 + gravação + backend + Postgres no mesmo núcleo. Antes de produção: subir para 2–4 vCPU ou separar a voz em outra VPS (decidir com consumo medido). Gravação ≈ 1 MB/min (WAV) → precisa rotina de arquivamento.
 
+### Ajustes aplicados na VPS (2026-10-02, autorizados pelo usuário)
+
+- **Correção da inspeção acima:** o ufw **tinha** `5060/udp` e `10000:20000/udp` liberados para qualquer IP (comandos no histórico do root). Os logs do Asterisk já mostravam robôs externos tentando `REGISTER`/`INVITE` (ex.: 5.135.106.93, 31.70.73.121).
+- Backup completo de `/etc/asterisk` em `/root/backup-voz-20261002-191216/`.
+- **ufw:** removida a regra `5060/udp` (v4 e v6). SIP só será liberado para os IPs do tronco quando contratado. Faixa RTP `10000:20000/udp` mantida (casa com `rtp.conf`).
+- **Asterisk:** `pjsip.conf` reduzido ao `transport-udp` (ramal de teste `1001` removido); `chan_sip` e `chan_iax2` com `noload` em `modules.conf`. Reiniciado; 0 endpoints.
+- **Ambiente gráfico desligado:** `systemctl set-default multi-user.target`; `lightdm`, `xrdp` e `xrdp-sesman` desabilitados e parados (xrdp escutava 3389, que já estava bloqueada no ufw).
+- Conferido depois: `mvp-backend` e Apache ativos, Postgres/Redis (Docker `mvp_db`/`mvp_redis`) no ar, `https://api.clienton.com.br/health` = 200.
+- Reverter: `cp -a /root/backup-voz-20261002-191216/asterisk/* /etc/asterisk/ && systemctl restart asterisk`; `systemctl set-default graphical.target && systemctl enable --now lightdm`.
+
 ### Tronco SIP (pesquisa de 2026-10-02)
 
 | Operadora | Preço | Observações |
@@ -2219,7 +2229,7 @@ Use este bloco para retomar **sem depender do histórico do chat**. Substitui a 
 
 1. **Prova de conceito**
    - Usuário: contratar tronco (2 canais) e passar dados (servidor SIP, usuário/senha, número de saída/DID).
-   - Na VPS (**aguarda confirmação do usuário** por mexer em produção): desligar ambiente gráfico; limpar teste `1001`; ufw liberando SIP **só para IPs da operadora** + faixa RTP; WebRTC via Apache na porta 443 (proxy WSS); dialplan **só números brasileiros** (bloquear internacional e serviços especiais) + limite de chamadas simultâneas; ARI só em localhost; página de teste ligando do navegador para um celular (medir qualidade, atraso, CPU).
+   - Na VPS: ~~desligar ambiente gráfico; limpar teste `1001`; fechar 5060 para o mundo~~ (feito em 2026-10-02); ufw liberando SIP **só para IPs da operadora**; WebRTC via Apache na porta 443 (proxy WSS); dialplan **só números brasileiros** (bloquear internacional e serviços especiais) + limite de chamadas simultâneas; ARI só em localhost; página de teste ligando do navegador para um celular (medir qualidade, atraso, CPU).
 2. **Discagem manual**: softphone na Central do Agente, registro de chamadas, tabulação (reusar tabulações/filas de Operação), gravação.
 3. **Preview com mailing**: campanha de voz (reusar upload/normalização de `campaign-spreadsheet.ts` / `campaign-phone.ts`), fila de contatos por atendente, regras de nova tentativa (não atendeu, ocupado, caixa postal, inválido) com limite, horário permitido, gravação por campanha, relatórios (TMA, contatos/hora, taxa de contato), estado do atendente (disponível, em chamada, pós-atendimento, pausa).
 4. **Futuro**: progressivo/preditivo com detecção de caixa postal; depois bot de voz com IA.
@@ -2227,5 +2237,5 @@ Use este bloco para retomar **sem depender do histórico do chat**. Substitui a 
 ### Pendências para retomar
 
 - Usuário contratar o tronco (sugestão: Vono) e confirmar política de uso.
-- Usuário autorizar mudanças na VPS de produção (ambiente gráfico e firewall).
+- ~~Usuário autorizar mudanças na VPS de produção~~ — autorizado e aplicado em 2026-10-02. Falta liberar 5060 só para os IPs da Vono (depende do contrato).
 - Criar subdomínio de voz no DNS se optarmos por subdomínio próprio em vez de caminho no Apache existente.
