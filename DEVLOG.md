@@ -2,14 +2,16 @@
 
 ## Checkpoint atual
 
-- Data: 2026-08-20
+- Data: 2026-10-02
 - Escopo vigente: **[Escopo vigente — maio/2026](#escopo-vigente--maio2026)** (prioridades atuais)
-- Retomada rápida: **[Checkpoint sessão 2026-08-20 — Agendamentos e campanhas agendadas](#checkpoint-de-sessão-2026-08-20--agendamentos-e-campanhas-agendadas)**
+- Retomada rápida: **[Checkpoint sessão 2026-10-02 — Telefonia própria (discador preview e manual)](#checkpoint-de-sessão-2026-10-02--telefonia-própria-discador-preview-e-manual)**
+- Meta Tech Provider / App Review: enviado em 2026-08-26, aguardando Meta — ver [`docs/partners/CHECKPOINT-META-APP-REVIEW.md`](docs/partners/CHECKPOINT-META-APP-REVIEW.md)
+- Sessão anterior: **[Checkpoint sessão 2026-08-20 — Agendamentos e campanhas agendadas](#checkpoint-de-sessão-2026-08-20--agendamentos-e-campanhas-agendadas)**
 - Sessão anterior: **[Checkpoint sessão 2026-06-08 — Campanhas, Instagram e bugs](#checkpoint-de-sessão-2026-06-08--campanhas-instagram-e-bugs)**
 - Sessão anterior: **[Checkpoint sessão 2026-06-03 — Motor IA no fluxo](#checkpoint-de-sessão-2026-06-03--motor-ia-no-fluxo)**
 - Sessão anterior: **[Checkpoint sessão 2026-05-28 — Operação (filas, tabulações, encerramento)](#checkpoint-de-sessão-2026-05-28--operação-filas-tabulações-encerramento)**
 - Sessão anterior: **[Checkpoint sessão 2026-05-22 — alinhamento produto](#checkpoint-de-sessão-2026-05-22--alinhamento-produto)**
-- Telefonia (discussão pausada): **[Discussão telefonia — a retomar](#discussão-telefonia--a-retomar-2026-05-22)**
+- Telefonia: decisão tomada em 2026-10-02 (Asterisk próprio + tronco SIP) — ver checkpoint acima; histórico em **[Discussão telefonia — a retomar](#discussão-telefonia--a-retomar-2026-05-22)**
 - Benchmark mercado 2026: **[Benchmark omnichannel — matriz ClientOn](#benchmark-omnichannel-2026--matriz-clienton)**
 - Backlog produto: **[BACKLOG.md](BACKLOG.md)** · resumo no [DEVLOG](#backlog--roadmap-produto)
 - Commits Operação/atendimento (branch `master`, GitHub): `70fa8d2`, `b44ed5c`, `12dee52`, `6af1c28` — **validar deploy na VPS** após `6af1c28`
@@ -1903,7 +1905,9 @@ Atualizar quando fechar: cadastro mestre, inbound→fluxo, CTWA/Lead Ads, insigh
 
 ## Discussão telefonia — a retomar (2026-05-22)
 
-> **Status:** decisão de arquitetura **não fechada**. Retomar quando WhatsApp + fluxos + IA texto estiverem sólidos (meta 31–60 dias).  
+> **Atualização 2026-10-02:** decisão fechada para o discador com atendente humano — **Asterisk próprio + tronco SIP nacional** (Twilio Voice descartado). Ver [Checkpoint 2026-10-02 — Telefonia própria](#checkpoint-de-sessão-2026-10-02--telefonia-própria-discador-preview-e-manual). O conteúdo abaixo fica como histórico (bot de voz com IA segue como fase futura).
+>
+> **Status (2026-05-22):** decisão de arquitetura **não fechada**. Retomar quando WhatsApp + fluxos + IA texto estiverem sólidos (meta 31–60 dias).  
 > **Contexto:** existe **protótipo próprio** de telefonia que pode ser embarcado no ClientOn.
 
 ### Pergunta central
@@ -2164,3 +2168,64 @@ python scripts\deploy-vps-remote.py
 ```
 
 Ler antes de continuar: `DOCUMENTO_NODES_FLUXO.md` (seção `agendamento`) e esta seção do `DEVLOG.md`.
+
+## Checkpoint de sessão (2026-10-02) — Telefonia própria (discador preview e manual)
+
+Use este bloco para retomar **sem depender do histórico do chat**. Substitui a [Discussão telefonia de 2026-05-22](#discussão-telefonia--a-retomar-2026-05-22) no que diz respeito ao discador com atendente humano (bot de voz com IA continua como fase futura).
+
+### Pedido do cliente
+
+- Sistema de voz que, a partir de um **mailing**, faz ligações e, no "alô" do cliente, a ligação já está com o **atendente**.
+- Modos agora: **preview** (sistema mostra o próximo contato do mailing; a ligação só sai quando o atendente clica em "Ligar") e **discagem manual** (atendente digita o número).
+- Arquitetura já preparada para **progressivo/preditivo** depois (sistema disca antes do atendente; exige detecção de caixa postal e controle de abandono) — **não implementar agora**.
+- Uso do primeiro cliente: **pesquisa**. **10 atendentes** simultâneos (faixa planejada 5–20). Gravação **configurável por campanha**.
+
+### Decisões tomadas
+
+| Tema | Decisão | Motivo |
+|------|---------|--------|
+| Provedor de voz | **PBX próprio (Asterisk) + tronco SIP nacional** | Custo. **Twilio Voice descartado** pelo usuário (gasto alto). Referência: US$ 0,0623/min para celular BR no Twilio ≈ US$ 3.300/mês para 10 atendentes × 4 h/dia × 22 dias (~52.800 min) |
+| Protótipo de telefonia citado em maio | **Não adequado / não existe no repo** | Nenhum código no repositório; as 8 perguntas de maio nunca foram respondidas |
+| Software PBX | **Asterisk** (não FreeSWITCH) | Comunidade maior, WebRTC nativo, ARI (REST + WebSocket) fácil de controlar pelo backend Node; FreeSWITCH só faria diferença em preditivo de altíssimo volume |
+| Onde rodar | **VPS atual para a prova de conceito**; reavaliar antes de produção com 10 atendentes | Ver capacidade abaixo |
+| Softphone | **WebRTC no navegador** (ex.: JsSIP) dentro da Central do Agente; atendente usa headset | Sem app instalado |
+| Controle | **ClientOn backend via ARI** (aplicação Stasis): valida tenant, permissão, campanha, horário permitido e número de saída antes de discar; recebe eventos (chamando, atendida, ocupado, não atende, desligou, duração); liga gravação se a campanha pedir; abre tabulação ao fim | Toda regra de negócio no ClientOn, Asterisk só faz telefonia |
+| Abstração | Camada `VoiceProvider` no backend | Permite trocar Asterisk/tronco no futuro sem refazer telas e regras |
+| Regulação | Pesquisa em princípio **não exige prefixo 0303** (telemarketing de oferta); confirmar com operadora/cliente. Atenção a chamadas curtas (Anatel), "Não Me Perturbe", horários e aviso de gravação (LGPD) | Preview não gera abandono, ajuda com regra de chamadas curtas |
+
+### Estado atual da VPS (inspeção read-only em 2026-10-02)
+
+- **Asterisk 20.6 já instalado** (pacote Ubuntu, instalado em 2026-09-14). Em 2026-09-15 foi configurado só um teste: ramal PJSIP `1001` (UDP, ulaw/alaw) e extensão de eco `600` em `from-internal`; o `1001` também está duplicado em `sip.conf` (chan_sip, descontinuado). Resto é configuração de fábrica.
+- **Sem tronco SIP**, **sem transporte WebRTC** (`res_pjsip_transport_websocket` não ativo), **servidor HTTP do Asterisk desligado**, **ARI sem usuário/aplicação**, **0 chamadas processadas**, nenhuma gravação.
+- Módulos úteis já carregados: `res_ari*` e codec **Opus** (`codec_opus_open_source`).
+- **Firewall (ufw):** só 80, 443, 22 liberados (3000 negado). Porta 5060 e áudio (RTP) bloqueados de fora — por isso o `1001` aparece indisponível.
+- **Capacidade:** 1 vCPU (AMD EPYC), 3,8 GB RAM (2,6 GB livres), 53 GB livres em disco, carga ~0. Ubuntu 24.04.
+- **Ambiente gráfico (lightdm/Xorg) rodando no servidor** — consumo desnecessário; desligar antes de colocar voz.
+- Avaliação: 1 vCPU serve para a prova de conceito; **apertado para 10–20 chamadas** com conversão Opus↔G.711 + gravação + backend + Postgres no mesmo núcleo. Antes de produção: subir para 2–4 vCPU ou separar a voz em outra VPS (decidir com consumo medido). Gravação ≈ 1 MB/min (WAV) → precisa rotina de arquivamento.
+
+### Tronco SIP (pesquisa de 2026-10-02)
+
+| Operadora | Preço | Observações |
+|-----------|-------|-------------|
+| **Vono** (sugerida) | R$ 40/canal/mês, ilimitado fixo+celular Brasil → **10 canais ≈ R$ 400/mês** | Sem fidelidade, ativação grátis, operadora autorizada Anatel com RN1 próprio (0483), numeração nos 67 DDDs, suporte 24h, cita call center e tem guia para Asterisk. https://falevono.com.br/sip-trunk |
+| Telecom Cloud | R$ 39,90/canal (1–9 canais); 10 canais ≈ R$ 349,90/mês (confirmar) | Página não informa fidelidade nem política de uso; menos transparência. https://telecomcloud.com.br/sip-trunking/ |
+| Avoip | R$ 497/mês por 10 canais + R$ 200 de taxa | **Fidelidade de 24 meses** — descartada para começar |
+
+- Cada atendente em ligação ocupa 1 canal → **10 canais** para este cliente.
+- **Antes de contratar:** confirmar por escrito que o plano "ilimitado" pode ser usado para **pesquisa ativa com 10 atendentes discando o dia todo (modo preview)** — planos ilimitados costumam ter política de uso justo e às vezes excluem discador/call center. Se não puder, pedir plano por minuto.
+- Para a prova de conceito: começar com **2 canais** e expandir para 10 depois.
+
+### Plano
+
+1. **Prova de conceito**
+   - Usuário: contratar tronco (2 canais) e passar dados (servidor SIP, usuário/senha, número de saída/DID).
+   - Na VPS (**aguarda confirmação do usuário** por mexer em produção): desligar ambiente gráfico; limpar teste `1001`; ufw liberando SIP **só para IPs da operadora** + faixa RTP; WebRTC via Apache na porta 443 (proxy WSS); dialplan **só números brasileiros** (bloquear internacional e serviços especiais) + limite de chamadas simultâneas; ARI só em localhost; página de teste ligando do navegador para um celular (medir qualidade, atraso, CPU).
+2. **Discagem manual**: softphone na Central do Agente, registro de chamadas, tabulação (reusar tabulações/filas de Operação), gravação.
+3. **Preview com mailing**: campanha de voz (reusar upload/normalização de `campaign-spreadsheet.ts` / `campaign-phone.ts`), fila de contatos por atendente, regras de nova tentativa (não atendeu, ocupado, caixa postal, inválido) com limite, horário permitido, gravação por campanha, relatórios (TMA, contatos/hora, taxa de contato), estado do atendente (disponível, em chamada, pós-atendimento, pausa).
+4. **Futuro**: progressivo/preditivo com detecção de caixa postal; depois bot de voz com IA.
+
+### Pendências para retomar
+
+- Usuário contratar o tronco (sugestão: Vono) e confirmar política de uso.
+- Usuário autorizar mudanças na VPS de produção (ambiente gráfico e firewall).
+- Criar subdomínio de voz no DNS se optarmos por subdomínio próprio em vez de caminho no Apache existente.
