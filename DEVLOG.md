@@ -2223,6 +2223,14 @@ Use este bloco para retomar **sem depender do histórico do chat**. Substitui a 
   - `from-vono`: chamadas recebidas tocam `hello-world` (provisório).
 - ufw: `5060/udp` liberada **só para 190.89.248.47**.
 - **Testes 2026-10-05:** chamada recebida do celular do usuário atendida (caller ID chega como `55` + DDD + número); chamada feita do servidor para celular (via `clienton-saida`, discado `011992007226`) tocou ~8 s, atendida, 38 s de áudio, encerrada normalmente.
+- **WebRTC (2026-10-05):**
+  - Apache (`api.clienton.com.br-le-ssl.conf`): `ProxyPass /voice-ws http://127.0.0.1:8088/ws upgrade=websocket` antes do `ProxyPass /`. O navegador usa `wss://api.clienton.com.br/voice-ws`; o TLS termina no Apache.
+  - `http.conf`: servidor HTTP do Asterisk ligado só em `127.0.0.1:8088`.
+  - `pjsip.conf`: `transport-ws` + ramal de teste `agente-teste` (`webrtc=yes`, `dtls_auto_generate_cert`, opus/alaw/ulaw, context `clienton-saida`). Senha em `scripts/.voice-test-secret` (fora do Git).
+  - `rtp.conf`: `icesupport=yes`, `ice_blacklist=172.16.0.0/12` (não anunciar IPs do Docker).
+  - Handshake WS = 101.
+  - Página de teste provisória: `https://app.clienton.com.br/voz-teste.html` (JsSIP via CDN; some no próximo deploy do frontend, o que é esperado).
+  - Backups `*.pre-webrtc` em `/etc/asterisk/` e `/root/api-le-ssl.conf.pre-webrtc-*`.
 - Ruído conhecido no log: erros de `app_voicemail_imap/odbc` já registrados (módulos duplicados, inofensivo; dá para `noload`).
 
 ### Tronco SIP (pesquisa de 2026-10-02)
