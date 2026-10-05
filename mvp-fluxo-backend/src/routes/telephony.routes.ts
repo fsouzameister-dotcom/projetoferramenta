@@ -1,5 +1,4 @@
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
-import { timingSafeEqual } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import path from "node:path";
@@ -31,6 +30,7 @@ import {
   updateVoiceCampaign,
 } from "../voice-campaigns";
 import type { VoiceContactOutcome } from "../voice-campaign-rules";
+import { tokenMatches } from "../telephony-rules";
 
 const VOICE_CAMPAIGN_VALIDATION: Record<string, string> = {
   VOICE_CAMPAIGN_FILE_REQUIRED: "Envie a planilha de contatos",
@@ -321,13 +321,6 @@ const telephonyRoutes: FastifyPluginAsync = async (fastify) => {
     }
   });
 };
-
-function tokenMatches(received: string | undefined, expected: string): boolean {
-  if (!received) return false;
-  const a = Buffer.from(received);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
 
 /**
  * Rotas chamadas pelo dialplan do Asterisk (CURL em 127.0.0.1:3000). Fora de /api e sem JWT;

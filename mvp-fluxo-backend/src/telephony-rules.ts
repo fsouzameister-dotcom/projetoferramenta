@@ -1,5 +1,23 @@
 /** Regras puras da telefonia (sem banco/rede) — testáveis isoladamente. */
 
+import { timingSafeEqual } from "node:crypto";
+
+function safeEqual(received: string, expected: string): boolean {
+  const a = Buffer.from(received);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/**
+ * O hangup handler roda no mesmo canal que já definiu CURLOPT(httpheader), então o Asterisk envia o
+ * cabeçalho duas vezes e o Node junta como "token, token". Aceita somente se todas as cópias conferem.
+ */
+export function tokenMatches(received: string | undefined, expected: string): boolean {
+  if (!received || !expected) return false;
+  const parts = received.split(",").map((p) => p.trim());
+  return parts.length <= 4 && parts.every((p) => safeEqual(p, expected));
+}
+
 export type VoiceCallStatus =
   | "requested"
   | "authorized"

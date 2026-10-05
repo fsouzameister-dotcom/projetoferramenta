@@ -8,9 +8,18 @@ import {
   mapDialStatusToCallStatus,
   normalizeBrPhone,
   sipUsernameForUser,
+  tokenMatches,
 } from "../src/telephony-rules";
 
 describe("telephony-rules", () => {
+  test("tokenMatches aceita cabeçalho duplicado pelo Asterisk e rejeita divergente", () => {
+    assert.strictEqual(tokenMatches("abc123", "abc123"), true);
+    assert.strictEqual(tokenMatches("abc123, abc123", "abc123"), true);
+    assert.strictEqual(tokenMatches("abc123, outro", "abc123"), false);
+    assert.strictEqual(tokenMatches("", "abc123"), false);
+    assert.strictEqual(tokenMatches(undefined, "abc123"), false);
+  });
+
   test("normalizeBrPhone aceita celular em vários formatos", () => {
     for (const raw of ["11992007226", "(11) 99200-7226", "+55 11 99200-7226", "5511992007226", "011992007226"]) {
       assert.deepStrictEqual(normalizeBrPhone(raw), { digits: "11992007226", kind: "mobile" }, raw);
