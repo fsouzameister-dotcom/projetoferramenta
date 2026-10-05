@@ -21,6 +21,7 @@ import {
   messageTimestampNow,
 } from "../lib/agent-datetime";
 import { clearSession } from "../lib/session";
+import Softphone, { type DialRequest } from "../components/Softphone";
 
 type ConversationStatus = "em_espera" | "em_andamento" | "historico";
 type MessageType = "text" | "contact" | "location" | "attachment" | "audio" | "image";
@@ -345,6 +346,8 @@ export default function AgentHome() {
   const [masterClientById, setMasterClientById] = useState<Record<string, MasterClientPayload>>({});
   const [showTour, setShowTour] = useState(false);
   const [tourStepIndex, setTourStepIndex] = useState(0);
+  const [telephonyEnabled, setTelephonyEnabled] = useState(false);
+  const [dialRequest, setDialRequest] = useState<DialRequest | null>(null);
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [closeTabulacoes, setCloseTabulacoes] = useState<
     { id: string; label: string; description: string | null }[]
@@ -1412,6 +1415,7 @@ export default function AgentHome() {
               <p className="text-xs text-gray-300">Atendente: {userName}</p>
             </div>
             <div className="flex items-center gap-2 pr-24">
+              <Softphone dialRequest={dialRequest} onEnabledChange={setTelephonyEnabled} />
               <button
                 type="button"
                 onClick={handleOpenTour}
@@ -1508,6 +1512,15 @@ export default function AgentHome() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
+                  {telephonyEnabled && activeConversation?.phone ? (
+                    <button
+                      type="button"
+                      onClick={() => setDialRequest({ phone: activeConversation.phone, nonce: Date.now() })}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 text-[11px] hover:bg-emerald-500/30"
+                    >
+                      Ligar
+                    </button>
+                  ) : null}
                   {isConversationClosed ? (
                     <button
                       type="button"

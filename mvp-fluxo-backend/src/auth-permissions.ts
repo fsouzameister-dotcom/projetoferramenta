@@ -13,6 +13,7 @@ export const APP_PERMISSIONS = [
   "inbound",
   "campaigns",
   "appointments",
+  "telephony",
   "monitoring",
   "operations",
   "reports",
@@ -59,6 +60,12 @@ export const PERMISSION_CATALOG: PermissionMeta[] = [
   },
   { key: "campaigns", label: "Campanhas", group: "Automação", description: "Disparos em massa e relatórios." },
   { key: "appointments", label: "Agendamentos", group: "Automação", description: "Serviços, recursos, expediente e horários agendados." },
+  {
+    key: "telephony",
+    label: "Telefonia",
+    group: "Operacional",
+    description: "Liberar ligações por usuário e ver o histórico de chamadas.",
+  },
   { key: "monitoring", label: "Monitoramento", group: "Operacional", description: "Acompanhar conversas em tempo real." },
   { key: "operations", label: "Operação", group: "Operacional", description: "Filas, tabulações e configurações de atendimento." },
   { key: "reports", label: "Relatórios", group: "Operacional", description: "Relatórios e exportações." },
@@ -97,7 +104,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<AppRole, AppPermission[]> = {
   admin_local: APP_PERMISSIONS.filter(
     (p) => !isPlatformOnlyPermission(p)
   ),
-  supervisor: ["dashboard", "flows", "monitoring", "operations", "reports"],
+  supervisor: ["dashboard", "flows", "monitoring", "operations", "reports", "telephony"],
   agente: [],
 };
 

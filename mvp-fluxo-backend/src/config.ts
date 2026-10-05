@@ -89,6 +89,32 @@ export function getInboundWebhookSecret(): string | undefined {
   return process.env.INBOUND_WEBHOOK_SECRET?.trim();
 }
 
+export type TelephonyConfig = {
+  ariUrl: string;
+  ariUser: string;
+  ariPassword: string;
+  internalToken: string;
+  voiceWsUrl: string;
+  sipDomain: string;
+};
+
+/** Telefonia própria (Asterisk). Retorna null se o ambiente não tiver as variáveis de ARI e token interno. */
+export function getTelephonyConfig(): TelephonyConfig | null {
+  const ariUrl = process.env.ARI_URL?.trim();
+  const ariUser = process.env.ARI_USER?.trim();
+  const ariPassword = process.env.ARI_PASSWORD?.trim();
+  const internalToken = process.env.TELEPHONY_INTERNAL_TOKEN?.trim();
+  if (!ariUrl || !ariUser || !ariPassword || !internalToken) return null;
+  return {
+    ariUrl: ariUrl.replace(/\/+$/, ""),
+    ariUser,
+    ariPassword,
+    internalToken,
+    voiceWsUrl: process.env.VOICE_WS_URL?.trim() || "wss://api.clienton.com.br/voice-ws",
+    sipDomain: process.env.VOICE_SIP_DOMAIN?.trim() || "api.clienton.com.br",
+  };
+}
+
 /** Em dev, permite webhook sem segredo se INBOUND_WEBHOOK_SKIP_SECRET=true. */
 export function shouldSkipInboundWebhookSecret(): boolean {
   return (

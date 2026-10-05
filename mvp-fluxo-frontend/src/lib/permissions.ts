@@ -8,6 +8,7 @@ export const APP_PERMISSIONS = [
   "inbound",
   "campaigns",
   "appointments",
+  "telephony",
   "monitoring",
   "operations",
   "reports",
@@ -46,6 +47,7 @@ export const ROUTE_PERMISSIONS: Record<string, AppPermission> = {
   "/admin/inbound": "inbound",
   "/admin/campaigns": "campaigns",
   "/admin/appointments": "appointments",
+  "/admin/telephony": "telephony",
   "/admin/monitoring": "monitoring",
   "/admin/operations": "operations",
   "/reports": "reports",
@@ -56,7 +58,7 @@ export const ROUTE_PERMISSIONS: Record<string, AppPermission> = {
 const DEFAULT_ROLE_PERMISSIONS: Record<string, AppPermission[]> = {
   platform_admin: [...APP_PERMISSIONS],
   admin_local: APP_PERMISSIONS.filter((p) => !isPlatformOnlyPermission(p)),
-  supervisor: ["dashboard", "flows", "monitoring", "operations", "reports"],
+  supervisor: ["dashboard", "flows", "monitoring", "operations", "reports", "telephony"],
   admin: APP_PERMISSIONS.filter((p) => !isPlatformOnlyPermission(p)),
   agente: [],
 };
@@ -70,6 +72,7 @@ export const ADMIN_LANDING_PATHS = [
   "/admin/monitoring",
   "/admin/campaigns",
   "/admin/appointments",
+  "/admin/telephony",
   "/admin/ai",
   "/admin/roles",
   "/faq",

@@ -26,6 +26,7 @@ import OperationsAdmin from "./pages/OperationsAdmin";
 import Reports from "./pages/Reports";
 import CampaignsAdmin from "./pages/CampaignsAdmin";
 import AppointmentsAdmin from "./pages/AppointmentsAdmin";
+import TelephonyAdmin from "./pages/TelephonyAdmin";
 import PlatformTenants from "./pages/PlatformTenants";
 import Faq from "./pages/Faq";
 import Sidebar from "./components/Sidebar";
@@ -170,6 +171,7 @@ const RequirePathAccess = () => {
       "/admin/inbound": true,
       "/admin/campaigns": true,
       "/admin/appointments": true,
+      "/admin/telephony": true,
       "/admin/monitoring": true,
       "/admin/operations": true,
       "/admin/platform/tenants": true,
@@ -236,6 +238,7 @@ const router = createBrowserRouter([
                       { path: "admin/inbound", element: <InboundAdmin /> },
                       { path: "admin/campaigns", element: <CampaignsAdmin /> },
                       { path: "admin/appointments", element: <AppointmentsAdmin /> },
+                      { path: "admin/telephony", element: <TelephonyAdmin /> },
                       { path: "admin/monitoring", element: <MonitoringAdmin /> },
                       { path: "admin/operations", element: <OperationsAdmin /> },
                       {

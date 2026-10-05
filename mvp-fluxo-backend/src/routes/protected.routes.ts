@@ -22,6 +22,7 @@ import { authMiddleware } from "../middlewares/auth.middleware";
 import { aiFlowRoutes } from "./ai-flow.routes";
 import campaignRoutes from "./campaign.routes.js";
 import appointmentRoutes from "./appointment.routes.js";
+import telephonyRoutes from "./telephony.routes.js";
 import { listFlowsByTenant, createFlow, updateFlow } from "../flows";
 import { listNodesByFlow, createNode, updateNode, deleteNode } from "../nodes";
 import { executeFlow } from "../flow-executor";
@@ -5655,6 +5656,7 @@ const protectedRoutes: FastifyPluginAsync = async (fastify, opts) => {
   await fastify.register(campaignRoutes);
 
   await fastify.register(appointmentRoutes);
+  await fastify.register(telephonyRoutes);
 };
 
 export default protectedRoutes;

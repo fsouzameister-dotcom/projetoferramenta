@@ -88,6 +88,12 @@ export const SIDEBAR_GROUPS: SidebarNavGroup[] = [
         permission: "operations",
       },
       {
+        label: "Telefonia",
+        path: "/admin/telephony",
+        icon: "📞",
+        permission: "telephony",
+      },
+      {
         label: "Relatórios",
         path: "/reports",
         icon: "📊",
