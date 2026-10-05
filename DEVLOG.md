@@ -2213,6 +2213,17 @@ Use este bloco para retomar **sem depender do histórico do chat**. Substitui a 
 - Conferido depois: `mvp-backend` e Apache ativos, Postgres/Redis (Docker `mvp_db`/`mvp_redis`) no ar, `https://api.clienton.com.br/health` = 200.
 - Reverter: `cp -a /root/backup-voz-20261002-191216/asterisk/* /etc/asterisk/ && systemctl restart asterisk`; `systemctl set-default graphical.target && systemctl enable --now lightdm`.
 
+### Tronco Vono configurado (2026-10-05)
+
+- Contratado plano ilimitado. Domínio `vono2.me` (IP `190.89.248.47`), número **(11) 5444-4625**; usuário/senha em `scripts/.vono-secret.txt` (fora do Git). Vono orientou discar no formato **0 + DDD + número**.
+- `pjsip.conf`: registro `vono` (status **Registered**), endpoint `vono` (alaw/ulaw, `rtp_symmetric`, `rewrite_contact`), identify por IP. Backups: `pjsip.conf.pre-vono`, `extensions.conf.pre-vono`.
+- `extensions_clienton.conf` (incluído no fim de `extensions.conf`):
+  - `clienton-saida`: aceita só celular BR (DDD + 9 + 8 dígitos) e fixo BR (DDD + 2–5 + 7 dígitos); o resto é bloqueado.
+  - `clienton-dial`: limite de **2 chamadas simultâneas** (`GROUP_COUNT`; ajustar ao ampliar canais); disca `PJSIP/0${EXTEN}@vono`.
+  - `from-vono`: chamadas recebidas tocam `hello-world` (provisório).
+- ufw: `5060/udp` liberada **só para 190.89.248.47**.
+- Ruído conhecido no log: erros de `app_voicemail_imap/odbc` já registrados (módulos duplicados, inofensivo; dá para `noload`).
+
 ### Tronco SIP (pesquisa de 2026-10-02)
 
 | Operadora | Preço | Observações |
