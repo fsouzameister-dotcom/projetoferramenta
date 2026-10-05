@@ -2233,6 +2233,24 @@ Use este bloco para retomar **sem depender do histórico do chat**. Substitui a 
   - Validado: registro do `agente-teste` pelo navegador OK ("Registrado").
   - **2026-10-05: ligação navegador → Asterisk → Vono → celular testada pelo usuário: áudio perfeito nos dois sentidos.** Etapa 1 (prova de conceito) concluída.
   - Backups `*.pre-webrtc` em `/etc/asterisk/` e `/root/api-le-ssl.conf.pre-webrtc-*`.
+- **Etapa 2 — softphone na Central do Agente (2026-10-05, commit `1e846fd`, deploy OK):**
+  - **Liberação por usuário**: tabela `telephony_user_settings` gerida em Admin → Telefonia → "Usuários liberados". Permissões são por perfil e o perfil `agente` não é editável, por isso a liberação fica separada. Permissão de perfil `telephony` (admin_local e supervisor por padrão) dá acesso à tela admin (`/admin/telephony`).
+  - **Ramal por atendente via ARI**: `ag_<uuid sem hífens>`, criado/atualizado em `/asterisk/config/dynamic/res_pjsip/*` (sorcery astdb, `sorcery.conf`). A **senha é trocada a cada abertura do telefone** (`POST /api/agent/telephony/session`) e só vive na memória do navegador. Ao bloquear o usuário, o ramal é apagado.
+  - **Toda ligação passa pelo backend**:
+    1. O navegador pede `POST /api/agent/telephony/calls`, que valida a liberação, o número BR, uma ligação ativa por atendente e o intervalo mínimo de 5 s, e cria o `voice_calls` como `requested`.
+    2. O navegador disca com o cabeçalho `X-ClientOn-Call-Id`.
+    3. O dialplan `clienton-agentes` chama `GET /internal/telephony/authorize` (CURL + `X-Telephony-Token`). Só autoriza o pedido do próprio ramal, para o mesmo número, em até 60 s.
+    4. O hangup handler `clienton-fim` chama `/internal/telephony/finish` com DIALSTATUS, ANSWEREDTIME e DIALEDTIME.
+  - `/internal/` fica bloqueado no Apache (`ProxyPass /internal/ !`, 404 de fora). As rotas exigem token. O backend escuta só em 127.0.0.1.
+  - `.env` do backend: `ARI_URL`, `ARI_USER`, `ARI_PASSWORD`, `TELEPHONY_INTERNAL_TOKEN`, `VOICE_WS_URL`, `VOICE_SIP_DOMAIN` (valores só na VPS; o `ari.conf` usa o mesmo usuário `clienton`).
+  - **Tabulação**: reusa as tabulações da Operação (globais + fila padrão), é obrigatória antes da próxima ligação e é salva em `voice_calls`.
+  - **Frontend**:
+    - `components/Softphone.tsx`: botão "Telefone" no cabeçalho da Central do Agente, painel com discador, mudo, teclado (DTMF), desligar, tabulação e últimas ligações.
+    - Botão "Ligar" na conversa aberta.
+    - `pages/TelephonyAdmin.tsx`: histórico com filtros e resumo, liberação de usuários.
+  - Ramal fixo `agente-teste` removido (discava sem autorização do backend). A página `voz-teste.html` saiu no deploy.
+  - Backup antes da etapa: `/root/backup-voz-20261005-221127/`.
+  - Pendências: gravação por campanha e horário permitido (entram com o preview/mailing). O limite de canais está fixo em 2 no dialplan (`clienton-dial`); ajustar ao contratar os 10.
 - Ruído conhecido no log: erros de `app_voicemail_imap/odbc` já registrados (módulos duplicados, inofensivo; dá para `noload`).
 
 ### Tronco SIP (pesquisa de 2026-10-02)
