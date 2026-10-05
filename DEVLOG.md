@@ -2283,6 +2283,11 @@ Use este bloco para retomar **sem depender do histórico do chat**. Substitui a 
     - `components/telephony/VoiceCampaignsTab.tsx`: criar, importar mais, editar, pausar/ativar/encerrar, progresso;
     - histórico com colunas campanha e gravação.
   - Pendências: horário permitido para ligar; limite de canais (GROUP_COUNT 2 → 10 ao contratar); retenção/limpeza de gravações antigas.
+  - **Correção (2026-10-05): ligação ficava "Em andamento" e bloqueava a próxima por 3 h.**
+    - Causa: o hangup handler `clienton-fim` define `CURLOPT(httpheader)` de novo no mesmo canal, e o Asterisk envia `X-Telephony-Token` duas vezes. O Node junta como `"token, token"` e o `/internal/telephony/finish` respondia 403.
+    - Correção: `tokenMatches` (em `telephony-rules.ts`) aceita cópias duplicadas desde que todas confiram.
+    - A ligação presa (`9e681bd4…`) foi fechada manualmente com os dados reais (ANSWER, 77 s).
+  - Observação: `/var/log/asterisk/messages.log*` ocupa ~8 GB (ruído antigo de ataques SIP); revisar logrotate/nível de log.
 - Ruído conhecido no log: erros de `app_voicemail_imap/odbc` já registrados (módulos duplicados, inofensivo; dá para `noload`).
 
 ### Tronco SIP (pesquisa de 2026-10-02)
