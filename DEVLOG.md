@@ -2231,6 +2231,7 @@ Use este bloco para retomar **sem depender do histórico do chat**. Substitui a 
   - Handshake WS = 101.
   - Página de teste provisória: `https://app.clienton.com.br/voz-teste.html`. Ela usa o JsSIP empacotado em `/var/www/app/vendor/jssip.min.js` (esbuild, IIFE). O pacote npm `jssip` não traz mais `dist/`, e o `+esm` do jsdelivr falha no navegador. Página e vendor somem no próximo deploy do frontend, o que é esperado. `jssip@3.13.8` já foi adicionado ao `mvp-fluxo-frontend/package.json` para o softphone.
   - Validado: registro do `agente-teste` pelo navegador OK ("Registrado").
+  - **2026-10-05: ligação navegador → Asterisk → Vono → celular testada pelo usuário: áudio perfeito nos dois sentidos.** Etapa 1 (prova de conceito) concluída.
   - Backups `*.pre-webrtc` em `/etc/asterisk/` e `/root/api-le-ssl.conf.pre-webrtc-*`.
 - Ruído conhecido no log: erros de `app_voicemail_imap/odbc` já registrados (módulos duplicados, inofensivo; dá para `noload`).
 
