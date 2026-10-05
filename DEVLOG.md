@@ -2251,6 +2251,38 @@ Use este bloco para retomar **sem depender do histórico do chat**. Substitui a 
   - Ramal fixo `agente-teste` removido (discava sem autorização do backend). A página `voz-teste.html` saiu no deploy.
   - Backup antes da etapa: `/root/backup-voz-20261005-221127/`.
   - Pendências: gravação por campanha e horário permitido (entram com o preview/mailing). O limite de canais está fixo em 2 no dialplan (`clienton-dial`); ajustar ao contratar os 10.
+  - Usuário testou na tela do operador: funcionou.
+- **Etapa 3 — campanhas de voz (discagem preview por mailing) + gravação (2026-10-05, commit `ce340aa`, deploy OK):**
+  - Decisões do usuário:
+    - mailing de telefonia em tela própria (Admin → Telefonia → "Campanhas de voz"), separado dos disparos WhatsApp;
+    - campanha distribuída pelas **filas** ligadas a ela (atendentes em `queue_user_permissions`; sem fila, todos os liberados veem);
+    - **5 tentativas / 60 min** por padrão, configurável por campanha;
+    - gravação por campanha já nesta etapa.
+  - Tabelas `voice_campaigns`, `voice_campaign_queues` e `voice_campaign_contacts` (migração 013, espelhadas em `ensureTelephonySchema`). Em `voice_calls`: `campaign_id`, `contact_id`, `recorded`.
+  - Importação:
+    - xlsx/xls/csv via base64, com prévia (`POST /admin/telephony/parse-spreadsheet`) e escolha das colunas de telefone e nome;
+    - telefone normalizado (BR fixo/celular), deduplicado por campanha (`UNIQUE(campaign_id, phone)`);
+    - inválidos são reportados com a linha;
+    - todas as colunas ficam em `data` e aparecem no cartão do contato.
+  - **Preview** (`POST /api/agent/telephony/campaigns/:id/next`): em uma transação, aplica a trava por atendente, as mesmas regras da manual (1 ativa, 5 s) e reserva o contato com `FOR UPDATE SKIP LOCKED`.
+    - Ordem: pendentes/retry vencidos, por `next_attempt_at`/criação.
+    - Também recupera reservas presas: pedido `requested` > 60 s (não conta tentativa) ou reserva > 3 h.
+    - Cria o `voice_calls` e devolve o contato; o navegador disca na hora. **Sempre um clique por ligação** (regra da Vono: sem discador automático).
+  - Desfecho do contato (`resolveContactAfterAttempt`, `voice-campaign-rules.ts`):
+    - a tabulação traz `outcome`: "Concluir contato", "Tentar mais tarde" ou "Não ligar mais";
+    - sem tabulação, o fim da ligação aplica o padrão: atendida conclui, as demais voltam como `retry` após o intervalo, até esgotar;
+    - falha antes de chegar ao Asterisk (`abandon`) devolve o contato sem contar tentativa.
+  - **Gravação**:
+    - `authorize` responde `ok:rec` quando a campanha grava e marca `recorded`;
+    - o dialplan `clienton-agentes` faz `MixMonitor(/var/spool/asterisk/monitor/clienton/<callId>.wav,b,...)`: só grava após atender, com os dois lados;
+    - `/usr/local/bin/clienton-rec-post` converte para OGG/Opus 16 kbps (~120 KB/min) com ffmpeg (instalado nesta etapa) e apaga o WAV;
+    - admin ouve em "Histórico de ligações" (`GET /admin/telephony/calls/:id/recording`, via blob autenticado).
+    - Backup do dialplan: `/etc/asterisk/extensions_clienton.conf.pre-rec.*`.
+  - Frontend:
+    - `Softphone.tsx` virou **"Discador"**: badge de status da linha; abas **Preview** ("Selecione a fila" + "Pedir próximo contato" + cartão do contato com tentativa x/y e dados da planilha) e **Manual** (teclado);
+    - `components/telephony/VoiceCampaignsTab.tsx`: criar, importar mais, editar, pausar/ativar/encerrar, progresso;
+    - histórico com colunas campanha e gravação.
+  - Pendências: horário permitido para ligar; limite de canais (GROUP_COUNT 2 → 10 ao contratar); retenção/limpeza de gravações antigas.
 - Ruído conhecido no log: erros de `app_voicemail_imap/odbc` já registrados (módulos duplicados, inofensivo; dá para `noload`).
 
 ### Tronco SIP (pesquisa de 2026-10-02)
