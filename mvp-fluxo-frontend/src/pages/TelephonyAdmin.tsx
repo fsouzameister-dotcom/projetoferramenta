@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import api, { getApiErrorMessage, unwrapApiData } from "../api/client";
 import InfoTooltip from "~components/InfoTooltip";
+import VoiceCampaignsTab from "~components/telephony/VoiceCampaignsTab";
 import {
   adminBtnPrimaryClass,
   adminErrorClass,
@@ -41,7 +42,7 @@ function todayStr(): string {
 }
 
 export default function TelephonyAdmin() {
-  const [activeTab, setActiveTab] = useState<"calls" | "users">("calls");
+  const [activeTab, setActiveTab] = useState<"calls" | "campaigns" | "users">("calls");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -61,6 +62,7 @@ export default function TelephonyAdmin() {
         {(
           [
             { id: "calls", label: "Histórico de ligações" },
+            { id: "campaigns", label: "Campanhas de voz" },
             { id: "users", label: "Usuários liberados" },
           ] as const
         ).map((tab) => (
@@ -88,6 +90,8 @@ export default function TelephonyAdmin() {
 
       {activeTab === "calls" ? (
         <CallsTab setError={setError} />
+      ) : activeTab === "campaigns" ? (
+        <VoiceCampaignsTab setError={setError} setNotice={setNotice} />
       ) : (
         <UsersTab setError={setError} setNotice={setNotice} />
       )}
@@ -101,6 +105,31 @@ function CallsTab(props: { setError: (v: string | null) => void }) {
   const [to, setTo] = useState(todayStr());
   const [calls, setCalls] = useState<VoiceCall[]>([]);
   const [loading, setLoading] = useState(false);
+  const [playing, setPlaying] = useState<{ callId: string; url: string } | null>(null);
+  const [loadingAudioId, setLoadingAudioId] = useState<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (playing) URL.revokeObjectURL(playing.url);
+    };
+  }, [playing]);
+
+  const playRecording = async (callId: string) => {
+    if (playing?.callId === callId) {
+      setPlaying(null);
+      return;
+    }
+    setLoadingAudioId(callId);
+    setError(null);
+    try {
+      const res = await api.get(`/admin/telephony/calls/${callId}/recording`, { responseType: "blob" });
+      setPlaying({ callId, url: URL.createObjectURL(res.data as Blob) });
+    } catch {
+      setError("Gravação indisponível (a ligação pode não ter sido atendida ou ainda está sendo processada).");
+    } finally {
+      setLoadingAudioId(null);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -168,15 +197,17 @@ function CallsTab(props: { setError: (v: string | null) => void }) {
               <th className="px-4 py-3">Data/hora</th>
               <th className="px-4 py-3">Atendente</th>
               <th className="px-4 py-3">Número</th>
+              <th className="px-4 py-3">Campanha</th>
               <th className="px-4 py-3">Resultado</th>
               <th className="px-4 py-3">Duração</th>
               <th className="px-4 py-3">Tabulação</th>
+              <th className="px-4 py-3">Gravação</th>
             </tr>
           </thead>
           <tbody>
             {calls.length === 0 ? (
               <tr className={adminTableRowClass}>
-                <td colSpan={6} className="px-4 py-6 text-center text-gray-400">
+                <td colSpan={8} className="px-4 py-6 text-center text-gray-400">
                   Nenhuma ligação no período.
                 </td>
               </tr>
@@ -185,7 +216,11 @@ function CallsTab(props: { setError: (v: string | null) => void }) {
                 <tr key={c.id} className={adminTableRowClass}>
                   <td className="px-4 py-3 text-gray-300 whitespace-nowrap">{formatCallDateTime(c.createdAt)}</td>
                   <td className="px-4 py-3 text-gray-200">{c.userName ?? "—"}</td>
-                  <td className="px-4 py-3 text-gray-200 whitespace-nowrap">{formatBrPhone(c.phone)}</td>
+                  <td className="px-4 py-3 text-gray-200 whitespace-nowrap">
+                    {formatBrPhone(c.phone)}
+                    {c.contactName ? <div className="text-xs text-gray-400">{c.contactName}</div> : null}
+                  </td>
+                  <td className="px-4 py-3 text-gray-300">{c.campaignName ?? "Manual"}</td>
                   <td className="px-4 py-3">
                     <span className={c.status === "answered" ? "text-emerald-300" : "text-gray-300"}>
                       {voiceCallStatusLabel[c.status] ?? c.status}
@@ -193,6 +228,23 @@ function CallsTab(props: { setError: (v: string | null) => void }) {
                   </td>
                   <td className="px-4 py-3 text-gray-300">{c.status === "answered" ? formatDuration(c.talkSeconds) : "—"}</td>
                   <td className="px-4 py-3 text-gray-300">{c.tabulacaoLabel ?? "—"}</td>
+                  <td className="px-4 py-3">
+                    {c.recorded && c.status === "answered" ? (
+                      <div className="space-y-1">
+                        <button
+                          type="button"
+                          className="text-cyan-300 hover:underline text-xs"
+                          disabled={loadingAudioId === c.id}
+                          onClick={() => void playRecording(c.id)}
+                        >
+                          {loadingAudioId === c.id ? "Carregando…" : playing?.callId === c.id ? "Fechar" : "Ouvir"}
+                        </button>
+                        {playing?.callId === c.id ? <audio src={playing.url} controls autoPlay className="h-8 w-56" /> : null}
+                      </div>
+                    ) : (
+                      <span className="text-gray-500">—</span>
+                    )}
+                  </td>
                 </tr>
               ))
             )}

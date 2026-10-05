@@ -1,5 +1,8 @@
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { timingSafeEqual } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
+import path from "node:path";
 import { getTelephonyConfig } from "../config";
 import { ApiError, ERROR_CODES, sendSuccess } from "../http";
 import {
@@ -7,6 +10,7 @@ import {
   authorizeCallFromAsterisk,
   createTelephonySession,
   finishCallFromAsterisk,
+  getRecordedCall,
   isTelephonyEnabledForUser,
   listAgentRecentCalls,
   listTabulacoesForCall,
@@ -16,10 +20,43 @@ import {
   setTelephonyUserEnabled,
   tabulateCall,
 } from "../telephony";
+import {
+  addVoiceCampaignContacts,
+  createVoiceCampaign,
+  listAgentVoiceCampaigns,
+  listVoiceCampaigns,
+  listVoiceQueues,
+  previewVoiceSpreadsheet,
+  requestNextCampaignContact,
+  updateVoiceCampaign,
+} from "../voice-campaigns";
+import type { VoiceContactOutcome } from "../voice-campaign-rules";
+
+const VOICE_CAMPAIGN_VALIDATION: Record<string, string> = {
+  VOICE_CAMPAIGN_FILE_REQUIRED: "Envie a planilha de contatos",
+  VOICE_CAMPAIGN_FILE_INVALID: "Arquivo inválido. Use .xlsx, .xls ou .csv",
+  VOICE_CAMPAIGN_FILE_EMPTY: "A planilha está vazia ou sem cabeçalho",
+  VOICE_CAMPAIGN_FILE_TOO_LARGE: "A planilha tem mais de 50.000 linhas. Divida em arquivos menores",
+  VOICE_CAMPAIGN_PHONE_COLUMN: "Selecione a coluna de telefone",
+  VOICE_CAMPAIGN_NAME_REQUIRED: "Informe o nome da campanha",
+};
+
+function recordingsDir(): string {
+  return process.env.VOICE_RECORDINGS_DIR?.trim() || "/var/spool/asterisk/monitor/clienton";
+}
 
 function mapTelephonyError(err: unknown): never {
   const code = err instanceof Error ? err.message : "";
   const t = ERROR_CODES.telephony;
+  if (VOICE_CAMPAIGN_VALIDATION[code]) {
+    throw new ApiError(400, t.VOICE_CAMPAIGN_INVALID, VOICE_CAMPAIGN_VALIDATION[code]);
+  }
+  if (code === "VOICE_CAMPAIGN_NOT_FOUND") {
+    throw new ApiError(404, t.VOICE_CAMPAIGN_NOT_FOUND, "Campanha não encontrada ou não disponível para você");
+  }
+  if (code === "VOICE_CAMPAIGN_NO_CONTACTS") {
+    throw new ApiError(404, t.VOICE_CAMPAIGN_NO_CONTACTS, "Nenhum contato disponível agora nesta campanha");
+  }
   if (code === "TELEPHONY_NOT_CONFIGURED") {
     throw new ApiError(503, t.TELEPHONY_NOT_CONFIGURED, "Telefonia não configurada no servidor");
   }
@@ -88,6 +125,25 @@ const telephonyRoutes: FastifyPluginAsync = async (fastify) => {
     }
   });
 
+  fastify.get("/agent/telephony/campaigns", async (request, reply) => {
+    const items = await listAgentVoiceCampaigns(request.tenant.id, currentUserId(request));
+    return sendSuccess(request, reply, items);
+  });
+
+  fastify.post("/agent/telephony/campaigns/:campaignId/next", async (request, reply) => {
+    const { campaignId } = request.params as { campaignId: string };
+    try {
+      const next = await requestNextCampaignContact({
+        tenantId: request.tenant.id,
+        userId: currentUserId(request),
+        campaignId,
+      });
+      return sendSuccess(request, reply, next, 201);
+    } catch (err) {
+      mapTelephonyError(err);
+    }
+  });
+
   fastify.post("/agent/telephony/calls/:callId/abandon", async (request, reply) => {
     const { callId } = request.params as { callId: string };
     await abandonRequestedCall({ tenantId: request.tenant.id, userId: currentUserId(request), callId });
@@ -110,16 +166,21 @@ const telephonyRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.post("/agent/telephony/calls/:callId/tabulate", async (request, reply) => {
     const { callId } = request.params as { callId: string };
-    const body = (request.body ?? {}) as { tabulacaoId?: string };
+    const body = (request.body ?? {}) as { tabulacaoId?: string; outcome?: string };
     if (!body.tabulacaoId) {
       throw new ApiError(400, ERROR_CODES.common.VALIDATION_ERROR, "Informe a tabulação");
     }
+    const outcome =
+      body.outcome === "done" || body.outcome === "retry" || body.outcome === "do_not_call"
+        ? (body.outcome as VoiceContactOutcome)
+        : null;
     try {
       const updated = await tabulateCall({
         tenantId: request.tenant.id,
         userId: currentUserId(request),
         callId,
         tabulacaoId: body.tabulacaoId,
+        outcome,
       });
       return sendSuccess(request, reply, updated);
     } catch (err) {
@@ -149,9 +210,115 @@ const telephonyRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.get("/admin/telephony/calls", async (request, reply) => {
-    const q = request.query as { from?: string; to?: string; userId?: string };
-    const items = await listTenantCalls({ tenantId: request.tenant.id, from: q.from, to: q.to, userId: q.userId });
+    const q = request.query as { from?: string; to?: string; userId?: string; campaignId?: string };
+    const items = await listTenantCalls({
+      tenantId: request.tenant.id,
+      from: q.from,
+      to: q.to,
+      userId: q.userId,
+      campaignId: q.campaignId,
+    });
     return sendSuccess(request, reply, items);
+  });
+
+  fastify.get("/admin/telephony/calls/:callId/recording", async (request, reply) => {
+    const { callId } = request.params as { callId: string };
+    const call = await getRecordedCall(request.tenant.id, callId);
+    if (!call?.recorded) {
+      throw new ApiError(404, ERROR_CODES.telephony.TELEPHONY_RECORDING_NOT_FOUND, "Gravação não encontrada");
+    }
+    for (const [ext, mime] of [
+      ["ogg", "audio/ogg"],
+      ["wav", "audio/wav"],
+    ] as const) {
+      const file = path.join(recordingsDir(), `${call.id}.${ext}`);
+      const info = await stat(file).catch(() => null);
+      if (info?.isFile() && info.size > 0) {
+        reply.header("Content-Length", info.size);
+        reply.header("Cache-Control", "private, max-age=300");
+        reply.header("Content-Disposition", `inline; filename="ligacao-${call.id}.${ext}"`);
+        return reply.type(mime).send(createReadStream(file));
+      }
+    }
+    throw new ApiError(404, ERROR_CODES.telephony.TELEPHONY_RECORDING_NOT_FOUND, "Gravação não encontrada");
+  });
+
+  // --- Campanhas de voz (mailing de telefonia) ---------------------------
+  fastify.get("/admin/telephony/queues", async (request, reply) => {
+    return sendSuccess(request, reply, await listVoiceQueues(request.tenant.id));
+  });
+
+  fastify.post("/admin/telephony/parse-spreadsheet", async (request, reply) => {
+    const body = (request.body ?? {}) as { filename?: string; contentBase64?: string };
+    try {
+      return sendSuccess(request, reply, previewVoiceSpreadsheet(body));
+    } catch (err) {
+      mapTelephonyError(err);
+    }
+  });
+
+  fastify.get("/admin/telephony/campaigns", async (request, reply) => {
+    return sendSuccess(request, reply, await listVoiceCampaigns(request.tenant.id));
+  });
+
+  fastify.post("/admin/telephony/campaigns", async (request, reply) => {
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    try {
+      const created = await createVoiceCampaign({
+        tenantId: request.tenant.id,
+        userId: currentUserId(request),
+        name: typeof body.name === "string" ? body.name : undefined,
+        queueIds: body.queueIds,
+        maxAttempts: body.maxAttempts,
+        retryIntervalMinutes: body.retryIntervalMinutes,
+        recordCalls: body.recordCalls,
+        filename: typeof body.filename === "string" ? body.filename : undefined,
+        contentBase64: typeof body.contentBase64 === "string" ? body.contentBase64 : undefined,
+        phoneColumn: typeof body.phoneColumn === "string" ? body.phoneColumn : undefined,
+        nameColumn: typeof body.nameColumn === "string" ? body.nameColumn : null,
+      });
+      return sendSuccess(request, reply, created, 201);
+    } catch (err) {
+      mapTelephonyError(err);
+    }
+  });
+
+  fastify.post("/admin/telephony/campaigns/:campaignId/contacts", async (request, reply) => {
+    const { campaignId } = request.params as { campaignId: string };
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    try {
+      const updated = await addVoiceCampaignContacts({
+        tenantId: request.tenant.id,
+        campaignId,
+        filename: typeof body.filename === "string" ? body.filename : undefined,
+        contentBase64: typeof body.contentBase64 === "string" ? body.contentBase64 : undefined,
+        phoneColumn: typeof body.phoneColumn === "string" ? body.phoneColumn : undefined,
+        nameColumn: typeof body.nameColumn === "string" ? body.nameColumn : null,
+      });
+      return sendSuccess(request, reply, updated);
+    } catch (err) {
+      mapTelephonyError(err);
+    }
+  });
+
+  fastify.put("/admin/telephony/campaigns/:campaignId", async (request, reply) => {
+    const { campaignId } = request.params as { campaignId: string };
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    try {
+      const updated = await updateVoiceCampaign({
+        tenantId: request.tenant.id,
+        campaignId,
+        name: typeof body.name === "string" ? body.name : undefined,
+        status: typeof body.status === "string" ? body.status : undefined,
+        queueIds: body.queueIds,
+        maxAttempts: body.maxAttempts,
+        retryIntervalMinutes: body.retryIntervalMinutes,
+        recordCalls: body.recordCalls,
+      });
+      return sendSuccess(request, reply, updated);
+    } catch (err) {
+      mapTelephonyError(err);
+    }
   });
 };
 
@@ -182,7 +349,8 @@ export const telephonyInternalRoutes: FastifyPluginAsync = async (fastify) => {
       endpoint: String(q.endpoint ?? ""),
       number: String(q.number ?? ""),
     });
-    return reply.type("text/plain").send(result.ok ? "ok" : `deny:${result.reason}`);
+    const text = result.ok ? (result.record ? "ok:rec" : "ok") : `deny:${result.reason}`;
+    return reply.type("text/plain").send(text);
   });
 
   fastify.get("/internal/telephony/finish", async (request, reply) => {
