@@ -2222,6 +2222,7 @@ Use este bloco para retomar **sem depender do histórico do chat**. Substitui a 
   - `clienton-dial`: limite de **2 chamadas simultâneas** (`GROUP_COUNT`; ajustar ao ampliar canais); disca `PJSIP/0${EXTEN}@vono`.
   - `from-vono`: chamadas recebidas tocam `hello-world` (provisório).
 - ufw: `5060/udp` liberada **só para 190.89.248.47**.
+- **Testes 2026-10-05:** chamada recebida do celular do usuário atendida (caller ID chega como `55` + DDD + número); chamada feita do servidor para celular (via `clienton-saida`, discado `011992007226`) tocou ~8 s, atendida, 38 s de áudio, encerrada normalmente.
 - Ruído conhecido no log: erros de `app_voicemail_imap/odbc` já registrados (módulos duplicados, inofensivo; dá para `noload`).
 
 ### Tronco SIP (pesquisa de 2026-10-02)
