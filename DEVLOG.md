@@ -2225,6 +2225,17 @@ Use este bloco para retomar **sem depender do histórico do chat**. Substitui a 
 - **Antes de contratar:** confirmar por escrito que o plano "ilimitado" pode ser usado para **pesquisa ativa com 10 atendentes discando o dia todo (modo preview)** — planos ilimitados costumam ter política de uso justo e às vezes excluem discador/call center. Se não puder, pedir plano por minuto.
 - Para a prova de conceito: começar com **2 canais** e expandir para 10 depois.
 
+### Respostas da Vono (2026-10-05)
+
+| Pergunta | Resposta da Vono | Impacto no projeto |
+|----------|------------------|--------------------|
+| Pesquisa ativa com 10 atendentes no ilimitado? | Pode, **desde que não use discador eletrônico**: uma pessoa precisa iniciar cada ligação. Se identificarem **rajadas de discagem, o plano é bloqueado na hora**. | Manual: ok. Preview: o atendente clica em "Ligar" para cada contato, 1 chamada por vez. Confirmar por escrito que esse formato é aceito. **Progressivo/preditivo não pode** neste plano (exigirá outro tronco, por minuto). Implementar trava anti-rajada: nada é discado sem clique do atendente, 1 chamada ativa por atendente, intervalo mínimo entre chamadas e limite global de chamadas por minuto. |
+| Limites | 1 canal = 1 ligação simultânea. 10 simultâneas = 10 canais (R$ 40 cada). **Limite de 4.500 min/mês por canal.** | 10 canais = 45.000 min/mês. 4.500 min ≈ 75 h de conversa por canal/mês: pode apertar se o atendente falar mais de ~3,4 h/dia (22 dias). Medir minutos por mês no sistema e alertar perto do limite. Perguntar: o limite é somado entre os canais? O que acontece ao passar (bloqueio ou cobrança por minuto)? |
+| Número exibido | Contrata-se número no DDD desejado; é ele que aparece para o cliente. | Escolher o DDD do público pesquisado (melhora a taxa de atendimento). Definir com o cliente. |
+| Autenticação | SIP com usuário e senha; uma conta com 10 simultâneas. | O Asterisk registra **uma vez** na Vono; atendentes entram no Asterisk pelo navegador e nunca recebem a senha da Vono. Ainda precisamos do domínio/IPs do servidor SIP da Vono para o firewall. |
+
+Pendências com a Vono: confirmar por escrito o preview com clique do atendente; limite de minutos somado ou por canal e o que acontece ao passar; limite de "rajada" (quantas chamadas/min por canal); domínio e IPs de sinalização e áudio.
+
 ### Plano
 
 1. **Prova de conceito**
