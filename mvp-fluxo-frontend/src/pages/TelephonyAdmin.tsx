@@ -260,13 +260,19 @@ function UsersTab(props: { setError: (v: string | null) => void; setNotice: (v: 
   const [users, setUsers] = useState<TelephonyUser[]>([]);
   const [configured, setConfigured] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [recordManual, setRecordManual] = useState<boolean | null>(null);
+  const [savingSettings, setSavingSettings] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const res = await api.get("/admin/telephony/users");
+      const [res, settings] = await Promise.all([
+        api.get("/admin/telephony/users"),
+        api.get("/admin/telephony/settings"),
+      ]);
       const data = unwrapApiData<{ configured: boolean; users: TelephonyUser[] }>(res.data);
       setConfigured(data.configured);
       setUsers(data.users);
+      setRecordManual(unwrapApiData<{ recordManualCalls: boolean }>(settings.data).recordManualCalls);
     } catch (e) {
       setError(getApiErrorMessage(e, "Erro ao carregar usuários"));
     }
@@ -275,6 +281,23 @@ function UsersTab(props: { setError: (v: string | null) => void; setNotice: (v: 
   useEffect(() => {
     void load();
   }, [load]);
+
+  const toggleRecordManual = async () => {
+    if (recordManual === null) return;
+    setSavingSettings(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await api.put("/admin/telephony/settings", { recordManualCalls: !recordManual });
+      const updated = unwrapApiData<{ recordManualCalls: boolean }>(res.data).recordManualCalls;
+      setRecordManual(updated);
+      setNotice(updated ? "Ligações manuais passam a ser gravadas." : "Ligações manuais não serão mais gravadas.");
+    } catch (e) {
+      setError(getApiErrorMessage(e, "Erro ao salvar"));
+    } finally {
+      setSavingSettings(false);
+    }
+  };
 
   const toggle = async (user: TelephonyUser) => {
     setSavingId(user.userId);
@@ -301,8 +324,34 @@ function UsersTab(props: { setError: (v: string | null) => void; setNotice: (v: 
       {!configured ? (
         <div className={adminErrorClass}>Telefonia ainda não configurada no servidor. As liberações ficam salvas, mas ninguém consegue ligar.</div>
       ) : null}
+      <div className="rounded-xl border border-zinc-600/60 bg-zinc-800/40 p-4 flex items-center justify-between gap-4">
+        <div>
+          <div className="text-sm font-medium text-gray-100">Gravar ligações manuais</div>
+          <div className="text-xs text-gray-400 mt-0.5">
+            Vale para as ligações da aba Manual do Discador. Ligações de campanha seguem a opção de cada campanha. Gravações
+            ficam no Histórico de ligações (botão “Ouvir”).
+          </div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={Boolean(recordManual)}
+          aria-label="Gravar ligações manuais"
+          disabled={recordManual === null || savingSettings}
+          onClick={() => void toggleRecordManual()}
+          className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
+            recordManual ? "bg-emerald-500" : "bg-zinc-600"
+          }`}
+        >
+          <span
+            className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+              recordManual ? "translate-x-5" : "translate-x-1"
+            }`}
+          />
+        </button>
+      </div>
       <p className="text-sm text-gray-400">
-        O telefone aparece na Central do Agente somente para os usuários liberados aqui.
+        O discador aparece na Central do Agente somente para os usuários liberados aqui.
       </p>
       <div className={adminPanelClass}>
         <table className="w-full text-sm">

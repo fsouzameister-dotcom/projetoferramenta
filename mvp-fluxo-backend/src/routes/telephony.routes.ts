@@ -10,6 +10,8 @@ import {
   createTelephonySession,
   finishCallFromAsterisk,
   getRecordedCall,
+  getTelephonyTenantSettings,
+  updateTelephonyTenantSettings,
   isTelephonyEnabledForUser,
   listAgentRecentCalls,
   listTabulacoesForCall,
@@ -192,6 +194,21 @@ const telephonyRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get("/admin/telephony/users", async (request, reply) => {
     const items = await listTelephonyUsers(request.tenant.id);
     return sendSuccess(request, reply, { configured: getTelephonyConfig() !== null, users: items });
+  });
+
+  fastify.get("/admin/telephony/settings", async (request, reply) => {
+    return sendSuccess(request, reply, await getTelephonyTenantSettings(request.tenant.id));
+  });
+
+  fastify.put("/admin/telephony/settings", async (request, reply) => {
+    const body = (request.body ?? {}) as { recordManualCalls?: boolean };
+    if (typeof body.recordManualCalls !== "boolean") {
+      throw new ApiError(400, ERROR_CODES.common.VALIDATION_ERROR, "Informe recordManualCalls");
+    }
+    const updated = await updateTelephonyTenantSettings(request.tenant.id, {
+      recordManualCalls: body.recordManualCalls,
+    });
+    return sendSuccess(request, reply, updated);
   });
 
   fastify.put("/admin/telephony/users/:userId", async (request, reply) => {

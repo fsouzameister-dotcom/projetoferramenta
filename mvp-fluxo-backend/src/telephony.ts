@@ -129,6 +129,13 @@ export async function ensureTelephonySchema(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_voice_campaign_contacts_pick
       ON voice_campaign_contacts (campaign_id, status, next_attempt_at, created_at)
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS telephony_tenant_settings (
+      tenant_id uuid PRIMARY KEY,
+      record_manual_calls boolean NOT NULL DEFAULT true,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )
+  `);
   await pool.query(`ALTER TABLE voice_calls ADD COLUMN IF NOT EXISTS campaign_id uuid`);
   await pool.query(`ALTER TABLE voice_calls ADD COLUMN IF NOT EXISTS contact_id uuid`);
   await pool.query(`ALTER TABLE voice_calls ADD COLUMN IF NOT EXISTS recorded boolean NOT NULL DEFAULT false`);
@@ -230,6 +237,33 @@ export async function assertTelephonyEnabled(tenantId: string, userId: string): 
   if (!(await isTelephonyEnabledForUser(tenantId, userId))) {
     throw new Error("TELEPHONY_NOT_ENABLED");
   }
+}
+
+// --- Configurações do tenant ----------------------------------------------
+
+export type TelephonyTenantSettings = { recordManualCalls: boolean };
+
+export async function getTelephonyTenantSettings(tenantId: string): Promise<TelephonyTenantSettings> {
+  await ensureTelephonySchema();
+  const result = await pool.query(
+    `SELECT record_manual_calls FROM telephony_tenant_settings WHERE tenant_id = $1::uuid`,
+    [tenantId]
+  );
+  return { recordManualCalls: result.rows[0] ? Boolean(result.rows[0].record_manual_calls) : true };
+}
+
+export async function updateTelephonyTenantSettings(
+  tenantId: string,
+  input: { recordManualCalls: boolean }
+): Promise<TelephonyTenantSettings> {
+  await ensureTelephonySchema();
+  await pool.query(
+    `INSERT INTO telephony_tenant_settings (tenant_id, record_manual_calls)
+     VALUES ($1::uuid, $2)
+     ON CONFLICT (tenant_id) DO UPDATE SET record_manual_calls = EXCLUDED.record_manual_calls, updated_at = now()`,
+    [tenantId, input.recordManualCalls]
+  );
+  return getTelephonyTenantSettings(tenantId);
 }
 
 // --- Sessão SIP (credenciais efêmeras) -----------------------------------
@@ -399,7 +433,11 @@ export async function authorizeCallFromAsterisk(input: {
   const result = await pool.query(
     `UPDATE voice_calls c
      SET status = 'authorized', authorized_at = now(),
-         recorded = COALESCE((SELECT record_calls FROM voice_campaigns WHERE id = c.campaign_id), false)
+         recorded = CASE
+           WHEN c.campaign_id IS NOT NULL
+             THEN COALESCE((SELECT record_calls FROM voice_campaigns WHERE id = c.campaign_id), false)
+           ELSE COALESCE((SELECT record_manual_calls FROM telephony_tenant_settings WHERE tenant_id = c.tenant_id), true)
+         END
      FROM telephony_user_settings s
      WHERE c.id = $1::uuid
        AND c.status = 'requested'

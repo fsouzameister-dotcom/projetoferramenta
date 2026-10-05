@@ -2287,6 +2287,10 @@ Use este bloco para retomar **sem depender do histórico do chat**. Substitui a 
     - Causa: o hangup handler `clienton-fim` define `CURLOPT(httpheader)` de novo no mesmo canal, e o Asterisk envia `X-Telephony-Token` duas vezes. O Node junta como `"token, token"` e o `/internal/telephony/finish` respondia 403.
     - Correção: `tokenMatches` (em `telephony-rules.ts`) aceita cópias duplicadas desde que todas confiram.
     - A ligação presa (`9e681bd4…`) foi fechada manualmente com os dados reais (ANSWER, 77 s).
+  - **Gravação de ligações manuais (2026-10-05):**
+    - nova tabela `telephony_tenant_settings.record_manual_calls` (migração 014), **ligada por padrão**;
+    - o `authorize` usa essa opção quando a ligação não tem campanha;
+    - o switch fica em Admin → Telefonia → "Usuários liberados" (`GET/PUT /admin/telephony/settings`).
   - Observação: `/var/log/asterisk/messages.log*` ocupa ~8 GB (ruído antigo de ataques SIP); revisar logrotate/nível de log.
 - Ruído conhecido no log: erros de `app_voicemail_imap/odbc` já registrados (módulos duplicados, inofensivo; dá para `noload`).
 
