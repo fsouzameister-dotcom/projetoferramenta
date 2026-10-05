@@ -2291,6 +2291,10 @@ Use este bloco para retomar **sem depender do histórico do chat**. Substitui a 
     - nova tabela `telephony_tenant_settings.record_manual_calls` (migração 014), **ligada por padrão**;
     - o `authorize` usa essa opção quando a ligação não tem campanha;
     - o switch fica em Admin → Telefonia → "Usuários liberados" (`GET/PUT /admin/telephony/settings`).
+  - **Próximos passos (definidos em 2026-10-05):**
+    - o usuário testa a gravação (manual e campanha) em 2026-10-06;
+    - aviso de gravação: por enquanto os atendentes avisam (sem áudio automático);
+    - depois: **transcrição das gravações sem API paga**, com modelo local open source (whisper.cpp/faster-whisper ou Vosk). Avaliar a capacidade da VPS (1 vCPU / 3,8 GB): provavelmente fila em lote fora do horário, ou sob demanda, ou um servidor de transcrição separado.
   - Observação: `/var/log/asterisk/messages.log*` ocupa ~8 GB (ruído antigo de ataques SIP); revisar logrotate/nível de log.
 - Ruído conhecido no log: erros de `app_voicemail_imap/odbc` já registrados (módulos duplicados, inofensivo; dá para `noload`).
 
