@@ -2229,7 +2229,8 @@ Use este bloco para retomar **sem depender do histórico do chat**. Substitui a 
   - `pjsip.conf`: `transport-ws` + ramal de teste `agente-teste` (`webrtc=yes`, `dtls_auto_generate_cert`, opus/alaw/ulaw, context `clienton-saida`). Senha em `scripts/.voice-test-secret` (fora do Git).
   - `rtp.conf`: `icesupport=yes`, `ice_blacklist=172.16.0.0/12` (não anunciar IPs do Docker).
   - Handshake WS = 101.
-  - Página de teste provisória: `https://app.clienton.com.br/voz-teste.html` (JsSIP via CDN; some no próximo deploy do frontend, o que é esperado).
+  - Página de teste provisória: `https://app.clienton.com.br/voz-teste.html`. Ela usa o JsSIP empacotado em `/var/www/app/vendor/jssip.min.js` (esbuild, IIFE). O pacote npm `jssip` não traz mais `dist/`, e o `+esm` do jsdelivr falha no navegador. Página e vendor somem no próximo deploy do frontend, o que é esperado. `jssip@3.13.8` já foi adicionado ao `mvp-fluxo-frontend/package.json` para o softphone.
+  - Validado: registro do `agente-teste` pelo navegador OK ("Registrado").
   - Backups `*.pre-webrtc` em `/etc/asterisk/` e `/root/api-le-ssl.conf.pre-webrtc-*`.
 - Ruído conhecido no log: erros de `app_voicemail_imap/odbc` já registrados (módulos duplicados, inofensivo; dá para `noload`).
 
