@@ -25,6 +25,15 @@ export type DialRequest = { phone: string; nonce: number };
 const KEYPAD = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"];
 const CAMPAIGN_STORAGE_KEY = "clienton.dialer.campaign";
 
+type EarlyHangupResult = "unavailable" | "invalid_number" | "no_answer" | "cancelled";
+
+const EARLY_HANGUP_OPTIONS: { value: EarlyHangupResult; label: string; hint: string }[] = [
+  { value: "unavailable", label: "Desligado / fora de área", hint: "Tenta de novo no intervalo da campanha" },
+  { value: "invalid_number", label: "Número inexistente", hint: "Retira o contato da fila" },
+  { value: "no_answer", label: "Não atendeu", hint: "Tenta de novo no intervalo da campanha" },
+  { value: "cancelled", label: "Desisti da ligação", hint: "Ex.: discou errado ou desligou sem querer" },
+];
+
 /** Valor para <input type="datetime-local"> (hora local), daqui a `minutes` minutos, arredondado. */
 function localDateTimeValue(minutes: number): string {
   const d = new Date(Date.now() + minutes * 60_000);
@@ -66,6 +75,9 @@ export default function Softphone(props: {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const answeredAtRef = useRef<number | null>(null);
   const voicemailRef = useRef(false);
+  const agentHungUpRef = useRef(false);
+  const [earlyHangup, setEarlyHangup] = useState<{ callId: string; hasContact: boolean } | null>(null);
+  const [savingEarly, setSavingEarly] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -217,8 +229,12 @@ export default function Softphone(props: {
       setError("Tabule a ligação anterior antes de fazer outra.");
       return false;
     }
+    if (earlyHangup) {
+      setError("Informe por que a ligação anterior foi encerrada antes de fazer outra.");
+      return false;
+    }
     return true;
-  }, [line, pendingCallId]);
+  }, [earlyHangup, line, pendingCallId]);
 
   /** Disca um pedido já registrado no backend (callId vai no cabeçalho para o dialplan autorizar). */
   const dial = useCallback(
@@ -229,9 +245,11 @@ export default function Softphone(props: {
       const finish = (failedCause?: string) => {
         const answered = answeredAtRef.current !== null;
         const voicemail = voicemailRef.current;
+        const agentHungUp = agentHungUpRef.current;
         sessionRef.current = null;
         answeredAtRef.current = null;
         voicemailRef.current = false;
+        agentHungUpRef.current = false;
         setCallState("idle");
         setMuted(false);
         setShowKeypad(false);
@@ -247,6 +265,10 @@ export default function Softphone(props: {
             .catch(() => void openTabulation(callId));
         } else if (answered) {
           void openTabulation(callId);
+        } else if (reachedServer && agentHungUp) {
+          // A operadora costuma tocar um aviso ("desligado", "não existe") sem sinalizar; o operador informa o motivo.
+          setInfo(null);
+          setEarlyHangup({ callId, hasContact });
         } else if (reachedServer) {
           void showUnansweredResult(callId, hasContact);
           if (hasContact) void loadCampaigns();
@@ -345,7 +367,37 @@ export default function Softphone(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dialRequest?.nonce]);
 
-  const hangup = () => sessionRef.current?.terminate();
+  const hangup = () => {
+    if (answeredAtRef.current === null) agentHungUpRef.current = true;
+    sessionRef.current?.terminate();
+  };
+
+  const saveEarlyHangup = async (result: EarlyHangupResult) => {
+    if (!earlyHangup) return;
+    setSavingEarly(true);
+    setError(null);
+    try {
+      await api.post(`/agent/telephony/calls/${earlyHangup.callId}/result`, { result });
+      const label = EARLY_HANGUP_OPTIONS.find((o) => o.value === result)?.label ?? "";
+      if (earlyHangup.hasContact) {
+        setContact(null);
+        setInfo(
+          result === "invalid_number"
+            ? `${label}: contato retirado da fila.`
+            : `${label}: contato reagendado automaticamente.`
+        );
+        void loadCampaigns();
+      } else {
+        setInfo(`${label} registrado.`);
+      }
+      setEarlyHangup(null);
+      void loadRecent();
+    } catch (e) {
+      setError(getApiErrorMessage(e, "Erro ao registrar o motivo"));
+    } finally {
+      setSavingEarly(false);
+    }
+  };
 
   const hangupVoicemail = () => {
     voicemailRef.current = true;
@@ -664,7 +716,7 @@ export default function Softphone(props: {
             <button
               key={t}
               type="button"
-              disabled={busy || Boolean(pendingCallId)}
+              disabled={busy || Boolean(pendingCallId) || Boolean(earlyHangup)}
               onClick={() => {
                 setTab(t);
                 setError(null);
@@ -690,7 +742,25 @@ export default function Softphone(props: {
 
         {contactCard}
 
-        {pendingCallId ? (
+        {earlyHangup ? (
+          <div>
+            <p className="text-xs text-gray-300 mb-2">Você desligou antes de atenderem. O que aconteceu?</p>
+            <div className="space-y-1.5">
+              {EARLY_HANGUP_OPTIONS.map((o) => (
+                <button
+                  key={o.value}
+                  type="button"
+                  disabled={savingEarly}
+                  onClick={() => void saveEarlyHangup(o.value)}
+                  className="w-full text-left p-2 rounded-lg border border-[#314263] bg-[#0f1a33] hover:border-cyan-500/50 disabled:opacity-50"
+                >
+                  <span className="text-xs font-medium text-white block">{o.label}</span>
+                  <span className="text-[11px] text-gray-400 block">{o.hint}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : pendingCallId ? (
           tabulationForm
         ) : busy ? (
           callControls
@@ -769,7 +839,7 @@ export default function Softphone(props: {
           </>
         )}
 
-        {recent.length > 0 && !busy && !pendingCallId ? (
+        {recent.length > 0 && !busy && !pendingCallId && !earlyHangup ? (
           <div className="mt-4 border-t border-[#33466f] pt-3">
             <p className="text-[11px] uppercase tracking-wide text-gray-400 mb-1.5">Últimas ligações</p>
             <ul className="space-y-1 max-h-40 overflow-y-auto">

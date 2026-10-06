@@ -2312,6 +2312,10 @@ Use este bloco para retomar **sem depender do histórico do chat**. Substitui a 
   - **Retorno agendado**: data/hora escolhida pelo operador; o contato volta **para o mesmo operador**, e qualquer um da fila pode puxar depois de 15 min de tolerância. Não esgota pelo limite de tentativas.
   - **Exportação Excel** das ligações (`GET /admin/telephony/calls/export`, xlsx com as colunas da planilha do contato). O histórico ganhou filtros por campanha (inclui "somente manuais") e por resultado, além da marca de sucesso e do retorno.
   - Esquema movido para `telephony-schema.ts`.
+  - **Teste real (06/10 09:50):** celular desligado → a Vono **não sinaliza** "desligado"; toca o aviso em early media e o operador desliga (registro: CANCEL / causa 127).
+    - Por isso, quando o operador desliga antes de atenderem, o Discador pede o motivo (obrigatório): desligado/fora de área, número inexistente, não atendeu ou desisti da ligação.
+    - Rota `POST /agent/telephony/calls/:id/result`. O resultado manual fica protegido contra sobrescrita pelo `finish` (`tabulated_at`).
+    - Falta testar ocupado e "tocou até o fim".
   - Relatórios além da exportação (por campanha, operador, horário) ficam para depois.
   - Observação: `/var/log/asterisk/messages.log*` ocupa ~8 GB (ruído antigo de ataques SIP); revisar logrotate/nível de log.
 - Ruído conhecido no log: erros de `app_voicemail_imap/odbc` já registrados (módulos duplicados, inofensivo; dá para `noload`).

@@ -404,7 +404,7 @@ export async function finishCallFromAsterisk(input: {
     `UPDATE voice_calls
      SET status = $2, dial_status = NULLIF($3, ''), hangup_cause = NULLIF($4, ''),
          ring_seconds = $5, talk_seconds = $6, ended_at = now(),
-         result = CASE WHEN result = 'voicemail' THEN result ELSE $7 END
+         result = CASE WHEN tabulated_at IS NOT NULL AND result IS NOT NULL THEN result ELSE $7 END
      WHERE id = $1::uuid AND ended_at IS NULL
      RETURNING contact_id, tabulated_at, result`,
     [input.callId, status, input.dialStatus ?? "", input.hangupCause ?? "", ringSeconds, talkSeconds, result]
@@ -443,6 +443,34 @@ export async function markCallVoicemail(input: {
   }
   const result = await pool.query(`${CALL_SELECT} WHERE c.id = $1::uuid`, [input.callId]);
   return mapCall(result.rows[0]);
+}
+
+/** Motivos que o operador informa ao desligar antes de atender (a operadora tocou um aviso em vez de sinalizar). */
+export const AGENT_MARKABLE_RESULTS: VoiceCallResult[] = ["unavailable", "invalid_number", "no_answer", "cancelled"];
+
+export async function markCallResultByAgent(input: {
+  tenantId: string;
+  userId: string;
+  callId: string;
+  result: string;
+}): Promise<VoiceCallRecord> {
+  await ensureTelephonySchema();
+  if (!AGENT_MARKABLE_RESULTS.includes(input.result as VoiceCallResult)) throw new Error("TELEPHONY_RESULT_INVALID");
+  if (!/^[0-9a-f-]{36}$/i.test(input.callId)) throw new Error("TELEPHONY_CALL_NOT_FOUND");
+  const result = input.result as VoiceCallResult;
+  const updated = await pool.query(
+    `UPDATE voice_calls
+     SET result = $4, tabulated_at = now()
+     WHERE id = $1::uuid AND tenant_id = $2::uuid AND user_id = $3::uuid AND status <> 'answered'
+     RETURNING contact_id`,
+    [input.callId, input.tenantId, input.userId, result]
+  );
+  if (!updated.rows[0]) throw new Error("TELEPHONY_CALL_NOT_FOUND");
+  if (updated.rows[0].contact_id) {
+    await updateContactAfterCall(input.callId, (ctx) => resolveContactAfterResult({ ...ctx, result }), { result });
+  }
+  const row = await pool.query(`${CALL_SELECT} WHERE c.id = $1::uuid`, [input.callId]);
+  return mapCall(row.rows[0]);
 }
 
 export async function getAgentCall(tenantId: string, userId: string, callId: string): Promise<VoiceCallRecord> {

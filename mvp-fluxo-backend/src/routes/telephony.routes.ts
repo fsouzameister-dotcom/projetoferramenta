@@ -12,6 +12,7 @@ import {
   getAgentCall,
   getRecordedCall,
   getTelephonyTenantSettings,
+  markCallResultByAgent,
   markCallVoicemail,
   updateTelephonyTenantSettings,
   isTelephonyEnabledForUser,
@@ -66,6 +67,9 @@ function mapTelephonyError(err: unknown): never {
   }
   if (code === "VOICE_TABULACAO_NOT_FOUND") {
     throw new ApiError(404, t.VOICE_TABULACAO_NOT_FOUND, "Tabulação não encontrada");
+  }
+  if (code === "TELEPHONY_RESULT_INVALID") {
+    throw new ApiError(400, t.TELEPHONY_RESULT_INVALID, "Motivo inválido");
   }
   if (code === "TELEPHONY_CALLBACK_INVALID") {
     throw new ApiError(400, t.TELEPHONY_CALLBACK_INVALID, "Informe data e hora do retorno (no futuro, até 60 dias)");
@@ -194,6 +198,22 @@ const telephonyRoutes: FastifyPluginAsync = async (fastify) => {
     const { callId } = request.params as { callId: string };
     try {
       const updated = await markCallVoicemail({ tenantId: request.tenant.id, userId: currentUserId(request), callId });
+      return sendSuccess(request, reply, updated);
+    } catch (err) {
+      mapTelephonyError(err);
+    }
+  });
+
+  fastify.post("/agent/telephony/calls/:callId/result", async (request, reply) => {
+    const { callId } = request.params as { callId: string };
+    const body = (request.body ?? {}) as { result?: string };
+    try {
+      const updated = await markCallResultByAgent({
+        tenantId: request.tenant.id,
+        userId: currentUserId(request),
+        callId,
+        result: String(body.result ?? ""),
+      });
       return sendSuccess(request, reply, updated);
     } catch (err) {
       mapTelephonyError(err);
