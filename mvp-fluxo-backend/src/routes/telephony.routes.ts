@@ -27,6 +27,7 @@ import {
 import {
   MAX_RECORDINGS_PER_ZIP,
   createRecordingsDownloadToken,
+  parseRecordingFormat,
   findRecordingFile,
   recordingsZipFilename,
   streamRecordingsZip,
@@ -389,9 +390,11 @@ const telephonyRoutes: FastifyPluginAsync = async (fastify) => {
         `São ${summary.count} gravações; o limite por download é ${MAX_RECORDINGS_PER_ZIP}. Reduza o período ou use mais filtros.`
       );
     }
-    const token = createRecordingsDownloadToken({ ...filter, onlyRecorded: true });
+    const format = parseRecordingFormat((request.body as { format?: unknown } | undefined)?.format);
+    const token = createRecordingsDownloadToken({ ...filter, onlyRecorded: true }, format);
     return sendSuccess(request, reply, {
       ...summary,
+      format,
       path: `/downloads/telephony/recordings.zip?t=${encodeURIComponent(token)}`,
     });
   });
@@ -525,12 +528,13 @@ export const telephonyInternalRoutes: FastifyPluginAsync = async (fastify) => {
 export const telephonyDownloadRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get("/downloads/telephony/recordings.zip", async (request, reply) => {
     const q = request.query as { t?: string };
-    const filter = verifyRecordingsDownloadToken(String(q.t ?? ""));
-    if (!filter) {
+    const verified = verifyRecordingsDownloadToken(String(q.t ?? ""));
+    if (!verified) {
       return reply.code(403).type("text/plain; charset=utf-8").send("Link expirado ou inválido. Gere o download novamente.");
     }
+    const { filter, format } = verified;
     const stream = new PassThrough();
-    streamRecordingsZip(filter, stream).catch((err) => {
+    streamRecordingsZip(filter, stream, format).catch((err) => {
       request.log.error({ err }, "falha ao gerar zip de gravações");
       stream.destroy(err instanceof Error ? err : new Error(String(err)));
     });

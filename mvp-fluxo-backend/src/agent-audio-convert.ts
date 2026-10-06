@@ -10,7 +10,7 @@ type ConvertResult = {
   voice: boolean;
 };
 
-function resolveFfmpegPath(): string | null {
+export function resolveFfmpegPath(): string | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const mod = require("ffmpeg-static") as string | null;

@@ -39,6 +39,15 @@ const roleLabel: Record<string, string> = {
   platform_admin: "Plataforma",
 };
 
+type RecordingFormat = "ogg" | "mp3" | "wav";
+
+/** kbPerSecond = tamanho médio por segundo de conversa, para estimar o .zip. */
+const RECORDING_FORMAT_INFO: Record<RecordingFormat, { option: string; label: string; kbPerSecond: number }> = {
+  ogg: { option: "OGG (original, menor)", label: "OGG", kbPerSecond: 2.1 },
+  mp3: { option: "MP3 (compatível)", label: "MP3", kbPerSecond: 4 },
+  wav: { option: "WAV (sem compressão)", label: "WAV", kbPerSecond: 15.7 },
+};
+
 /** Aceita "mm:ss", "h:mm:ss" ou segundos; vazio/ inválido = sem filtro. */
 function parseDurationInput(raw: string): number | null {
   const v = raw.trim();
@@ -154,6 +163,7 @@ function CallsTab(props: { setError: (v: string | null) => void }) {
   const [operators, setOperators] = useState<{ userId: string; name: string; email: string }[]>([]);
   const [exporting, setExporting] = useState(false);
   const [preparingZip, setPreparingZip] = useState(false);
+  const [zipFormat, setZipFormat] = useState<RecordingFormat>("ogg");
 
   useEffect(() => {
     void api
@@ -184,11 +194,13 @@ function CallsTab(props: { setError: (v: string | null) => void }) {
     setPreparingZip(true);
     setError(null);
     try {
-      const res = await api.post("/admin/telephony/recordings/download", filterParams);
+      const res = await api.post("/admin/telephony/recordings/download", { ...filterParams, format: zipFormat });
       const data = unwrapApiData<{ count: number; totalTalkSeconds: number; path: string }>(res.data);
-      const estimatedMb = Math.max(1, Math.round((data.totalTalkSeconds * 2.1) / 1024));
+      const { label, kbPerSecond } = RECORDING_FORMAT_INFO[zipFormat];
+      const estimatedMb = Math.max(1, Math.round((data.totalTalkSeconds * kbPerSecond) / 1024));
       const ok = window.confirm(
-        `${data.count} gravação(ões), ${formatDuration(data.totalTalkSeconds)} de áudio (~${estimatedMb} MB).\n\n` +
+        `${data.count} gravação(ões) em ${label}, ${formatDuration(data.totalTalkSeconds)} de áudio (~${estimatedMb} MB).\n\n` +
+          (zipFormat === "ogg" ? "" : "A conversão é feita durante o download, que pode demorar um pouco mais para começar e terminar.\n\n") +
           "O arquivo .zip traz uma pasta por campanha e a planilha das ligações. Baixar agora?"
       );
       if (ok) window.location.assign(`${getApiOrigin()}${data.path}`);
@@ -296,6 +308,20 @@ function CallsTab(props: { setError: (v: string | null) => void }) {
         <button type="button" className={adminBtnSecondaryClass} onClick={() => void exportXlsx()} disabled={exporting}>
           {exporting ? "Gerando..." : "Exportar Excel"}
         </button>
+        <label className={adminLabelClass}>
+          Formato do áudio
+          <select
+            value={zipFormat}
+            onChange={(e) => setZipFormat(e.target.value as RecordingFormat)}
+            className={`${adminInputInlineClass} mt-1.5 block`}
+          >
+            {(Object.keys(RECORDING_FORMAT_INFO) as RecordingFormat[]).map((f) => (
+              <option key={f} value={f}>
+                {RECORDING_FORMAT_INFO[f].option}
+              </option>
+            ))}
+          </select>
+        </label>
         <button
           type="button"
           className={adminBtnSecondaryClass}
