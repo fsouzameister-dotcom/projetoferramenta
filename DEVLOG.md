@@ -2316,6 +2316,11 @@ Use este bloco para retomar **sem depender do histórico do chat**. Substitui a 
     - Por isso, quando o operador desliga antes de atenderem, o Discador pede o motivo (obrigatório): desligado/fora de área, número inexistente, não atendeu ou desisti da ligação.
     - Rota `POST /agent/telephony/calls/:id/result`. O resultado manual fica protegido contra sobrescrita pelo `finish` (`tabulated_at`).
     - Falta testar ocupado e "tocou até o fim".
+    - Usuário testou caixa postal: botão de registro OK.
+  - **Download de gravações em lote (2026-10-06):**
+    - Histórico ganhou os filtros operador, duração mínima/máxima (tempo falado, `mm:ss`) e "somente com gravação", que valem para a lista, o Excel e o zip.
+    - "Baixar gravações (.zip)": `POST /admin/telephony/recordings/download` confere o volume (limite de 2.000 por zip) e devolve um link assinado de 10 min. O navegador baixa direto de `GET /downloads/telephony/recordings.zip?t=…` (fora de /api, sem JWT no cabeçalho, em streaming via `archiver` sem recompressão).
+    - O zip tem uma pasta por campanha (`manual/` para as avulsas), arquivos `data_hora_telefone_operador_resultado_id.ogg`, `ligacoes.xlsx` e uma lista das gravações não encontradas.
   - Relatórios além da exportação (por campanha, operador, horário) ficam para depois.
   - Observação: `/var/log/asterisk/messages.log*` ocupa ~8 GB (ruído antigo de ataques SIP); revisar logrotate/nível de log.
 - Ruído conhecido no log: erros de `app_voicemail_imap/odbc` já registrados (módulos duplicados, inofensivo; dá para `noload`).

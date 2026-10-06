@@ -529,9 +529,18 @@ export type TenantCallFilter = {
   userId?: string;
   campaignId?: string;
   result?: string;
+  minTalkSeconds?: number | string;
+  maxTalkSeconds?: number | string;
+  onlyRecorded?: boolean | string;
 };
 
-/** Filtro do histórico (datas no fuso de São Paulo). Usado na listagem e na exportação. */
+function optionalSeconds(raw: unknown): number | null {
+  if (raw === undefined || raw === null || raw === "") return null;
+  const n = Number.parseInt(String(raw), 10);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+/** Filtro do histórico (datas no fuso de São Paulo). Usado na listagem, na exportação e no download de gravações. */
 export function buildTenantCallFilter(input: TenantCallFilter): { where: string; params: unknown[] } {
   const params: unknown[] = [input.tenantId];
   const where = ["c.tenant_id = $1::uuid"];
@@ -556,6 +565,19 @@ export function buildTenantCallFilter(input: TenantCallFilter): { where: string;
   if (input.result && VOICE_CALL_RESULTS.includes(input.result as VoiceCallResult)) {
     params.push(input.result);
     where.push(`c.result = $${params.length}`);
+  }
+  const minTalk = optionalSeconds(input.minTalkSeconds);
+  if (minTalk !== null) {
+    params.push(minTalk);
+    where.push(`c.talk_seconds >= $${params.length}`);
+  }
+  const maxTalk = optionalSeconds(input.maxTalkSeconds);
+  if (maxTalk !== null) {
+    params.push(maxTalk);
+    where.push(`c.talk_seconds <= $${params.length}`);
+  }
+  if (input.onlyRecorded === true || input.onlyRecorded === "true") {
+    where.push(`c.recorded = true AND c.status = 'answered'`);
   }
   return { where: where.join(" AND "), params };
 }

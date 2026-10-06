@@ -6,7 +6,7 @@ import * as bcrypt from "bcrypt";
 import { JWT_SECRET, getCorsOrigin, resolveLoginTenantId } from "./config";
 import { pool } from "./db";
 import { findUserByEmail } from "./tenant-platform";
-import { telephonyInternalRoutes } from "./routes/telephony.routes";
+import { telephonyDownloadRoutes, telephonyInternalRoutes } from "./routes/telephony.routes";
 import { getPermissionsForRoleId } from "./roles";
 import {
   ApiError,
@@ -870,6 +870,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   );
 
   await app.register(telephonyInternalRoutes);
+  await app.register(telephonyDownloadRoutes);
   await app.register(protectedRoutes, { prefix: "/api" });
   await app.ready();
   return app;

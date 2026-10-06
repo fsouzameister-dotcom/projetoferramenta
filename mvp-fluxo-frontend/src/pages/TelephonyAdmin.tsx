@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import api, { getApiErrorMessage, unwrapApiData } from "../api/client";
+import api, { getApiErrorMessage, getApiOrigin, unwrapApiData } from "../api/client";
 import InfoTooltip from "~components/InfoTooltip";
 import VoiceCampaignsTab from "~components/telephony/VoiceCampaignsTab";
 import {
@@ -38,6 +38,16 @@ const roleLabel: Record<string, string> = {
   admin_local: "Administrador",
   platform_admin: "Plataforma",
 };
+
+/** Aceita "mm:ss", "h:mm:ss" ou segundos; vazio/ inválido = sem filtro. */
+function parseDurationInput(raw: string): number | null {
+  const v = raw.trim();
+  if (!v) return null;
+  if (/^\d+$/.test(v)) return Number(v);
+  const parts = v.split(":");
+  if (parts.length < 2 || parts.length > 3 || parts.some((p) => !/^\d+$/.test(p))) return null;
+  return parts.map(Number).reduce((acc, n) => acc * 60 + n, 0);
+}
 
 function todayStr(): string {
   const d = new Date();
@@ -136,14 +146,24 @@ function CallsTab(props: { setError: (v: string | null) => void }) {
 
   const [campaignFilter, setCampaignFilter] = useState("");
   const [resultFilter, setResultFilter] = useState("");
+  const [userFilter, setUserFilter] = useState("");
+  const [minTalk, setMinTalk] = useState("");
+  const [maxTalk, setMaxTalk] = useState("");
+  const [onlyRecorded, setOnlyRecorded] = useState(false);
   const [campaigns, setCampaigns] = useState<{ id: string; name: string }[]>([]);
+  const [operators, setOperators] = useState<{ userId: string; name: string; email: string }[]>([]);
   const [exporting, setExporting] = useState(false);
+  const [preparingZip, setPreparingZip] = useState(false);
 
   useEffect(() => {
     void api
       .get("/admin/telephony/campaigns")
       .then((res) => setCampaigns(unwrapApiData<{ id: string; name: string }[]>(res.data)))
       .catch(() => setCampaigns([]));
+    void api
+      .get("/admin/telephony/users")
+      .then((res) => setOperators(unwrapApiData<{ users: TelephonyUser[] }>(res.data).users.filter((u) => u.enabled)))
+      .catch(() => setOperators([]));
   }, []);
 
   const filterParams = useMemo(
@@ -152,9 +172,32 @@ function CallsTab(props: { setError: (v: string | null) => void }) {
       to,
       ...(campaignFilter ? { campaignId: campaignFilter } : {}),
       ...(resultFilter ? { result: resultFilter } : {}),
+      ...(userFilter ? { userId: userFilter } : {}),
+      ...(parseDurationInput(minTalk) !== null ? { minTalkSeconds: String(parseDurationInput(minTalk)) } : {}),
+      ...(parseDurationInput(maxTalk) !== null ? { maxTalkSeconds: String(parseDurationInput(maxTalk)) } : {}),
+      ...(onlyRecorded ? { onlyRecorded: "true" } : {}),
     }),
-    [from, to, campaignFilter, resultFilter]
+    [from, to, campaignFilter, resultFilter, userFilter, minTalk, maxTalk, onlyRecorded]
   );
+
+  const downloadRecordings = async () => {
+    setPreparingZip(true);
+    setError(null);
+    try {
+      const res = await api.post("/admin/telephony/recordings/download", filterParams);
+      const data = unwrapApiData<{ count: number; totalTalkSeconds: number; path: string }>(res.data);
+      const estimatedMb = Math.max(1, Math.round((data.totalTalkSeconds * 2.1) / 1024));
+      const ok = window.confirm(
+        `${data.count} gravação(ões), ${formatDuration(data.totalTalkSeconds)} de áudio (~${estimatedMb} MB).\n\n` +
+          "O arquivo .zip traz uma pasta por campanha e a planilha das ligações. Baixar agora?"
+      );
+      if (ok) window.location.assign(`${getApiOrigin()}${data.path}`);
+    } catch (e) {
+      setError(getApiErrorMessage(e, "Não foi possível preparar o download das gravações"));
+    } finally {
+      setPreparingZip(false);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -253,6 +296,52 @@ function CallsTab(props: { setError: (v: string | null) => void }) {
         <button type="button" className={adminBtnSecondaryClass} onClick={() => void exportXlsx()} disabled={exporting}>
           {exporting ? "Gerando..." : "Exportar Excel"}
         </button>
+        <button
+          type="button"
+          className={adminBtnSecondaryClass}
+          onClick={() => void downloadRecordings()}
+          disabled={preparingZip}
+          title="Baixa um .zip com as gravações das ligações que passam pelos filtros"
+        >
+          {preparingZip ? "Preparando..." : "Baixar gravações (.zip)"}
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-3">
+        <label className={adminLabelClass}>
+          Operador
+          <select value={userFilter} onChange={(e) => setUserFilter(e.target.value)} className={`${adminInputInlineClass} mt-1.5 block`}>
+            <option value="">Todos</option>
+            {operators.map((u) => (
+              <option key={u.userId} value={u.userId}>
+                {u.name || u.email}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className={adminLabelClass}>
+          Duração mínima
+          <input
+            value={minTalk}
+            onChange={(e) => setMinTalk(e.target.value)}
+            placeholder="mm:ss"
+            className={`${adminInputInlineClass} mt-1.5 block w-24`}
+          />
+        </label>
+        <label className={adminLabelClass}>
+          Duração máxima
+          <input
+            value={maxTalk}
+            onChange={(e) => setMaxTalk(e.target.value)}
+            placeholder="mm:ss"
+            className={`${adminInputInlineClass} mt-1.5 block w-24`}
+          />
+        </label>
+        <label className="flex items-center gap-2 text-sm text-gray-300 pb-2 cursor-pointer">
+          <input type="checkbox" checked={onlyRecorded} onChange={(e) => setOnlyRecorded(e.target.checked)} />
+          Somente com gravação
+        </label>
+        <span className="text-xs text-gray-500 pb-2">Duração = tempo falado. Ex.: 0:30 ou 2:00.</span>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

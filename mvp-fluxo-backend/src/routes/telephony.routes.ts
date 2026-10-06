@@ -1,7 +1,6 @@
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
-import path from "node:path";
+import { PassThrough } from "node:stream";
 import { getTelephonyConfig } from "../config";
 import { ApiError, ERROR_CODES, sendSuccess } from "../http";
 import {
@@ -23,7 +22,17 @@ import {
   requestOutboundCall,
   setTelephonyUserEnabled,
   tabulateCall,
+  type TenantCallFilter,
 } from "../telephony";
+import {
+  MAX_RECORDINGS_PER_ZIP,
+  createRecordingsDownloadToken,
+  findRecordingFile,
+  recordingsZipFilename,
+  streamRecordingsZip,
+  summarizeRecordings,
+  verifyRecordingsDownloadToken,
+} from "../voice-recordings-zip";
 import {
   addVoiceCampaignContacts,
   createVoiceCampaign,
@@ -52,8 +61,20 @@ const VOICE_CAMPAIGN_VALIDATION: Record<string, string> = {
   VOICE_TABULACAO_LABEL_REQUIRED: "Informe o nome da tabulação",
 };
 
-function recordingsDir(): string {
-  return process.env.VOICE_RECORDINGS_DIR?.trim() || "/var/spool/asterisk/monitor/clienton";
+function parseCallFilter(tenantId: string, raw: unknown): TenantCallFilter {
+  const q = (raw ?? {}) as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+  return {
+    tenantId,
+    from: str(q.from),
+    to: str(q.to),
+    userId: str(q.userId),
+    campaignId: str(q.campaignId),
+    result: str(q.result),
+    minTalkSeconds: str(q.minTalkSeconds),
+    maxTalkSeconds: str(q.maxTalkSeconds),
+    onlyRecorded: q.onlyRecorded === true || q.onlyRecorded === "true",
+  };
 }
 
 function mapTelephonyError(err: unknown): never {
@@ -277,28 +298,12 @@ const telephonyRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.get("/admin/telephony/calls", async (request, reply) => {
-    const q = request.query as { from?: string; to?: string; userId?: string; campaignId?: string; result?: string };
-    const items = await listTenantCalls({
-      tenantId: request.tenant.id,
-      from: q.from,
-      to: q.to,
-      userId: q.userId,
-      campaignId: q.campaignId,
-      result: q.result,
-    });
+    const items = await listTenantCalls(parseCallFilter(request.tenant.id, request.query));
     return sendSuccess(request, reply, items);
   });
 
   fastify.get("/admin/telephony/calls/export", async (request, reply) => {
-    const q = request.query as { from?: string; to?: string; userId?: string; campaignId?: string; result?: string };
-    const { buffer, filename } = await buildVoiceCallsXlsx({
-      tenantId: request.tenant.id,
-      from: q.from,
-      to: q.to,
-      userId: q.userId,
-      campaignId: q.campaignId,
-      result: q.result,
-    });
+    const { buffer, filename } = await buildVoiceCallsXlsx(parseCallFilter(request.tenant.id, request.query));
     reply.header("Content-Disposition", `attachment; filename="${filename}"`);
     reply.header("Content-Length", buffer.length);
     return reply
@@ -360,20 +365,35 @@ const telephonyRoutes: FastifyPluginAsync = async (fastify) => {
     if (!call?.recorded) {
       throw new ApiError(404, ERROR_CODES.telephony.TELEPHONY_RECORDING_NOT_FOUND, "Gravação não encontrada");
     }
-    for (const [ext, mime] of [
-      ["ogg", "audio/ogg"],
-      ["wav", "audio/wav"],
-    ] as const) {
-      const file = path.join(recordingsDir(), `${call.id}.${ext}`);
-      const info = await stat(file).catch(() => null);
-      if (info?.isFile() && info.size > 0) {
-        reply.header("Content-Length", info.size);
-        reply.header("Cache-Control", "private, max-age=300");
-        reply.header("Content-Disposition", `inline; filename="ligacao-${call.id}.${ext}"`);
-        return reply.type(mime).send(createReadStream(file));
-      }
+    const found = await findRecordingFile(call.id);
+    if (!found) {
+      throw new ApiError(404, ERROR_CODES.telephony.TELEPHONY_RECORDING_NOT_FOUND, "Gravação não encontrada");
     }
-    throw new ApiError(404, ERROR_CODES.telephony.TELEPHONY_RECORDING_NOT_FOUND, "Gravação não encontrada");
+    reply.header("Content-Length", found.size);
+    reply.header("Cache-Control", "private, max-age=300");
+    reply.header("Content-Disposition", `inline; filename="ligacao-${call.id}.${found.ext}"`);
+    return reply.type(found.ext === "ogg" ? "audio/ogg" : "audio/wav").send(createReadStream(found.file));
+  });
+
+  /** Prepara o download em lote: confere o volume e devolve um link assinado (10 min) para o .zip. */
+  fastify.post("/admin/telephony/recordings/download", async (request, reply) => {
+    const filter = parseCallFilter(request.tenant.id, request.body);
+    const summary = await summarizeRecordings(filter);
+    if (summary.count === 0) {
+      throw new ApiError(404, ERROR_CODES.telephony.TELEPHONY_RECORDING_NOT_FOUND, "Nenhuma gravação com esses filtros");
+    }
+    if (summary.count > MAX_RECORDINGS_PER_ZIP) {
+      throw new ApiError(
+        400,
+        ERROR_CODES.common.VALIDATION_ERROR,
+        `São ${summary.count} gravações; o limite por download é ${MAX_RECORDINGS_PER_ZIP}. Reduza o período ou use mais filtros.`
+      );
+    }
+    const token = createRecordingsDownloadToken({ ...filter, onlyRecorded: true });
+    return sendSuccess(request, reply, {
+      ...summary,
+      path: `/downloads/telephony/recordings.zip?t=${encodeURIComponent(token)}`,
+    });
   });
 
   // --- Campanhas de voz (mailing de telefonia) ---------------------------
@@ -495,6 +515,28 @@ export const telephonyInternalRoutes: FastifyPluginAsync = async (fastify) => {
       hangupCause: q.cause,
     });
     return reply.type("text/plain").send("ok");
+  });
+};
+
+/**
+ * Download do .zip de gravações. Fora de /api e sem JWT no cabeçalho, para o navegador baixar direto
+ * (sem carregar tudo em memória); autorizado pelo link assinado gerado em /admin/telephony/recordings/download.
+ */
+export const telephonyDownloadRoutes: FastifyPluginAsync = async (fastify) => {
+  fastify.get("/downloads/telephony/recordings.zip", async (request, reply) => {
+    const q = request.query as { t?: string };
+    const filter = verifyRecordingsDownloadToken(String(q.t ?? ""));
+    if (!filter) {
+      return reply.code(403).type("text/plain; charset=utf-8").send("Link expirado ou inválido. Gere o download novamente.");
+    }
+    const stream = new PassThrough();
+    streamRecordingsZip(filter, stream).catch((err) => {
+      request.log.error({ err }, "falha ao gerar zip de gravações");
+      stream.destroy(err instanceof Error ? err : new Error(String(err)));
+    });
+    reply.header("Content-Disposition", `attachment; filename="${recordingsZipFilename(filter)}"`);
+    reply.header("Cache-Control", "no-store");
+    return reply.type("application/zip").send(stream);
   });
 };
 
