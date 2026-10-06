@@ -16,8 +16,11 @@ import {
 import {
   formatCallDateTime,
   voiceCampaignStatusLabel,
+  voiceOutcomeLabel,
   type VoiceCampaignStatus,
   type VoiceCampaignSummary,
+  type VoiceCampaignTabulacao,
+  type VoiceContactOutcome,
   type VoiceImportResult,
   type VoiceSpreadsheetPreview,
 } from "~lib/telephony";
@@ -27,7 +30,8 @@ type Mode =
   | null
   | { kind: "create" }
   | { kind: "edit"; campaign: VoiceCampaignSummary }
-  | { kind: "import"; campaign: VoiceCampaignSummary };
+  | { kind: "import"; campaign: VoiceCampaignSummary }
+  | { kind: "tabulacoes"; campaign: VoiceCampaignSummary };
 
 function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -130,7 +134,15 @@ export default function VoiceCampaignsTab(props: {
         </div>
       </div>
 
-      {mode ? (
+      {mode?.kind === "tabulacoes" ? (
+        <CampaignTabulacoesPanel
+          key={`tab-${mode.campaign.id}`}
+          campaign={mode.campaign}
+          onClose={() => setMode(null)}
+          setError={setError}
+          setNotice={setNotice}
+        />
+      ) : mode ? (
         <CampaignForm
           key={mode.kind === "create" ? "create" : `${mode.kind}-${mode.campaign.id}`}
           mode={mode}
@@ -163,7 +175,7 @@ export default function VoiceCampaignsTab(props: {
               </tr>
             ) : (
               campaigns.map((c) => {
-                const finished = c.counts.done + c.counts.exhausted + c.counts.doNotCall;
+                const finished = c.counts.done + c.counts.exhausted + c.counts.doNotCall + c.counts.invalid;
                 const pct = c.counts.total ? Math.round((finished / c.counts.total) * 100) : 0;
                 return (
                   <tr key={c.id} className={adminTableRowClass}>
@@ -187,7 +199,7 @@ export default function VoiceCampaignsTab(props: {
                       </div>
                       <div className="text-[11px] text-gray-400 mt-1">
                         {finished}/{c.counts.total} finalizados ({pct}%) · {c.counts.done} concluídos ·{" "}
-                        {c.counts.exhausted} esgotados · {c.counts.doNotCall} não ligar
+                        {c.counts.exhausted} esgotados · {c.counts.doNotCall} não ligar · {c.counts.invalid} inválidos
                       </div>
                     </td>
                     <td className="px-4 py-3 text-gray-300 text-xs">
@@ -203,6 +215,13 @@ export default function VoiceCampaignsTab(props: {
                       <div className="text-gray-400">{c.recordCalls ? "Grava ligações" : "Sem gravação"}</div>
                     </td>
                     <td className="px-4 py-3 text-right whitespace-nowrap space-x-3">
+                      <button
+                        type="button"
+                        className={adminBtnLinkClass}
+                        onClick={() => setMode({ kind: "tabulacoes", campaign: c })}
+                      >
+                        Tabulações
+                      </button>
                       <button type="button" className={adminBtnLinkClass} onClick={() => setMode({ kind: "import", campaign: c })}>
                         Importar
                       </button>
@@ -250,8 +269,288 @@ export default function VoiceCampaignsTab(props: {
   );
 }
 
+const OUTCOME_OPTIONS: VoiceContactOutcome[] = ["done", "retry", "callback", "do_not_call"];
+
+function CampaignTabulacoesPanel(props: {
+  campaign: VoiceCampaignSummary;
+  onClose: () => void;
+  setError: (v: string | null) => void;
+  setNotice: (v: string | null) => void;
+}) {
+  const { campaign, onClose, setError, setNotice } = props;
+  const [items, setItems] = useState<VoiceCampaignTabulacao[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, VoiceCampaignTabulacao>>({});
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [newTab, setNewTab] = useState({ label: "", description: "", outcome: "done" as VoiceContactOutcome, isSuccess: false });
+  const base = `/admin/telephony/campaigns/${campaign.id}/tabulacoes`;
+
+  const load = useCallback(async () => {
+    try {
+      const res = await api.get(base);
+      const data = unwrapApiData<VoiceCampaignTabulacao[]>(res.data);
+      setItems(data);
+      setDrafts(Object.fromEntries(data.map((t) => [t.id, t])));
+    } catch (e) {
+      setError(getApiErrorMessage(e, "Erro ao carregar tabulações"));
+    }
+  }, [base, setError]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const patchDraft = (id: string, patch: Partial<VoiceCampaignTabulacao>) =>
+    setDrafts((prev) => ({ ...prev, [id]: { ...prev[id]!, ...patch } }));
+
+  const save = async (id: string, extra: Partial<VoiceCampaignTabulacao> = {}) => {
+    const draft = { ...drafts[id]!, ...extra };
+    setSavingId(id);
+    setError(null);
+    setNotice(null);
+    try {
+      await api.put(`${base}/${id}`, {
+        label: draft.label,
+        description: draft.description ?? "",
+        outcome: draft.outcome,
+        isSuccess: draft.isSuccess,
+        active: draft.active,
+        sortOrder: draft.sortOrder,
+      });
+      setNotice(`Tabulação "${draft.label}" salva.`);
+      await load();
+    } catch (e) {
+      setError(getApiErrorMessage(e, "Erro ao salvar tabulação"));
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const move = async (id: string, direction: -1 | 1) => {
+    const active = items.filter((t) => t.active);
+    const idx = active.findIndex((t) => t.id === id);
+    const other = active[idx + direction];
+    if (!other) return;
+    const current = active[idx]!;
+    setSavingId(id);
+    try {
+      await api.put(`${base}/${current.id}`, { sortOrder: other.sortOrder });
+      await api.put(`${base}/${other.id}`, { sortOrder: current.sortOrder === other.sortOrder ? current.sortOrder + direction : current.sortOrder });
+      await load();
+    } catch (e) {
+      setError(getApiErrorMessage(e, "Erro ao reordenar"));
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const create = async () => {
+    if (!newTab.label.trim()) return setError("Informe o nome da tabulação");
+    setSavingId("new");
+    setError(null);
+    try {
+      await api.post(base, newTab);
+      setNewTab({ label: "", description: "", outcome: "done", isSuccess: false });
+      setNotice("Tabulação criada.");
+      await load();
+    } catch (e) {
+      setError(getApiErrorMessage(e, "Erro ao criar tabulação"));
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const activeItems = items.filter((t) => t.active);
+  const inactiveItems = items.filter((t) => !t.active);
+
+  return (
+    <section className={`${adminSectionClass} space-y-4`}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-white">Tabulações — {campaign.name}</h2>
+          <p className="text-xs text-gray-400 mt-1 max-w-3xl">
+            Aparecem para o operador quando a ligação é <strong className="text-gray-200">atendida</strong>. O destino define o que
+            acontece com o contato. Não atendeu, ocupado, número inexistente e similares são marcados automaticamente pelo sistema;
+            caixa postal o operador marca com um botão próprio.
+          </p>
+        </div>
+        <button type="button" className={adminBtnSecondaryClass} onClick={onClose}>
+          Fechar
+        </button>
+      </div>
+
+      <div className="overflow-x-auto rounded-lg border border-zinc-700">
+        <table className="w-full text-sm">
+          <thead className={adminTableHeadClass}>
+            <tr>
+              <th className="px-3 py-2 w-16">Ordem</th>
+              <th className="px-3 py-2">Nome</th>
+              <th className="px-3 py-2">Descrição (ajuda ao operador)</th>
+              <th className="px-3 py-2">Destino do contato</th>
+              <th className="px-3 py-2">Sucesso</th>
+              <th className="px-3 py-2 text-right">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {activeItems.map((t, idx) => {
+              const d = drafts[t.id] ?? t;
+              const dirty =
+                d.label !== t.label ||
+                (d.description ?? "") !== (t.description ?? "") ||
+                d.outcome !== t.outcome ||
+                d.isSuccess !== t.isSuccess;
+              return (
+                <tr key={t.id} className={adminTableRowClass}>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <button
+                      type="button"
+                      className="text-gray-400 hover:text-white disabled:opacity-30 px-1"
+                      disabled={idx === 0 || savingId !== null}
+                      onClick={() => void move(t.id, -1)}
+                      aria-label="Subir"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      className="text-gray-400 hover:text-white disabled:opacity-30 px-1"
+                      disabled={idx === activeItems.length - 1 || savingId !== null}
+                      onClick={() => void move(t.id, 1)}
+                      aria-label="Descer"
+                    >
+                      ↓
+                    </button>
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      value={d.label}
+                      maxLength={80}
+                      onChange={(e) => patchDraft(t.id, { label: e.target.value })}
+                      className={adminInputClass}
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      value={d.description ?? ""}
+                      maxLength={200}
+                      onChange={(e) => patchDraft(t.id, { description: e.target.value })}
+                      className={adminInputClass}
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <select
+                      value={d.outcome}
+                      onChange={(e) => patchDraft(t.id, { outcome: e.target.value as VoiceContactOutcome })}
+                      className={adminSelectClass}
+                    >
+                      {OUTCOME_OPTIONS.map((o) => (
+                        <option key={o} value={o}>
+                          {voiceOutcomeLabel[o]}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="px-3 py-2 text-center">
+                    <input
+                      type="checkbox"
+                      checked={d.isSuccess}
+                      onChange={(e) => patchDraft(t.id, { isSuccess: e.target.checked })}
+                    />
+                  </td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap space-x-3">
+                    <button
+                      type="button"
+                      className={adminBtnLinkClass}
+                      disabled={!dirty || savingId !== null}
+                      onClick={() => void save(t.id)}
+                    >
+                      {savingId === t.id ? "Salvando…" : "Salvar"}
+                    </button>
+                    <button
+                      type="button"
+                      className={adminBtnDangerClass}
+                      disabled={savingId !== null}
+                      onClick={() => void save(t.id, { active: false })}
+                    >
+                      Desativar
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+            <tr className={`${adminTableRowClass} bg-zinc-900/30`}>
+              <td className="px-3 py-2 text-xs text-gray-500">Nova</td>
+              <td className="px-3 py-2">
+                <input
+                  value={newTab.label}
+                  maxLength={80}
+                  placeholder="Ex.: Fora do perfil"
+                  onChange={(e) => setNewTab((p) => ({ ...p, label: e.target.value }))}
+                  className={adminInputClass}
+                />
+              </td>
+              <td className="px-3 py-2">
+                <input
+                  value={newTab.description}
+                  maxLength={200}
+                  onChange={(e) => setNewTab((p) => ({ ...p, description: e.target.value }))}
+                  className={adminInputClass}
+                />
+              </td>
+              <td className="px-3 py-2">
+                <select
+                  value={newTab.outcome}
+                  onChange={(e) => setNewTab((p) => ({ ...p, outcome: e.target.value as VoiceContactOutcome }))}
+                  className={adminSelectClass}
+                >
+                  {OUTCOME_OPTIONS.map((o) => (
+                    <option key={o} value={o}>
+                      {voiceOutcomeLabel[o]}
+                    </option>
+                  ))}
+                </select>
+              </td>
+              <td className="px-3 py-2 text-center">
+                <input
+                  type="checkbox"
+                  checked={newTab.isSuccess}
+                  onChange={(e) => setNewTab((p) => ({ ...p, isSuccess: e.target.checked }))}
+                />
+              </td>
+              <td className="px-3 py-2 text-right">
+                <button type="button" className={adminBtnPrimaryClass} disabled={savingId !== null} onClick={() => void create()}>
+                  Adicionar
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      {inactiveItems.length > 0 ? (
+        <div className="text-xs text-gray-400">
+          Desativadas:{" "}
+          {inactiveItems.map((t, i) => (
+            <span key={t.id}>
+              {i > 0 ? ", " : ""}
+              {t.label}{" "}
+              <button
+                type="button"
+                className="text-cyan-300 hover:underline"
+                disabled={savingId !== null}
+                onClick={() => void save(t.id, { active: true })}
+              >
+                reativar
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function CampaignForm(props: {
-  mode: Exclude<Mode, null>;
+  mode: Exclude<Mode, null | { kind: "tabulacoes"; campaign: VoiceCampaignSummary }>;
   queues: Queue[];
   onCancel: () => void;
   onSaved: (message: string) => void;

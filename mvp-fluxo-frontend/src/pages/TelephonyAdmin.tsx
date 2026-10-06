@@ -4,6 +4,7 @@ import InfoTooltip from "~components/InfoTooltip";
 import VoiceCampaignsTab from "~components/telephony/VoiceCampaignsTab";
 import {
   adminBtnPrimaryClass,
+  adminBtnSecondaryClass,
   adminErrorClass,
   adminInputInlineClass,
   adminLabelClass,
@@ -14,11 +15,13 @@ import {
   adminTableRowClass,
 } from "~lib/admin-ui";
 import {
+  callResultLabel,
   formatBrPhone,
   formatCallDateTime,
   formatDuration,
-  voiceCallStatusLabel,
+  voiceCallResultLabel,
   type VoiceCall,
+  type VoiceCallResult,
 } from "~lib/telephony";
 
 type TelephonyUser = {
@@ -131,25 +134,67 @@ function CallsTab(props: { setError: (v: string | null) => void }) {
     }
   };
 
+  const [campaignFilter, setCampaignFilter] = useState("");
+  const [resultFilter, setResultFilter] = useState("");
+  const [campaigns, setCampaigns] = useState<{ id: string; name: string }[]>([]);
+  const [exporting, setExporting] = useState(false);
+
+  useEffect(() => {
+    void api
+      .get("/admin/telephony/campaigns")
+      .then((res) => setCampaigns(unwrapApiData<{ id: string; name: string }[]>(res.data)))
+      .catch(() => setCampaigns([]));
+  }, []);
+
+  const filterParams = useMemo(
+    () => ({
+      from,
+      to,
+      ...(campaignFilter ? { campaignId: campaignFilter } : {}),
+      ...(resultFilter ? { result: resultFilter } : {}),
+    }),
+    [from, to, campaignFilter, resultFilter]
+  );
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await api.get("/admin/telephony/calls", { params: { from, to } });
+      const res = await api.get("/admin/telephony/calls", { params: filterParams });
       setCalls(unwrapApiData<VoiceCall[]>(res.data));
     } catch (e) {
       setError(getApiErrorMessage(e, "Erro ao carregar ligações"));
     } finally {
       setLoading(false);
     }
-  }, [from, to, setError]);
+  }, [filterParams, setError]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  const exportXlsx = async () => {
+    setExporting(true);
+    setError(null);
+    try {
+      const res = await api.get("/admin/telephony/calls/export", { params: filterParams, responseType: "blob" });
+      const url = URL.createObjectURL(res.data as Blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `ligacoes-${from}-a-${to}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch {
+      setError("Não foi possível exportar as ligações.");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const summary = useMemo(() => {
-    const answered = calls.filter((c) => c.status === "answered");
+    const answered = calls.filter((c) => (c.result ? c.result === "answered" : c.status === "answered"));
     const talk = answered.reduce((acc, c) => acc + c.talkSeconds, 0);
     return {
       total: calls.length,
@@ -171,8 +216,42 @@ function CallsTab(props: { setError: (v: string | null) => void }) {
           Até
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={`${adminInputInlineClass} mt-1.5 block`} />
         </label>
+        <label className={adminLabelClass}>
+          Campanha
+          <select
+            value={campaignFilter}
+            onChange={(e) => setCampaignFilter(e.target.value)}
+            className={`${adminInputInlineClass} mt-1.5 block`}
+          >
+            <option value="">Todas (inclui manuais)</option>
+            <option value="manual">Somente manuais</option>
+            {campaigns.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className={adminLabelClass}>
+          Resultado
+          <select
+            value={resultFilter}
+            onChange={(e) => setResultFilter(e.target.value)}
+            className={`${adminInputInlineClass} mt-1.5 block`}
+          >
+            <option value="">Todos</option>
+            {(Object.keys(voiceCallResultLabel) as VoiceCallResult[]).map((r) => (
+              <option key={r} value={r}>
+                {voiceCallResultLabel[r]}
+              </option>
+            ))}
+          </select>
+        </label>
         <button type="button" className={adminBtnPrimaryClass} onClick={() => void load()} disabled={loading}>
           {loading ? "Carregando..." : "Atualizar"}
+        </button>
+        <button type="button" className={adminBtnSecondaryClass} onClick={() => void exportXlsx()} disabled={exporting}>
+          {exporting ? "Gerando..." : "Exportar Excel"}
         </button>
       </div>
 
@@ -222,12 +301,22 @@ function CallsTab(props: { setError: (v: string | null) => void }) {
                   </td>
                   <td className="px-4 py-3 text-gray-300">{c.campaignName ?? "Manual"}</td>
                   <td className="px-4 py-3">
-                    <span className={c.status === "answered" ? "text-emerald-300" : "text-gray-300"}>
-                      {voiceCallStatusLabel[c.status] ?? c.status}
+                    <span
+                      className={
+                        (c.result ? c.result === "answered" : c.status === "answered") ? "text-emerald-300" : "text-gray-300"
+                      }
+                    >
+                      {callResultLabel(c)}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-gray-300">{c.status === "answered" ? formatDuration(c.talkSeconds) : "—"}</td>
-                  <td className="px-4 py-3 text-gray-300">{c.tabulacaoLabel ?? "—"}</td>
+                  <td className="px-4 py-3 text-gray-300">
+                    {c.tabulacaoLabel ?? "—"}
+                    {c.tabulacaoIsSuccess ? <span className="ml-1.5 text-[10px] text-emerald-300">● sucesso</span> : null}
+                    {c.callbackAt ? (
+                      <div className="text-[11px] text-amber-300">Retorno: {formatCallDateTime(c.callbackAt)}</div>
+                    ) : null}
+                  </td>
                   <td className="px-4 py-3">
                     {c.recorded && c.status === "answered" ? (
                       <div className="space-y-1">

@@ -9,8 +9,10 @@ import {
   authorizeCallFromAsterisk,
   createTelephonySession,
   finishCallFromAsterisk,
+  getAgentCall,
   getRecordedCall,
   getTelephonyTenantSettings,
+  markCallVoicemail,
   updateTelephonyTenantSettings,
   isTelephonyEnabledForUser,
   listAgentRecentCalls,
@@ -31,8 +33,13 @@ import {
   requestNextCampaignContact,
   updateVoiceCampaign,
 } from "../voice-campaigns";
-import type { VoiceContactOutcome } from "../voice-campaign-rules";
 import { tokenMatches } from "../telephony-rules";
+import { buildVoiceCallsXlsx } from "../voice-call-export";
+import {
+  createCampaignTabulacao,
+  listCampaignTabulacoes,
+  updateCampaignTabulacao,
+} from "../voice-campaign-tabulacoes";
 
 const VOICE_CAMPAIGN_VALIDATION: Record<string, string> = {
   VOICE_CAMPAIGN_FILE_REQUIRED: "Envie a planilha de contatos",
@@ -41,6 +48,7 @@ const VOICE_CAMPAIGN_VALIDATION: Record<string, string> = {
   VOICE_CAMPAIGN_FILE_TOO_LARGE: "A planilha tem mais de 50.000 linhas. Divida em arquivos menores",
   VOICE_CAMPAIGN_PHONE_COLUMN: "Selecione a coluna de telefone",
   VOICE_CAMPAIGN_NAME_REQUIRED: "Informe o nome da campanha",
+  VOICE_TABULACAO_LABEL_REQUIRED: "Informe o nome da tabulação",
 };
 
 function recordingsDir(): string {
@@ -55,6 +63,12 @@ function mapTelephonyError(err: unknown): never {
   }
   if (code === "VOICE_CAMPAIGN_NOT_FOUND") {
     throw new ApiError(404, t.VOICE_CAMPAIGN_NOT_FOUND, "Campanha não encontrada ou não disponível para você");
+  }
+  if (code === "VOICE_TABULACAO_NOT_FOUND") {
+    throw new ApiError(404, t.VOICE_TABULACAO_NOT_FOUND, "Tabulação não encontrada");
+  }
+  if (code === "TELEPHONY_CALLBACK_INVALID") {
+    throw new ApiError(400, t.TELEPHONY_CALLBACK_INVALID, "Informe data e hora do retorno (no futuro, até 60 dias)");
   }
   if (code === "VOICE_CAMPAIGN_NO_CONTACTS") {
     throw new ApiError(404, t.VOICE_CAMPAIGN_NO_CONTACTS, "Nenhum contato disponível agora nesta campanha");
@@ -157,32 +171,48 @@ const telephonyRoutes: FastifyPluginAsync = async (fastify) => {
     return sendSuccess(request, reply, items);
   });
 
+  fastify.get("/agent/telephony/calls/:callId", async (request, reply) => {
+    const { callId } = request.params as { callId: string };
+    try {
+      return sendSuccess(request, reply, await getAgentCall(request.tenant.id, currentUserId(request), callId));
+    } catch (err) {
+      mapTelephonyError(err);
+    }
+  });
+
   fastify.get("/agent/telephony/tabulacoes", async (request, reply) => {
-    const items = await listTabulacoesForCall(request.tenant.id);
-    return sendSuccess(
-      request,
-      reply,
-      items.map((t) => ({ id: t.id, label: t.label, description: t.description }))
-    );
+    const q = request.query as { callId?: string };
+    const data = await listTabulacoesForCall({
+      tenantId: request.tenant.id,
+      userId: currentUserId(request),
+      callId: q.callId ?? null,
+    });
+    return sendSuccess(request, reply, data);
+  });
+
+  fastify.post("/agent/telephony/calls/:callId/voicemail", async (request, reply) => {
+    const { callId } = request.params as { callId: string };
+    try {
+      const updated = await markCallVoicemail({ tenantId: request.tenant.id, userId: currentUserId(request), callId });
+      return sendSuccess(request, reply, updated);
+    } catch (err) {
+      mapTelephonyError(err);
+    }
   });
 
   fastify.post("/agent/telephony/calls/:callId/tabulate", async (request, reply) => {
     const { callId } = request.params as { callId: string };
-    const body = (request.body ?? {}) as { tabulacaoId?: string; outcome?: string };
+    const body = (request.body ?? {}) as { tabulacaoId?: string; callbackAt?: string };
     if (!body.tabulacaoId) {
       throw new ApiError(400, ERROR_CODES.common.VALIDATION_ERROR, "Informe a tabulação");
     }
-    const outcome =
-      body.outcome === "done" || body.outcome === "retry" || body.outcome === "do_not_call"
-        ? (body.outcome as VoiceContactOutcome)
-        : null;
     try {
       const updated = await tabulateCall({
         tenantId: request.tenant.id,
         userId: currentUserId(request),
         callId,
         tabulacaoId: body.tabulacaoId,
-        outcome,
+        callbackAt: body.callbackAt,
       });
       return sendSuccess(request, reply, updated);
     } catch (err) {
@@ -227,15 +257,81 @@ const telephonyRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.get("/admin/telephony/calls", async (request, reply) => {
-    const q = request.query as { from?: string; to?: string; userId?: string; campaignId?: string };
+    const q = request.query as { from?: string; to?: string; userId?: string; campaignId?: string; result?: string };
     const items = await listTenantCalls({
       tenantId: request.tenant.id,
       from: q.from,
       to: q.to,
       userId: q.userId,
       campaignId: q.campaignId,
+      result: q.result,
     });
     return sendSuccess(request, reply, items);
+  });
+
+  fastify.get("/admin/telephony/calls/export", async (request, reply) => {
+    const q = request.query as { from?: string; to?: string; userId?: string; campaignId?: string; result?: string };
+    const { buffer, filename } = await buildVoiceCallsXlsx({
+      tenantId: request.tenant.id,
+      from: q.from,
+      to: q.to,
+      userId: q.userId,
+      campaignId: q.campaignId,
+      result: q.result,
+    });
+    reply.header("Content-Disposition", `attachment; filename="${filename}"`);
+    reply.header("Content-Length", buffer.length);
+    return reply
+      .type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      .send(buffer);
+  });
+
+  fastify.get("/admin/telephony/campaigns/:campaignId/tabulacoes", async (request, reply) => {
+    const { campaignId } = request.params as { campaignId: string };
+    try {
+      return sendSuccess(request, reply, await listCampaignTabulacoes({ tenantId: request.tenant.id, campaignId }));
+    } catch (err) {
+      mapTelephonyError(err);
+    }
+  });
+
+  fastify.post("/admin/telephony/campaigns/:campaignId/tabulacoes", async (request, reply) => {
+    const { campaignId } = request.params as { campaignId: string };
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    try {
+      const created = await createCampaignTabulacao({
+        tenantId: request.tenant.id,
+        campaignId,
+        label: body.label,
+        description: body.description,
+        outcome: body.outcome,
+        isSuccess: body.isSuccess,
+      });
+      return sendSuccess(request, reply, created, 201);
+    } catch (err) {
+      mapTelephonyError(err);
+    }
+  });
+
+  fastify.put("/admin/telephony/campaigns/:campaignId/tabulacoes/:tabulacaoId", async (request, reply) => {
+    const { campaignId, tabulacaoId } = request.params as { campaignId: string; tabulacaoId: string };
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    try {
+      const updated = await updateCampaignTabulacao({
+        tenantId: request.tenant.id,
+        campaignId,
+        tabulacaoId,
+        label: body.label,
+        description: body.description,
+        outcome: body.outcome,
+        isSuccess: body.isSuccess,
+        active: body.active,
+        sortOrder: body.sortOrder,
+      });
+      return sendSuccess(request, reply, updated);
+    } catch (err) {
+      mapTelephonyError(err);
+    }
   });
 
   fastify.get("/admin/telephony/calls/:callId/recording", async (request, reply) => {

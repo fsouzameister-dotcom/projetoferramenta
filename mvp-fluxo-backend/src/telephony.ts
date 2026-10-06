@@ -6,145 +6,31 @@ import { removeAgentEndpoint, upsertAgentEndpoint } from "./telephony-ari";
 import {
   MIN_SECONDS_BETWEEN_CALLS,
   REQUEST_AUTHORIZE_WINDOW_SECONDS,
+  classifyCallResult,
   computeCallDurations,
   mapDialStatusToCallStatus,
   normalizeBrPhone,
   sipUsernameForUser,
+  VOICE_CALL_RESULTS,
+  type VoiceCallResult,
   type VoiceCallStatus,
 } from "./telephony-rules";
-import { resolveContactAfterAttempt, type VoiceContactOutcome } from "./voice-campaign-rules";
+import {
+  parseCallbackAt,
+  resolveContactAfterAttempt,
+  resolveContactAfterResult,
+  type ContactNextState,
+  type VoiceContactOutcome,
+} from "./voice-campaign-rules";
+import { getCampaignTabulacao, listCampaignTabulacoes } from "./voice-campaign-tabulacoes";
 import {
   assertTabulacaoAllowedForQueue,
   listTabulacoesForConversationClose,
   type TabulacaoRecord,
 } from "./tabulacoes";
-import { ensureSchema as ensureServiceQueuesSchema } from "./service-queues";
+import { ensureTelephonySchema } from "./telephony-schema";
 
-let schemaReady = false;
-
-export async function ensureTelephonySchema(): Promise<void> {
-  if (schemaReady) return;
-  await ensureServiceQueuesSchema();
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS telephony_user_settings (
-      user_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-      tenant_id uuid NOT NULL,
-      enabled boolean NOT NULL DEFAULT false,
-      sip_username text UNIQUE,
-      created_at timestamptz NOT NULL DEFAULT now(),
-      updated_at timestamptz NOT NULL DEFAULT now()
-    )
-  `);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_telephony_user_settings_tenant
-      ON telephony_user_settings (tenant_id, enabled)
-  `);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS voice_calls (
-      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      tenant_id uuid NOT NULL,
-      user_id uuid REFERENCES users(id) ON DELETE SET NULL,
-      direction text NOT NULL DEFAULT 'outbound',
-      phone text NOT NULL,
-      status text NOT NULL DEFAULT 'requested',
-      sip_username text,
-      dial_status text,
-      hangup_cause text,
-      ring_seconds integer NOT NULL DEFAULT 0,
-      talk_seconds integer NOT NULL DEFAULT 0,
-      tabulacao_id uuid,
-      tabulacao_label text,
-      tabulated_at timestamptz,
-      created_at timestamptz NOT NULL DEFAULT now(),
-      authorized_at timestamptz,
-      ended_at timestamptz,
-      CONSTRAINT chk_voice_calls_status
-        CHECK (status IN ('requested', 'authorized', 'answered', 'no_answer', 'busy', 'cancelled', 'failed')),
-      CONSTRAINT chk_voice_calls_direction
-        CHECK (direction IN ('outbound', 'inbound'))
-    )
-  `);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_voice_calls_tenant_created
-      ON voice_calls (tenant_id, created_at DESC)
-  `);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_voice_calls_user_created
-      ON voice_calls (user_id, created_at DESC)
-  `);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS voice_campaigns (
-      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      tenant_id uuid NOT NULL,
-      name text NOT NULL,
-      status text NOT NULL DEFAULT 'active',
-      max_attempts integer NOT NULL DEFAULT 5,
-      retry_interval_minutes integer NOT NULL DEFAULT 60,
-      record_calls boolean NOT NULL DEFAULT false,
-      phone_column text,
-      name_column text,
-      headers jsonb NOT NULL DEFAULT '[]'::jsonb,
-      created_by uuid,
-      created_at timestamptz NOT NULL DEFAULT now(),
-      updated_at timestamptz NOT NULL DEFAULT now(),
-      CONSTRAINT chk_voice_campaigns_status CHECK (status IN ('active', 'paused', 'completed'))
-    )
-  `);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_voice_campaigns_tenant
-      ON voice_campaigns (tenant_id, status, created_at DESC)
-  `);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS voice_campaign_queues (
-      campaign_id uuid NOT NULL REFERENCES voice_campaigns(id) ON DELETE CASCADE,
-      queue_id uuid NOT NULL REFERENCES service_queues(id) ON DELETE CASCADE,
-      PRIMARY KEY (campaign_id, queue_id)
-    )
-  `);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS voice_campaign_contacts (
-      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      tenant_id uuid NOT NULL,
-      campaign_id uuid NOT NULL REFERENCES voice_campaigns(id) ON DELETE CASCADE,
-      phone text NOT NULL,
-      name text,
-      data jsonb NOT NULL DEFAULT '{}'::jsonb,
-      status text NOT NULL DEFAULT 'pending',
-      attempts integer NOT NULL DEFAULT 0,
-      next_attempt_at timestamptz,
-      reserved_by uuid,
-      reserved_at timestamptz,
-      last_call_id uuid,
-      last_result text,
-      last_tabulacao_label text,
-      completed_at timestamptz,
-      created_at timestamptz NOT NULL DEFAULT now(),
-      updated_at timestamptz NOT NULL DEFAULT now(),
-      CONSTRAINT uq_voice_campaign_contacts_phone UNIQUE (campaign_id, phone),
-      CONSTRAINT chk_voice_campaign_contacts_status
-        CHECK (status IN ('pending', 'in_call', 'retry', 'done', 'exhausted', 'do_not_call'))
-    )
-  `);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_voice_campaign_contacts_pick
-      ON voice_campaign_contacts (campaign_id, status, next_attempt_at, created_at)
-  `);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS telephony_tenant_settings (
-      tenant_id uuid PRIMARY KEY,
-      record_manual_calls boolean NOT NULL DEFAULT true,
-      updated_at timestamptz NOT NULL DEFAULT now()
-    )
-  `);
-  await pool.query(`ALTER TABLE voice_calls ADD COLUMN IF NOT EXISTS campaign_id uuid`);
-  await pool.query(`ALTER TABLE voice_calls ADD COLUMN IF NOT EXISTS contact_id uuid`);
-  await pool.query(`ALTER TABLE voice_calls ADD COLUMN IF NOT EXISTS recorded boolean NOT NULL DEFAULT false`);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_voice_calls_campaign
-      ON voice_calls (campaign_id, created_at DESC)
-  `);
-  schemaReady = true;
-}
+export { ensureTelephonySchema };
 
 export function requireTelephonyConfig(): TelephonyConfig {
   const config = getTelephonyConfig();
@@ -312,6 +198,9 @@ export type VoiceCallRecord = {
   campaignName: string | null;
   contactName: string | null;
   recorded: boolean;
+  result: VoiceCallResult | null;
+  tabulacaoIsSuccess: boolean | null;
+  callbackAt: string | null;
   createdAt: string;
   endedAt: string | null;
 };
@@ -340,6 +229,9 @@ function mapCall(row: Record<string, unknown>): VoiceCallRecord {
     campaignName: row.campaign_name ? String(row.campaign_name) : null,
     contactName: row.contact_name ? String(row.contact_name) : null,
     recorded: Boolean(row.recorded),
+    result: row.result ? (String(row.result) as VoiceCallResult) : null,
+    tabulacaoIsSuccess: row.tabulacao_is_success == null ? null : Boolean(row.tabulacao_is_success),
+    callbackAt: toIso(row.callback_at),
     createdAt: toIso(row.created_at) ?? "",
     endedAt: toIso(row.ended_at),
   };
@@ -452,36 +344,43 @@ export async function authorizeCallFromAsterisk(input: {
   return { ok: true, record: Boolean(result.rows[0].recorded) };
 }
 
-async function applyContactOutcome(
-  client: PoolClient | typeof pool,
-  input: { callId: string; outcome?: VoiceContactOutcome | null; tabulacaoLabel?: string | null }
+type ContactCallContext = { attempts: number; maxAttempts: number; retryIntervalMinutes: number };
+
+/**
+ * Atualiza o contato da campanha ligado à ligação. Ignora se o contato já foi reservado por outra ligação
+ * (ex.: reserva expirada e repassada) ou se `compute` não define destino.
+ */
+async function updateContactAfterCall(
+  callId: string,
+  compute: (ctx: ContactCallContext) => ContactNextState | null,
+  extra: { result?: VoiceCallResult | null; tabulacaoLabel?: string | null; callbackUserId?: string | null } = {}
 ): Promise<void> {
-  const row = await client.query(
-    `SELECT ct.id, ct.attempts, ct.last_call_id, c.status AS call_status,
-            vc.max_attempts, vc.retry_interval_minutes
+  const row = await pool.query(
+    `SELECT ct.id, ct.attempts, ct.last_call_id, vc.max_attempts, vc.retry_interval_minutes
      FROM voice_calls c
      JOIN voice_campaign_contacts ct ON ct.id = c.contact_id
      JOIN voice_campaigns vc ON vc.id = ct.campaign_id
      WHERE c.id = $1::uuid`,
-    [input.callId]
+    [callId]
   );
   const r = row.rows[0];
-  if (!r || String(r.last_call_id) !== input.callId) return;
-  const next = resolveContactAfterAttempt({
-    callAnswered: r.call_status === "answered",
+  if (!r || String(r.last_call_id) !== callId) return;
+  const next = compute({
     attempts: Number(r.attempts),
     maxAttempts: Number(r.max_attempts),
     retryIntervalMinutes: Number(r.retry_interval_minutes),
-    outcome: input.outcome ?? null,
   });
-  await client.query(
+  if (!next) return;
+  await pool.query(
     `UPDATE voice_campaign_contacts
-     SET status = $2, next_attempt_at = $3, last_result = $4,
+     SET status = $2, next_attempt_at = $3,
+         last_call_result = COALESCE($4, last_call_result),
          last_tabulacao_label = COALESCE($5, last_tabulacao_label),
-         completed_at = CASE WHEN $2 IN ('done', 'exhausted', 'do_not_call') THEN now() ELSE NULL END,
+         callback_user_id = $6::uuid,
+         completed_at = CASE WHEN $2 IN ('done', 'exhausted', 'do_not_call', 'invalid') THEN now() ELSE NULL END,
          updated_at = now()
      WHERE id = $1::uuid`,
-    [r.id, next.status, next.nextAttemptAt, r.call_status, input.tabulacaoLabel ?? null]
+    [r.id, next.status, next.nextAttemptAt, extra.result ?? null, extra.tabulacaoLabel ?? null, extra.callbackUserId ?? null]
   );
 }
 
@@ -496,6 +395,7 @@ export async function finishCallFromAsterisk(input: {
   await ensureTelephonySchema();
   if (!/^[0-9a-f-]{36}$/i.test(input.callId)) return;
   const status = mapDialStatusToCallStatus(input.dialStatus);
+  const result = classifyCallResult(input.dialStatus, input.hangupCause);
   const { ringSeconds, talkSeconds } = computeCallDurations({
     dialedSeconds: input.dialedSeconds,
     answeredSeconds: input.answeredSeconds,
@@ -503,16 +403,57 @@ export async function finishCallFromAsterisk(input: {
   const updated = await pool.query(
     `UPDATE voice_calls
      SET status = $2, dial_status = NULLIF($3, ''), hangup_cause = NULLIF($4, ''),
-         ring_seconds = $5, talk_seconds = $6, ended_at = now()
+         ring_seconds = $5, talk_seconds = $6, ended_at = now(),
+         result = CASE WHEN result = 'voicemail' THEN result ELSE $7 END
      WHERE id = $1::uuid AND ended_at IS NULL
-     RETURNING contact_id, tabulacao_id`,
-    [input.callId, status, input.dialStatus ?? "", input.hangupCause ?? "", ringSeconds, talkSeconds]
+     RETURNING contact_id, tabulated_at, result`,
+    [input.callId, status, input.dialStatus ?? "", input.hangupCause ?? "", ringSeconds, talkSeconds, result]
   );
   const row = updated.rows[0];
-  // Se o atendente já tabulou (corrida com o hangup handler), o desfecho dele prevalece.
-  if (row?.contact_id && !row.tabulacao_id) {
-    await applyContactOutcome(pool, { callId: input.callId });
+  // Atendida espera a tabulação do operador; se ele já tabulou/marcou caixa postal, o desfecho dele prevalece.
+  if (row?.contact_id && !row.tabulated_at) {
+    const finalResult = String(row.result) as VoiceCallResult;
+    await updateContactAfterCall(input.callId, (ctx) => resolveContactAfterResult({ ...ctx, result: finalResult }), {
+      result: finalResult,
+    });
   }
+}
+
+/** Operador identificou caixa postal: encerra sem tabulação e reagenda o contato. */
+export async function markCallVoicemail(input: {
+  tenantId: string;
+  userId: string;
+  callId: string;
+}): Promise<VoiceCallRecord> {
+  await ensureTelephonySchema();
+  const updated = await pool.query(
+    `UPDATE voice_calls
+     SET result = 'voicemail', tabulacao_id = NULL, tabulacao_label = 'Caixa postal',
+         tabulacao_is_success = false, tabulated_at = now()
+     WHERE id = $1::uuid AND tenant_id = $2::uuid AND user_id = $3::uuid
+     RETURNING contact_id`,
+    [input.callId, input.tenantId, input.userId]
+  );
+  if (!updated.rows[0]) throw new Error("TELEPHONY_CALL_NOT_FOUND");
+  if (updated.rows[0].contact_id) {
+    await updateContactAfterCall(input.callId, (ctx) => resolveContactAfterResult({ ...ctx, result: "voicemail" }), {
+      result: "voicemail",
+      tabulacaoLabel: "Caixa postal",
+    });
+  }
+  const result = await pool.query(`${CALL_SELECT} WHERE c.id = $1::uuid`, [input.callId]);
+  return mapCall(result.rows[0]);
+}
+
+export async function getAgentCall(tenantId: string, userId: string, callId: string): Promise<VoiceCallRecord> {
+  await ensureTelephonySchema();
+  if (!/^[0-9a-f-]{36}$/i.test(callId)) throw new Error("TELEPHONY_CALL_NOT_FOUND");
+  const result = await pool.query(
+    `${CALL_SELECT} WHERE c.id = $1::uuid AND c.tenant_id = $2::uuid AND c.user_id = $3::uuid`,
+    [callId, tenantId, userId]
+  );
+  if (!result.rows[0]) throw new Error("TELEPHONY_CALL_NOT_FOUND");
+  return mapCall(result.rows[0]);
 }
 
 /** O navegador não conseguiu iniciar (ex.: microfone negado) — libera o atendente e devolve o contato. */
@@ -553,14 +494,17 @@ export async function listAgentRecentCalls(tenantId: string, userId: string): Pr
   return result.rows.map(mapCall);
 }
 
-export async function listTenantCalls(input: {
+export type TenantCallFilter = {
   tenantId: string;
   from?: string;
   to?: string;
   userId?: string;
   campaignId?: string;
-}): Promise<VoiceCallRecord[]> {
-  await ensureTelephonySchema();
+  result?: string;
+};
+
+/** Filtro do histórico (datas no fuso de São Paulo). Usado na listagem e na exportação. */
+export function buildTenantCallFilter(input: TenantCallFilter): { where: string; params: unknown[] } {
   const params: unknown[] = [input.tenantId];
   const where = ["c.tenant_id = $1::uuid"];
   if (input.from && /^\d{4}-\d{2}-\d{2}$/.test(input.from)) {
@@ -575,18 +519,53 @@ export async function listTenantCalls(input: {
     params.push(input.userId);
     where.push(`c.user_id = $${params.length}::uuid`);
   }
-  if (input.campaignId && /^[0-9a-f-]{36}$/i.test(input.campaignId)) {
+  if (input.campaignId === "manual") {
+    where.push(`c.campaign_id IS NULL`);
+  } else if (input.campaignId && /^[0-9a-f-]{36}$/i.test(input.campaignId)) {
     params.push(input.campaignId);
     where.push(`c.campaign_id = $${params.length}::uuid`);
   }
+  if (input.result && VOICE_CALL_RESULTS.includes(input.result as VoiceCallResult)) {
+    params.push(input.result);
+    where.push(`c.result = $${params.length}`);
+  }
+  return { where: where.join(" AND "), params };
+}
+
+export async function listTenantCalls(input: TenantCallFilter): Promise<VoiceCallRecord[]> {
+  await ensureTelephonySchema();
+  const { where, params } = buildTenantCallFilter(input);
   const result = await pool.query(
     `${CALL_SELECT}
-     WHERE ${where.join(" AND ")}
+     WHERE ${where}
      ORDER BY c.created_at DESC
      LIMIT 500`,
     params
   );
   return result.rows.map(mapCall);
+}
+
+/** Ligações para exportação, com os dados da planilha do contato. */
+export async function listTenantCallsForExport(
+  input: TenantCallFilter
+): Promise<(VoiceCallRecord & { contactData: Record<string, string> | null })[]> {
+  await ensureTelephonySchema();
+  const { where, params } = buildTenantCallFilter(input);
+  const result = await pool.query(
+    `SELECT c.*, u.name AS user_name, vc.name AS campaign_name, ct.name AS contact_name, ct.data AS contact_data
+     FROM voice_calls c
+     LEFT JOIN users u ON u.id = c.user_id
+     LEFT JOIN voice_campaigns vc ON vc.id = c.campaign_id
+     LEFT JOIN voice_campaign_contacts ct ON ct.id = c.contact_id
+     WHERE ${where}
+     ORDER BY c.created_at ASC
+     LIMIT 100000`,
+    params
+  );
+  return result.rows.map((row) => ({
+    ...mapCall(row),
+    contactData: (row.contact_data as Record<string, string> | null) ?? null,
+  }));
 }
 
 export async function getRecordedCall(
@@ -605,8 +584,46 @@ export async function getRecordedCall(
 
 // --- Tabulação ------------------------------------------------------------
 
-export async function listTabulacoesForCall(tenantId: string): Promise<TabulacaoRecord[]> {
-  return listTabulacoesForConversationClose({ tenantId, queueKey: null });
+export type CallTabulacaoOption = {
+  id: string;
+  label: string;
+  description: string | null;
+  outcome: VoiceContactOutcome | null;
+  isSuccess: boolean;
+};
+
+/** Ligação de campanha usa as tabulações da campanha; manual usa as tabulações gerais da Operação. */
+export async function listTabulacoesForCall(input: {
+  tenantId: string;
+  userId: string;
+  callId?: string | null;
+}): Promise<{ kind: "campaign" | "general"; items: CallTabulacaoOption[] }> {
+  await ensureTelephonySchema();
+  if (input.callId && /^[0-9a-f-]{36}$/i.test(input.callId)) {
+    const call = await pool.query(
+      `SELECT campaign_id FROM voice_calls WHERE id = $1::uuid AND tenant_id = $2::uuid AND user_id = $3::uuid`,
+      [input.callId, input.tenantId, input.userId]
+    );
+    const campaignId = call.rows[0]?.campaign_id ? String(call.rows[0].campaign_id) : null;
+    if (campaignId) {
+      const tabs = await listCampaignTabulacoes({ tenantId: input.tenantId, campaignId, onlyActive: true });
+      return {
+        kind: "campaign",
+        items: tabs.map((t) => ({
+          id: t.id,
+          label: t.label,
+          description: t.description,
+          outcome: t.outcome,
+          isSuccess: t.isSuccess,
+        })),
+      };
+    }
+  }
+  const general = await listTabulacoesForConversationClose({ tenantId: input.tenantId, queueKey: null });
+  return {
+    kind: "general",
+    items: general.map((t) => ({ id: t.id, label: t.label, description: t.description, outcome: null, isSuccess: false })),
+  };
 }
 
 export async function tabulateCall(input: {
@@ -614,37 +631,56 @@ export async function tabulateCall(input: {
   userId: string;
   callId: string;
   tabulacaoId: string;
-  outcome?: VoiceContactOutcome | null;
+  callbackAt?: unknown;
 }): Promise<VoiceCallRecord> {
   await ensureTelephonySchema();
   const existing = await pool.query(
-    `SELECT id, contact_id FROM voice_calls WHERE id = $1::uuid AND tenant_id = $2::uuid AND user_id = $3::uuid`,
+    `SELECT id, contact_id, campaign_id, result FROM voice_calls
+     WHERE id = $1::uuid AND tenant_id = $2::uuid AND user_id = $3::uuid`,
     [input.callId, input.tenantId, input.userId]
   );
-  if (!existing.rows[0]) throw new Error("TELEPHONY_CALL_NOT_FOUND");
+  const call = existing.rows[0];
+  if (!call) throw new Error("TELEPHONY_CALL_NOT_FOUND");
 
-  let tabulacao: TabulacaoRecord;
-  try {
-    tabulacao = await assertTabulacaoAllowedForQueue({
-      tenantId: input.tenantId,
-      tabulacaoId: input.tabulacaoId,
-      queueKey: null,
-    });
-  } catch {
-    throw new Error("TELEPHONY_TABULACAO_NOT_ALLOWED");
-  }
-
-  await pool.query(
-    `UPDATE voice_calls SET tabulacao_id = $2::uuid, tabulacao_label = $3, tabulated_at = now()
-     WHERE id = $1::uuid`,
-    [input.callId, tabulacao.id, tabulacao.label]
-  );
-  if (existing.rows[0].contact_id) {
-    await applyContactOutcome(pool, {
-      callId: input.callId,
-      outcome: input.outcome ?? null,
-      tabulacaoLabel: tabulacao.label,
-    });
+  if (call.campaign_id) {
+    const tab = await getCampaignTabulacao(String(call.campaign_id), input.tabulacaoId);
+    if (!tab) throw new Error("TELEPHONY_TABULACAO_NOT_ALLOWED");
+    const callbackAt = tab.outcome === "callback" ? parseCallbackAt(input.callbackAt) : null;
+    if (tab.outcome === "callback" && !callbackAt) throw new Error("TELEPHONY_CALLBACK_INVALID");
+    await pool.query(
+      `UPDATE voice_calls
+       SET tabulacao_id = $2::uuid, tabulacao_label = $3, tabulacao_is_success = $4, callback_at = $5,
+           tabulated_at = now()
+       WHERE id = $1::uuid`,
+      [input.callId, tab.id, tab.label, tab.isSuccess, callbackAt]
+    );
+    if (call.contact_id) {
+      await updateContactAfterCall(
+        input.callId,
+        (ctx) => resolveContactAfterAttempt({ ...ctx, callAnswered: true, outcome: tab.outcome, callbackAt }),
+        {
+          result: (call.result as VoiceCallResult | null) ?? "answered",
+          tabulacaoLabel: tab.label,
+          callbackUserId: tab.outcome === "callback" ? input.userId : null,
+        }
+      );
+    }
+  } else {
+    let tabulacao: TabulacaoRecord;
+    try {
+      tabulacao = await assertTabulacaoAllowedForQueue({
+        tenantId: input.tenantId,
+        tabulacaoId: input.tabulacaoId,
+        queueKey: null,
+      });
+    } catch {
+      throw new Error("TELEPHONY_TABULACAO_NOT_ALLOWED");
+    }
+    await pool.query(
+      `UPDATE voice_calls SET tabulacao_id = $2::uuid, tabulacao_label = $3, tabulated_at = now()
+       WHERE id = $1::uuid`,
+      [input.callId, tabulacao.id, tabulacao.label]
+    );
   }
 
   const result = await pool.query(`${CALL_SELECT} WHERE c.id = $1::uuid`, [input.callId]);

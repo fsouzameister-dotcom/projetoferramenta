@@ -23,17 +23,67 @@ export type VoiceCall = {
   campaignName: string | null;
   contactName: string | null;
   recorded: boolean;
+  result: VoiceCallResult | null;
+  tabulacaoIsSuccess: boolean | null;
+  callbackAt: string | null;
   createdAt: string;
   endedAt: string | null;
 };
 
-export type VoiceContactOutcome = "done" | "retry" | "do_not_call";
+export type VoiceCallResult =
+  | "answered"
+  | "no_answer"
+  | "busy"
+  | "invalid_number"
+  | "unavailable"
+  | "carrier_failure"
+  | "cancelled"
+  | "voicemail";
 
-export const voiceOutcomeOptions: { value: VoiceContactOutcome; label: string }[] = [
-  { value: "done", label: "Concluir contato" },
-  { value: "retry", label: "Tentar mais tarde" },
-  { value: "do_not_call", label: "Não ligar mais" },
-];
+export const voiceCallResultLabel: Record<VoiceCallResult, string> = {
+  answered: "Atendida",
+  no_answer: "Não atendeu",
+  busy: "Ocupado",
+  invalid_number: "Número inexistente",
+  unavailable: "Desligado / fora de área",
+  carrier_failure: "Falha na operadora",
+  cancelled: "Cancelada pelo operador",
+  voicemail: "Caixa postal",
+};
+
+/** Rótulo do resultado; ligações antigas sem `result` caem no status. */
+export function callResultLabel(call: Pick<VoiceCall, "result" | "status">): string {
+  if (call.result) return voiceCallResultLabel[call.result] ?? call.result;
+  return voiceCallStatusLabel[call.status] ?? call.status;
+}
+
+export type VoiceContactOutcome = "done" | "retry" | "do_not_call" | "callback";
+
+export const voiceOutcomeLabel: Record<VoiceContactOutcome, string> = {
+  done: "Concluir contato",
+  retry: "Tentar de novo depois",
+  do_not_call: "Não ligar mais",
+  callback: "Agendar retorno",
+};
+
+export type CallTabulacaoOption = {
+  id: string;
+  label: string;
+  description: string | null;
+  outcome: VoiceContactOutcome | null;
+  isSuccess: boolean;
+};
+
+export type VoiceCampaignTabulacao = {
+  id: string;
+  campaignId: string;
+  label: string;
+  description: string | null;
+  outcome: VoiceContactOutcome;
+  isSuccess: boolean;
+  sortOrder: number;
+  active: boolean;
+};
 
 export type AgentVoiceCampaign = {
   id: string;
@@ -42,6 +92,8 @@ export type AgentVoiceCampaign = {
   readyNow: number;
   scheduled: number;
   nextRetryAt: string | null;
+  myCallbacks: number;
+  nextMyCallbackAt: string | null;
 };
 
 export type NextVoiceContact = {
@@ -56,6 +108,8 @@ export type NextVoiceContact = {
     attempts: number;
     maxAttempts: number;
     lastTabulacaoLabel: string | null;
+    lastCallResult: VoiceCallResult | null;
+    callbackAt: string | null;
   };
 };
 
@@ -85,6 +139,7 @@ export type VoiceCampaignSummary = {
     done: number;
     exhausted: number;
     doNotCall: number;
+    invalid: number;
     readyNow: number;
   };
 };

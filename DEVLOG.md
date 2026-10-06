@@ -2295,6 +2295,24 @@ Use este bloco para retomar **sem depender do histórico do chat**. Substitui a 
     - o usuário testa a gravação (manual e campanha) em 2026-10-06;
     - aviso de gravação: por enquanto os atendentes avisam (sem áudio automático);
     - depois: **transcrição das gravações sem API paga**, com modelo local open source (whisper.cpp/faster-whisper ou Vosk). Avaliar a capacidade da VPS (1 vCPU / 3,8 GB): provavelmente fila em lote fora do horário, ou sob demanda, ou um servidor de transcrição separado.
+- **Etapa 4 — tabulações por campanha, resultado da ligação, retorno agendado e exportação (2026-10-06):**
+  - **Resultado técnico automático** (`classifyCallResult`, coluna `voice_calls.result`) pelo DIALSTATUS + HANGUPCAUSE:
+    - atendida, não atendeu, ocupado, número inexistente (1/22/28), desligado/fora de área (20/27), falha na operadora, cancelada;
+    - ligações antigas reclassificadas na migração 015;
+    - **calibrar com testes reais da Vono** (inexistente, desligado, ocupado, não atende).
+  - **Caixa postal**: a rede sinaliza como atendida. O operador marca pelo botão "Caixa postal" (`POST /agent/telephony/calls/:id/voicemail`), sem tabular; o contato é reagendado.
+  - **Não atendida em campanha** não exige tabulação: o contato é reagendado automaticamente (`resolveContactAfterResult`):
+    - inexistente → status `invalid`;
+    - ocupado/falha → 15 min;
+    - demais → intervalo da campanha.
+  - **Tabulações por campanha** (`voice_campaign_tabulacoes`):
+    - cada uma define o desfecho do contato (concluir, tentar de novo, não ligar mais, agendar retorno) e se conta como **sucesso**;
+    - a lista padrão é criada com a campanha e editada em Campanhas de voz → Tabulações;
+    - ligações manuais seguem com as tabulações gerais.
+  - **Retorno agendado**: data/hora escolhida pelo operador; o contato volta **para o mesmo operador**, e qualquer um da fila pode puxar depois de 15 min de tolerância. Não esgota pelo limite de tentativas.
+  - **Exportação Excel** das ligações (`GET /admin/telephony/calls/export`, xlsx com as colunas da planilha do contato). O histórico ganhou filtros por campanha (inclui "somente manuais") e por resultado, além da marca de sucesso e do retorno.
+  - Esquema movido para `telephony-schema.ts`.
+  - Relatórios além da exportação (por campanha, operador, horário) ficam para depois.
   - Observação: `/var/log/asterisk/messages.log*` ocupa ~8 GB (ruído antigo de ataques SIP); revisar logrotate/nível de log.
 - Ruído conhecido no log: erros de `app_voicemail_imap/odbc` já registrados (módulos duplicados, inofensivo; dá para `noload`).
 

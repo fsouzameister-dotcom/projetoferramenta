@@ -3,12 +3,71 @@ import assert from "node:assert/strict";
 import {
   clampMaxAttempts,
   clampRetryIntervalMinutes,
+  parseCallbackAt,
   prepareVoiceContacts,
   resolveContactAfterAttempt,
+  resolveContactAfterResult,
   suggestColumn,
 } from "../src/voice-campaign-rules";
+import { classifyCallResult } from "../src/telephony-rules";
 
 const now = new Date("2026-10-02T12:00:00.000Z");
+
+test("classifyCallResult: sinalização da operadora", () => {
+  assert.equal(classifyCallResult("ANSWER", "16"), "answered");
+  assert.equal(classifyCallResult("NOANSWER", "19"), "no_answer");
+  assert.equal(classifyCallResult("BUSY", "17"), "busy");
+  assert.equal(classifyCallResult("CHANUNAVAIL", "1"), "invalid_number");
+  assert.equal(classifyCallResult("CONGESTION", "28"), "invalid_number");
+  assert.equal(classifyCallResult("CONGESTION", "17"), "busy");
+  assert.equal(classifyCallResult("CHANUNAVAIL", "20"), "unavailable");
+  assert.equal(classifyCallResult("CHANUNAVAIL", "27"), "unavailable");
+  assert.equal(classifyCallResult("CANCEL", "0"), "cancelled");
+  assert.equal(classifyCallResult("CONGESTION", "34"), "carrier_failure");
+  assert.equal(classifyCallResult("", ""), "carrier_failure");
+});
+
+test("resolveContactAfterResult: destinos automáticos", () => {
+  const base = { attempts: 1, maxAttempts: 5, retryIntervalMinutes: 60, now };
+  assert.equal(resolveContactAfterResult({ ...base, result: "answered" }), null);
+  assert.deepEqual(resolveContactAfterResult({ ...base, result: "invalid_number" }), { status: "invalid", nextAttemptAt: null });
+  assert.equal(
+    resolveContactAfterResult({ ...base, result: "busy" })?.nextAttemptAt?.toISOString(),
+    "2026-10-02T12:15:00.000Z"
+  );
+  assert.equal(
+    resolveContactAfterResult({ ...base, result: "no_answer" })?.nextAttemptAt?.toISOString(),
+    "2026-10-02T13:00:00.000Z"
+  );
+  assert.deepEqual(resolveContactAfterResult({ ...base, attempts: 5, result: "voicemail" }), {
+    status: "exhausted",
+    nextAttemptAt: null,
+  });
+});
+
+test("resolveContactAfterAttempt: retorno agendado não esgota", () => {
+  const callbackAt = new Date("2026-10-03T15:00:00.000Z");
+  assert.deepEqual(
+    resolveContactAfterAttempt({
+      callAnswered: true,
+      attempts: 5,
+      maxAttempts: 5,
+      retryIntervalMinutes: 60,
+      outcome: "callback",
+      callbackAt,
+      now,
+    }),
+    { status: "retry", nextAttemptAt: callbackAt }
+  );
+});
+
+test("parseCallbackAt: só futuro e até 60 dias", () => {
+  assert.equal(parseCallbackAt("2026-10-03T15:00:00.000Z", now)?.toISOString(), "2026-10-03T15:00:00.000Z");
+  assert.equal(parseCallbackAt("2026-10-01T15:00:00.000Z", now), null);
+  assert.equal(parseCallbackAt("2027-01-01T15:00:00.000Z", now), null);
+  assert.equal(parseCallbackAt("x", now), null);
+  assert.equal(parseCallbackAt(undefined, now), null);
+});
 
 test("resolveContactAfterAttempt: atendida sem tabulação conclui", () => {
   const r = resolveContactAfterAttempt({ callAnswered: true, attempts: 1, maxAttempts: 5, retryIntervalMinutes: 60, now });

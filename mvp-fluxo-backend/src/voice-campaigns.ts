@@ -7,16 +7,16 @@ import {
   insertCallRequest,
   requireTelephonyConfig,
 } from "./telephony";
+import { REQUEST_AUTHORIZE_WINDOW_SECONDS } from "./telephony-rules";
 import {
-  REQUEST_AUTHORIZE_WINDOW_SECONDS,
-} from "./telephony-rules";
-import {
+  CALLBACK_OWNER_GRACE_MINUTES,
   clampMaxAttempts,
   clampRetryIntervalMinutes,
   prepareVoiceContacts,
   suggestColumn,
   type VoiceCampaignStatus,
 } from "./voice-campaign-rules";
+import { seedCampaignTabulacoes } from "./voice-campaign-tabulacoes";
 
 const PHONE_CANDIDATES = ["telefone", "celular", "fone", "phone", "whatsapp", "numero", "tel"];
 const NAME_CANDIDATES = ["nome", "name", "cliente", "contato", "razaosocial"];
@@ -76,6 +76,7 @@ export type VoiceCampaignSummary = {
     done: number;
     exhausted: number;
     doNotCall: number;
+    invalid: number;
     readyNow: number;
   };
 };
@@ -86,7 +87,7 @@ const SUMMARY_SELECT = `
               JOIN service_queues q ON q.id = vq.queue_id WHERE vq.campaign_id = vc.id), '{}') AS queue_ids,
     COALESCE((SELECT array_agg(q.label ORDER BY q.label) FROM voice_campaign_queues vq
               JOIN service_queues q ON q.id = vq.queue_id WHERE vq.campaign_id = vc.id), '{}') AS queue_labels,
-    s.total, s.pending, s.retry, s.in_call, s.done, s.exhausted, s.do_not_call, s.ready_now
+    s.total, s.pending, s.retry, s.in_call, s.done, s.exhausted, s.do_not_call, s.invalid, s.ready_now
   FROM voice_campaigns vc
   LEFT JOIN LATERAL (
     SELECT count(*)::int AS total,
@@ -96,6 +97,7 @@ const SUMMARY_SELECT = `
       count(*) FILTER (WHERE status = 'done')::int AS done,
       count(*) FILTER (WHERE status = 'exhausted')::int AS exhausted,
       count(*) FILTER (WHERE status = 'do_not_call')::int AS do_not_call,
+      count(*) FILTER (WHERE status = 'invalid')::int AS invalid,
       count(*) FILTER (WHERE status IN ('pending', 'retry')
                         AND (next_attempt_at IS NULL OR next_attempt_at <= now()))::int AS ready_now
     FROM voice_campaign_contacts WHERE campaign_id = vc.id
@@ -120,6 +122,7 @@ function mapSummary(row: Record<string, unknown>): VoiceCampaignSummary {
       done: Number(row.done ?? 0),
       exhausted: Number(row.exhausted ?? 0),
       doNotCall: Number(row.do_not_call ?? 0),
+      invalid: Number(row.invalid ?? 0),
       readyNow: Number(row.ready_now ?? 0),
     },
   };
@@ -250,6 +253,7 @@ export async function createVoiceCampaign(input: {
     ]
   );
   const campaignId = String(inserted.rows[0].id);
+  await seedCampaignTabulacoes(input.tenantId, campaignId);
   for (const queueId of queueIds) {
     await pool.query(`INSERT INTO voice_campaign_queues (campaign_id, queue_id) VALUES ($1::uuid, $2::uuid)`, [
       campaignId,
@@ -354,6 +358,17 @@ const AGENT_VISIBLE = `
     )
   )`;
 
+/**
+ * Contato disponível agora para o atendente. Retorno agendado para outro operador só fica livre
+ * depois do prazo de tolerância (o dono não puxou a tempo).
+ */
+function availableNowFor(alias: string, userParam: string): string {
+  return `${alias}.status IN ('pending', 'retry')
+    AND (${alias}.next_attempt_at IS NULL OR ${alias}.next_attempt_at <= now())
+    AND (${alias}.callback_user_id IS NULL OR ${alias}.callback_user_id = ${userParam}
+         OR ${alias}.next_attempt_at <= now() - interval '${CALLBACK_OWNER_GRACE_MINUTES} minutes')`;
+}
+
 export type AgentVoiceCampaign = {
   id: string;
   name: string;
@@ -361,6 +376,8 @@ export type AgentVoiceCampaign = {
   readyNow: number;
   scheduled: number;
   nextRetryAt: string | null;
+  myCallbacks: number;
+  nextMyCallbackAt: string | null;
 };
 
 export async function listAgentVoiceCampaigns(tenantId: string, userId: string): Promise<AgentVoiceCampaign[]> {
@@ -370,11 +387,15 @@ export async function listAgentVoiceCampaigns(tenantId: string, userId: string):
        COALESCE((SELECT array_agg(q.label ORDER BY q.label) FROM voice_campaign_queues vq
                  JOIN service_queues q ON q.id = vq.queue_id WHERE vq.campaign_id = vc.id), '{}') AS queue_labels,
        (SELECT count(*)::int FROM voice_campaign_contacts c WHERE c.campaign_id = vc.id
-          AND c.status IN ('pending', 'retry') AND (c.next_attempt_at IS NULL OR c.next_attempt_at <= now())) AS ready_now,
+          AND ${availableNowFor("c", "$2::uuid")}) AS ready_now,
        (SELECT count(*)::int FROM voice_campaign_contacts c WHERE c.campaign_id = vc.id
           AND c.status = 'retry' AND c.next_attempt_at > now()) AS scheduled,
        (SELECT min(c.next_attempt_at) FROM voice_campaign_contacts c WHERE c.campaign_id = vc.id
-          AND c.status = 'retry' AND c.next_attempt_at > now()) AS next_retry_at
+          AND c.status = 'retry' AND c.next_attempt_at > now()) AS next_retry_at,
+       (SELECT count(*)::int FROM voice_campaign_contacts c WHERE c.campaign_id = vc.id
+          AND c.status = 'retry' AND c.callback_user_id = $2::uuid) AS my_callbacks,
+       (SELECT min(c.next_attempt_at) FROM voice_campaign_contacts c WHERE c.campaign_id = vc.id
+          AND c.status = 'retry' AND c.callback_user_id = $2::uuid) AS next_my_callback_at
      FROM voice_campaigns vc
      WHERE ${AGENT_VISIBLE}
      ORDER BY vc.name`,
@@ -387,6 +408,8 @@ export async function listAgentVoiceCampaigns(tenantId: string, userId: string):
     readyNow: Number(r.ready_now ?? 0),
     scheduled: Number(r.scheduled ?? 0),
     nextRetryAt: toIso(r.next_retry_at),
+    myCallbacks: Number(r.my_callbacks ?? 0),
+    nextMyCallbackAt: toIso(r.next_my_callback_at),
   }));
 }
 
@@ -402,6 +425,9 @@ export type NextVoiceContact = {
     attempts: number;
     maxAttempts: number;
     lastTabulacaoLabel: string | null;
+    lastCallResult: string | null;
+    /** Preenchido quando o contato voltou por retorno agendado. */
+    callbackAt: string | null;
   };
 };
 
@@ -434,20 +460,23 @@ export async function requestNextCampaignContact(input: {
 
     const picked = await client.query(
       `SELECT ct.id, ct.phone, ct.name, ct.data, ct.attempts, ct.status, ct.last_tabulacao_label,
+              ct.callback_user_id, ct.next_attempt_at, ct.last_call_result,
               lc.id AS last_call_id, lc.status AS last_call_status
        FROM voice_campaign_contacts ct
        LEFT JOIN voice_calls lc ON lc.id = ct.last_call_id
        WHERE ct.campaign_id = $1::uuid
          AND (
-           (ct.status IN ('pending', 'retry') AND (ct.next_attempt_at IS NULL OR ct.next_attempt_at <= now()))
+           (${availableNowFor("ct", "$3::uuid")})
            OR (ct.status = 'in_call' AND (
                 (lc.status = 'requested' AND lc.created_at < now() - make_interval(secs => $2))
                 OR ct.reserved_at < now() - interval '3 hours'))
          )
-       ORDER BY COALESCE(ct.next_attempt_at, ct.created_at) ASC, ct.created_at ASC
+       ORDER BY (ct.callback_user_id = $3::uuid) DESC NULLS LAST,
+                (ct.callback_user_id IS NOT NULL) DESC,
+                COALESCE(ct.next_attempt_at, ct.created_at) ASC, ct.created_at ASC
        LIMIT 1
        FOR UPDATE OF ct SKIP LOCKED`,
-      [c.id, REQUEST_AUTHORIZE_WINDOW_SECONDS]
+      [c.id, REQUEST_AUTHORIZE_WINDOW_SECONDS, input.userId]
     );
     const row = picked.rows[0];
     if (!row) throw new Error("VOICE_CAMPAIGN_NO_CONTACTS");
@@ -461,6 +490,7 @@ export async function requestNextCampaignContact(input: {
       );
     }
     const attempts = Number(row.attempts) + (staleRequest ? 0 : 1);
+    const callbackAt = row.callback_user_id && row.next_attempt_at ? toIso(row.next_attempt_at) : null;
 
     const callId = await insertCallRequest(client, {
       tenantId: input.tenantId,
@@ -472,7 +502,7 @@ export async function requestNextCampaignContact(input: {
     await client.query(
       `UPDATE voice_campaign_contacts
        SET status = 'in_call', attempts = $2, reserved_by = $3::uuid, reserved_at = now(),
-           last_call_id = $4::uuid, next_attempt_at = NULL, updated_at = now()
+           last_call_id = $4::uuid, next_attempt_at = NULL, callback_user_id = NULL, updated_at = now()
        WHERE id = $1::uuid`,
       [row.id, attempts, input.userId, callId]
     );
@@ -489,6 +519,8 @@ export async function requestNextCampaignContact(input: {
         attempts,
         maxAttempts: Number(c.max_attempts),
         lastTabulacaoLabel: row.last_tabulacao_label ? String(row.last_tabulacao_label) : null,
+        lastCallResult: row.last_call_result ? String(row.last_call_result) : null,
+        callbackAt,
       },
     };
   } catch (err) {

@@ -79,6 +79,59 @@ export function mapDialStatusToCallStatus(dialStatus: string | null | undefined)
   }
 }
 
+/** Resultado técnico da ligação (sinalização da operadora + marcação de caixa postal pelo operador). */
+export type VoiceCallResult =
+  | "answered"
+  | "no_answer"
+  | "busy"
+  | "invalid_number"
+  | "unavailable"
+  | "carrier_failure"
+  | "cancelled"
+  | "voicemail";
+
+export const VOICE_CALL_RESULTS: VoiceCallResult[] = [
+  "answered",
+  "no_answer",
+  "busy",
+  "invalid_number",
+  "unavailable",
+  "carrier_failure",
+  "cancelled",
+  "voicemail",
+];
+
+export const VOICE_CALL_RESULT_LABELS: Record<VoiceCallResult, string> = {
+  answered: "Atendida",
+  no_answer: "Não atendeu",
+  busy: "Ocupado",
+  invalid_number: "Número inexistente",
+  unavailable: "Desligado / fora de área",
+  carrier_failure: "Falha na operadora",
+  cancelled: "Cancelada pelo operador",
+  voicemail: "Caixa postal",
+};
+
+/**
+ * Classifica pelo DIALSTATUS e pelo HANGUPCAUSE (Q.850). A causa tem prioridade quando é específica:
+ * 1/22/28 = número inexistente/mudou/formato inválido; 17 = ocupado; 18/19 = não atendeu;
+ * 20/27 = assinante ausente/fora de serviço (desligado, fora de área).
+ */
+export function classifyCallResult(
+  dialStatus: string | null | undefined,
+  hangupCause: string | number | null | undefined
+): VoiceCallResult {
+  const status = String(dialStatus ?? "").trim().toUpperCase();
+  const cause = Number.parseInt(String(hangupCause ?? ""), 10);
+  if (status === "ANSWER") return "answered";
+  if (status === "CANCEL") return "cancelled";
+  if ([1, 22, 28].includes(cause)) return "invalid_number";
+  if (status === "BUSY" || cause === 17) return "busy";
+  if ([20, 27].includes(cause)) return "unavailable";
+  if (status === "NOANSWER" || cause === 18 || cause === 19) return "no_answer";
+  return "carrier_failure";
+}
+
 /** Nome do ramal PJSIP do usuário no Asterisk (também é o usuário SIP). */
 export function sipUsernameForUser(userId: string): string {
   const hex = userId.toLowerCase().replace(/[^0-9a-f]/g, "");

@@ -3,19 +3,19 @@ import { UA, WebSocketInterface } from "jssip";
 import type { RTCSession } from "jssip/lib/RTCSession";
 import api, { getApiErrorMessage, unwrapApiData } from "../api/client";
 import {
+  callResultLabel,
   formatBrPhone,
   formatCallDateTime,
   formatDuration,
-  voiceCallStatusLabel,
-  voiceOutcomeOptions,
+  voiceCallResultLabel,
+  voiceOutcomeLabel,
   type AgentVoiceCampaign,
+  type CallTabulacaoOption,
   type NextVoiceContact,
   type VoiceCall,
-  type VoiceContactOutcome,
 } from "~lib/telephony";
 
 type TelephonySession = { wsUrl: string; sipUri: string; username: string; password: string };
-type Tabulacao = { id: string; label: string; description: string | null };
 type LineState = "offline" | "connecting" | "ready" | "error";
 type CallState = "idle" | "requesting" | "ringing" | "in_call";
 type DialerTab = "preview" | "manual";
@@ -24,6 +24,14 @@ export type DialRequest = { phone: string; nonce: number };
 
 const KEYPAD = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"];
 const CAMPAIGN_STORAGE_KEY = "clienton.dialer.campaign";
+
+/** Valor para <input type="datetime-local"> (hora local), daqui a `minutes` minutos, arredondado. */
+function localDateTimeValue(minutes: number): string {
+  const d = new Date(Date.now() + minutes * 60_000);
+  d.setMinutes(Math.ceil(d.getMinutes() / 5) * 5, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 export default function Softphone(props: {
   dialRequest?: DialRequest | null;
@@ -43,9 +51,9 @@ export default function Softphone(props: {
   const [showKeypad, setShowKeypad] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [pendingCallId, setPendingCallId] = useState<string | null>(null);
-  const [tabulacoes, setTabulacoes] = useState<Tabulacao[]>([]);
+  const [tabulacoes, setTabulacoes] = useState<CallTabulacaoOption[]>([]);
   const [selectedTabulacao, setSelectedTabulacao] = useState<string | null>(null);
-  const [outcome, setOutcome] = useState<VoiceContactOutcome | null>(null);
+  const [callbackAt, setCallbackAt] = useState("");
   const [savingTabulacao, setSavingTabulacao] = useState(false);
   const [recent, setRecent] = useState<VoiceCall[]>([]);
   const [campaigns, setCampaigns] = useState<AgentVoiceCampaign[]>([]);
@@ -57,6 +65,7 @@ export default function Softphone(props: {
   const sessionRef = useRef<RTCSession | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const answeredAtRef = useRef<number | null>(null);
+  const voicemailRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -159,17 +168,45 @@ export default function Softphone(props: {
   const openTabulation = useCallback(async (callId: string) => {
     setPendingCallId(callId);
     setSelectedTabulacao(null);
-    setOutcome(null);
+    setCallbackAt(localDateTimeValue(60));
     try {
-      const res = await api.get("/agent/telephony/tabulacoes");
-      const items = unwrapApiData<Tabulacao[]>(res.data);
-      setTabulacoes(items);
-      if (items.length === 0) setPendingCallId(null);
+      const res = await api.get("/agent/telephony/tabulacoes", { params: { callId } });
+      const data = unwrapApiData<{ kind: "campaign" | "general"; items: CallTabulacaoOption[] }>(res.data);
+      setTabulacoes(data.items);
+      if (data.items.length === 0) setPendingCallId(null);
     } catch {
       setTabulacoes([]);
       setPendingCallId(null);
     }
   }, []);
+
+  /** Não atendida: o sistema já marcou o resultado e reagendou; só informa o operador. */
+  const showUnansweredResult = useCallback(
+    async (callId: string, hasContact: boolean) => {
+      if (hasContact) setContact(null);
+      setInfo("Ligação não atendida. Verificando resultado…");
+      for (const wait of [1200, 2500]) {
+        await new Promise((r) => window.setTimeout(r, wait));
+        try {
+          const res = await api.get(`/agent/telephony/calls/${callId}`);
+          const call = unwrapApiData<VoiceCall>(res.data);
+          if (call.result) {
+            const label = voiceCallResultLabel[call.result] ?? call.result;
+            setInfo(
+              hasContact
+                ? `${label}. ${call.result === "invalid_number" ? "Contato marcado como inválido." : "Contato reagendado automaticamente."}`
+                : `${label}.`
+            );
+            return;
+          }
+        } catch {
+          break;
+        }
+      }
+      setInfo(hasContact ? "Ligação não atendida. Contato reagendado automaticamente." : "Ligação não atendida.");
+    },
+    []
+  );
 
   const canStart = useCallback((): boolean => {
     if (!uaRef.current || line !== "ready") {
@@ -190,14 +227,29 @@ export default function Softphone(props: {
       setDialedNumber(dialNumber);
       let reachedServer = false;
       const finish = (failedCause?: string) => {
+        const answered = answeredAtRef.current !== null;
+        const voicemail = voicemailRef.current;
         sessionRef.current = null;
         answeredAtRef.current = null;
+        voicemailRef.current = false;
         setCallState("idle");
         setMuted(false);
         setShowKeypad(false);
         setElapsed(0);
-        if (reachedServer) {
+        if (voicemail) {
+          void api
+            .post(`/agent/telephony/calls/${callId}/voicemail`)
+            .then(() => {
+              if (hasContact) setContact(null);
+              setInfo(hasContact ? "Caixa postal registrada. Contato reagendado." : "Caixa postal registrada.");
+              if (hasContact) void loadCampaigns();
+            })
+            .catch(() => void openTabulation(callId));
+        } else if (answered) {
           void openTabulation(callId);
+        } else if (reachedServer) {
+          void showUnansweredResult(callId, hasContact);
+          if (hasContact) void loadCampaigns();
         } else {
           void api.post(`/agent/telephony/calls/${callId}/abandon`).catch(() => undefined);
           if (hasContact) setContact(null);
@@ -240,7 +292,7 @@ export default function Softphone(props: {
         finish(e instanceof Error ? e.message : undefined);
       }
     },
-    [loadRecent, openTabulation]
+    [loadCampaigns, loadRecent, openTabulation, showUnansweredResult]
   );
 
   const startManualCall = useCallback(
@@ -295,6 +347,32 @@ export default function Softphone(props: {
 
   const hangup = () => sessionRef.current?.terminate();
 
+  const hangupVoicemail = () => {
+    voicemailRef.current = true;
+    sessionRef.current?.terminate();
+  };
+
+  const markVoicemailAfterCall = async () => {
+    if (!pendingCallId) return;
+    setSavingTabulacao(true);
+    try {
+      await api.post(`/agent/telephony/calls/${pendingCallId}/voicemail`);
+      setPendingCallId(null);
+      setSelectedTabulacao(null);
+      setError(null);
+      if (contact) {
+        setContact(null);
+        void loadCampaigns();
+      }
+      setInfo(contact ? "Caixa postal registrada. Contato reagendado." : "Caixa postal registrada.");
+      void loadRecent();
+    } catch (e) {
+      setError(getApiErrorMessage(e, "Erro ao registrar caixa postal"));
+    } finally {
+      setSavingTabulacao(false);
+    }
+  };
+
   const toggleMute = () => {
     const session = sessionRef.current;
     if (!session) return;
@@ -311,25 +389,36 @@ export default function Softphone(props: {
     }
   };
 
+  const selectedOption = tabulacoes.find((t) => t.id === selectedTabulacao) ?? null;
+  const needsCallback = selectedOption?.outcome === "callback";
+
   const confirmTabulation = async () => {
     if (!pendingCallId || !selectedTabulacao) return;
-    if (contact && !outcome) {
-      setError("Escolha o que fazer com o contato.");
-      return;
+    let callbackIso: string | undefined;
+    if (needsCallback) {
+      const date = new Date(callbackAt);
+      if (!callbackAt || Number.isNaN(date.getTime()) || date.getTime() < Date.now()) {
+        setError("Informe data e hora futuras para o retorno.");
+        return;
+      }
+      callbackIso = date.toISOString();
     }
     setSavingTabulacao(true);
     try {
       await api.post(`/agent/telephony/calls/${pendingCallId}/tabulate`, {
         tabulacaoId: selectedTabulacao,
-        outcome: contact ? outcome : undefined,
+        callbackAt: callbackIso,
       });
       setPendingCallId(null);
       setSelectedTabulacao(null);
-      setOutcome(null);
       setError(null);
       if (contact) {
         setContact(null);
-        setInfo("Tabulação salva. Peça o próximo contato quando estiver pronto.");
+        setInfo(
+          needsCallback
+            ? `Retorno agendado para ${formatCallDateTime(callbackIso!)}. Ele volta para você nesse horário.`
+            : "Tabulação salva. Peça o próximo contato quando estiver pronto."
+        );
         void loadCampaigns();
       }
       void loadRecent();
@@ -377,10 +466,19 @@ export default function Softphone(props: {
           Tentativa {contact.contact.attempts}/{contact.contact.maxAttempts}
         </span>
       </div>
+      {contact.contact.callbackAt ? (
+        <p className="mt-1.5 inline-block rounded bg-amber-500/15 border border-amber-400/40 px-1.5 py-0.5 text-[10px] text-amber-200">
+          Retorno agendado para {formatCallDateTime(contact.contact.callbackAt)}
+        </p>
+      ) : null}
       <p className="text-[11px] text-gray-400 mt-1">
         {contact.campaign.name}
         {contact.campaign.recordCalls ? " · ligação gravada" : ""}
-        {contact.contact.lastTabulacaoLabel ? ` · última: ${contact.contact.lastTabulacaoLabel}` : ""}
+        {contact.contact.lastTabulacaoLabel
+          ? ` · última: ${contact.contact.lastTabulacaoLabel}`
+          : contact.contact.lastCallResult
+            ? ` · última: ${voiceCallResultLabel[contact.contact.lastCallResult] ?? contact.contact.lastCallResult}`
+            : ""}
       </p>
       {Object.keys(contact.contact.data).length > 0 ? (
         <dl className="mt-2 grid grid-cols-[auto,1fr] gap-x-2 gap-y-0.5 max-h-36 overflow-y-auto text-[11px]">
@@ -450,6 +548,16 @@ export default function Softphone(props: {
           Desligar
         </button>
       </div>
+      {callState === "in_call" ? (
+        <button
+          type="button"
+          onClick={hangupVoicemail}
+          className="mt-2 w-full px-3 py-1.5 rounded-lg text-xs border border-amber-400/50 text-amber-200 hover:bg-amber-500/10"
+          title="Desliga e registra caixa postal, sem tabulação"
+        >
+          Caiu na caixa postal — desligar
+        </button>
+      ) : null}
     </>
   );
 
@@ -467,42 +575,45 @@ export default function Softphone(props: {
                 checked={selectedTabulacao === t.id}
                 onChange={() => setSelectedTabulacao(t.id)}
               />
-              <span>
-                <span className="text-xs font-medium text-white block">{t.label}</span>
+              <span className="min-w-0">
+                <span className="text-xs font-medium text-white block">
+                  {t.label}
+                  {t.isSuccess ? <span className="ml-1.5 text-[10px] text-emerald-300">sucesso</span> : null}
+                </span>
                 {t.description ? <span className="text-[11px] text-gray-400 block">{t.description}</span> : null}
+                {t.outcome ? <span className="text-[10px] text-cyan-300/80 block">{voiceOutcomeLabel[t.outcome]}</span> : null}
               </span>
             </label>
           </li>
         ))}
       </ul>
-      {contact ? (
-        <div className="mt-3">
-          <p className="text-xs text-gray-300 mb-1.5">E o contato?</p>
-          <div className="grid grid-cols-3 gap-1.5">
-            {voiceOutcomeOptions.map((o) => (
-              <button
-                key={o.value}
-                type="button"
-                onClick={() => setOutcome(o.value)}
-                className={`px-2 py-1.5 rounded-lg text-[11px] border leading-tight ${
-                  outcome === o.value
-                    ? "border-cyan-400 bg-cyan-500/15 text-cyan-100"
-                    : "border-[#314263] text-gray-300 hover:bg-[#223150]"
-                }`}
-              >
-                {o.label}
-              </button>
-            ))}
-          </div>
-        </div>
+      {needsCallback ? (
+        <label className="block mt-3 text-xs text-gray-300">
+          Data e hora do retorno
+          <input
+            type="datetime-local"
+            value={callbackAt}
+            onChange={(e) => setCallbackAt(e.target.value)}
+            className="mt-1 w-full bg-[#0f1a33] border border-[#314263] rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-cyan-500/60 [color-scheme:dark]"
+          />
+          <span className="text-[10px] text-gray-500">O contato volta para você nesse horário (ou para a fila, se você não puxar).</span>
+        </label>
       ) : null}
       <button
         type="button"
-        disabled={!selectedTabulacao || (contact !== null && !outcome) || savingTabulacao}
+        disabled={!selectedTabulacao || savingTabulacao}
         onClick={() => void confirmTabulation()}
         className="mt-3 w-full px-3 py-2 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent-dark disabled:opacity-50"
       >
         {savingTabulacao ? "Salvando…" : "Salvar tabulação"}
+      </button>
+      <button
+        type="button"
+        disabled={savingTabulacao}
+        onClick={() => void markVoicemailAfterCall()}
+        className="mt-2 w-full px-3 py-1.5 rounded-lg text-xs border border-amber-400/50 text-amber-200 hover:bg-amber-500/10 disabled:opacity-50"
+      >
+        Foi caixa postal
       </button>
     </div>
   );
@@ -609,6 +720,12 @@ export default function Softphone(props: {
                   : ""}
               </p>
             ) : null}
+            {selectedCampaign && selectedCampaign.myCallbacks > 0 ? (
+              <p className="text-[11px] text-amber-200 mt-1">
+                {selectedCampaign.myCallbacks} retorno(s) agendado(s) para você
+                {selectedCampaign.nextMyCallbackAt ? ` · próximo ${formatCallDateTime(selectedCampaign.nextMyCallbackAt)}` : ""}
+              </p>
+            ) : null}
             <button
               type="button"
               onClick={() => void requestNextContact()}
@@ -672,7 +789,7 @@ export default function Softphone(props: {
                       {formatBrPhone(c.phone)}
                     </span>
                     <span className="text-[11px] text-gray-400 whitespace-nowrap">
-                      {voiceCallStatusLabel[c.status] ?? c.status}
+                      {callResultLabel(c)}
                       {c.status === "answered" ? ` · ${formatDuration(c.talkSeconds)}` : ""} · {formatCallDateTime(c.createdAt)}
                     </span>
                   </button>
