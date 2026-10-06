@@ -2321,6 +2321,7 @@ Use este bloco para retomar **sem depender do histórico do chat**. Substitui a 
     - Histórico ganhou os filtros operador, duração mínima/máxima (tempo falado, `mm:ss`) e "somente com gravação", que valem para a lista, o Excel e o zip.
     - "Baixar gravações (.zip)": `POST /admin/telephony/recordings/download` confere o volume (limite de 2.000 por zip) e devolve um link assinado de 10 min. O navegador baixa direto de `GET /downloads/telephony/recordings.zip?t=…` (fora de /api, sem JWT no cabeçalho, em streaming via `archiver` sem recompressão).
     - O zip tem uma pasta por campanha (`manual/` para as avulsas), arquivos `data_hora_telefone_operador_resultado_id.ogg`, `ligacoes.xlsx` e uma lista das gravações não encontradas.
+    - Escolha de formato: OGG (original), MP3 (16 kHz, 32 kbps, cerca de 2x o OGG) ou WAV (PCM 8 kHz, cerca de 8x). A conversão roda na hora, uma gravação por vez, com o `ffmpeg-static` do backend. Se uma conversão falhar, aquela gravação vai em OGG e entra em `conversao-formato.txt`.
   - Relatórios além da exportação (por campanha, operador, horário) ficam para depois.
   - Observação: `/var/log/asterisk/messages.log*` ocupa ~8 GB (ruído antigo de ataques SIP); revisar logrotate/nível de log.
 - Ruído conhecido no log: erros de `app_voicemail_imap/odbc` já registrados (módulos duplicados, inofensivo; dá para `noload`).
