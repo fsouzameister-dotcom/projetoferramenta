@@ -2365,3 +2365,19 @@ Pendências com a Vono (originais): confirmar por escrito o preview com clique d
 - Usuário contratar o tronco (sugestão: Vono) e confirmar política de uso.
 - ~~Usuário autorizar mudanças na VPS de produção~~ — autorizado e aplicado em 2026-10-02. Falta liberar 5060 só para os IPs da Vono (depende do contrato).
 - Criar subdomínio de voz no DNS se optarmos por subdomínio próprio em vez de caminho no Apache existente.
+
+## Verificação de segurança da VPS (2026-10-23)
+
+- **Sem sinais de invasão:**
+  - Logins SSH de outubro vieram todos do IP do usuário (45.183.24x.x). Os de setembro foram confirmados por ele.
+  - Nenhum usuário ou tenant criado em 30 dias.
+  - Nenhum processo ou cron estranho, e o `dpkg --verify` não acusou binário alterado.
+  - Postgres e Redis só escutam em 127.0.0.1.
+- **Falso alarme:** robôs receberam 200 em `/.git/config` em `app.clienton.com.br`, mas era o `index.html` da SPA (fallback). O repositório e o `.env` não estão expostos.
+- **SIP:** cerca de 1 milhão de tentativas externas em setembro, cessadas em 02/10 com o ufw. O CDR só mostra destinos BR, sem fraude no tronco.
+- **Aplicado (autorizado):**
+  - fail2ban: `/etc/fail2ban/jail.d/clienton.local`, com `sshd` (5 erros em 10 min dá 1 h de bloqueio, banaction ufw) e `recidive` (7 dias).
+  - avahi desligado.
+  - `/etc/apache2/conf-available/clienton-hidden-files.conf` (`RedirectMatch 404` para `.git`, `.svn`, `.hg`, `.env`).
+  - Backup do banco, `apt full-upgrade` de 104 pacotes e reboot (kernel 6.8.0-147). Serviços, Vono e health conferidos depois.
+- **Pendente:** SSH ainda aceita root por senha (cerca de 115 mil tentativas em 30 dias). O plano é passar para chave, ajustar `deploy-vps-remote.py` e os scripts temporários, e só então `PasswordAuthentication no`. Aguarda o OK do usuário.
