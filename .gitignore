@@ -7,6 +7,8 @@ backups/
 !.env.example
 scripts/.vps-deploy-secret
 scripts/.vps-deploy-secret.txt
+scripts/.vps-deploy-key
+scripts/.vps-deploy-key.pub
 scripts/.vono-secret
 scripts/.vono-secret.txt
 scripts/.voice-test-secret

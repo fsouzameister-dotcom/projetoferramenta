@@ -2380,4 +2380,10 @@ Pendências com a Vono (originais): confirmar por escrito o preview com clique d
   - avahi desligado.
   - `/etc/apache2/conf-available/clienton-hidden-files.conf` (`RedirectMatch 404` para `.git`, `.svn`, `.hg`, `.env`).
   - Backup do banco, `apt full-upgrade` de 104 pacotes e reboot (kernel 6.8.0-147). Serviços, Vono e health conferidos depois.
-- **Pendente:** SSH ainda aceita root por senha (cerca de 115 mil tentativas em 30 dias). O plano é passar para chave, ajustar `deploy-vps-remote.py` e os scripts temporários, e só então `PasswordAuthentication no`. Aguarda o OK do usuário.
+- **SSH só por chave (mesmo dia):**
+  - Chave Ed25519 em `scripts/.vps-deploy-key` (fora do Git, sem senha, só o usuário do Windows lê), instalada em `/root/.ssh/authorized_keys`.
+  - `deploy-vps-remote.py` (`connect_client()`, que os scripts temporários devem importar) e `deploy-vps-local.py` usam a chave. `VPS_SSH_KEY` sobrescreve o caminho.
+  - `/etc/ssh/sshd_config.d/00-clienton-hardening.conf`: `PermitRootLogin prohibit-password`, `PasswordAuthentication no`, `KbdInteractiveAuthentication no`. Backup em `/root/backup-ssh-*`.
+  - Testado: senha recusada (`allowed types: ['publickey']`), chave OK, deploy completo OK.
+  - A senha do root continua valendo no console web da InterServer (acesso de emergência).
+  - Os scripts antigos `scripts/vps-*.py` ainda conectam por senha e não funcionam mais pelo SSH. Ao reaproveitar algum, trocar o `connect` por `connect_client()`.

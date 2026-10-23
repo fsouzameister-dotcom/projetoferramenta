@@ -32,6 +32,7 @@ def _load_password() -> str:
 
 
 PASSWORD = _load_password()
+SSH_KEY = Path(os.environ.get("VPS_SSH_KEY") or Path(__file__).with_name(".vps-deploy-key"))
 BUILD_DIR = os.environ.get("BUILD_DIR", "/opt/build/projetoferramenta")
 BACKEND_DST = os.environ.get("BACKEND_DST", "/opt/mvp-fluxo-backend")
 FRONTEND_DST = os.environ.get("FRONTEND_DST", "/var/www/app")
@@ -103,8 +104,8 @@ rm -f "/tmp/{tar_name}"
 
 
 def run() -> int:
-    if not PASSWORD:
-        print("Defina VPS_ROOT_PASSWORD ou scripts/.vps-deploy-secret", file=sys.stderr)
+    if not SSH_KEY.is_file() and not PASSWORD:
+        print(f"Chave SSH não encontrada em {SSH_KEY} (ou defina VPS_SSH_KEY).", file=sys.stderr)
         return 2
 
     tar_name = f"clienton-local-deploy-{int(time.time())}.tar.gz"
@@ -118,7 +119,13 @@ def run() -> int:
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     print(f"Conectando em {USER}@{HOST}...")
-    client.connect(HOST, username=USER, password=PASSWORD, timeout=30, banner_timeout=30)
+    if SSH_KEY.is_file():
+        client.connect(
+            HOST, username=USER, key_filename=str(SSH_KEY), look_for_keys=False, allow_agent=False,
+            timeout=30, banner_timeout=30,
+        )
+    else:
+        client.connect(HOST, username=USER, password=PASSWORD, timeout=30, banner_timeout=30)
     transport = client.get_transport()
     if transport:
         transport.set_keepalive(30)

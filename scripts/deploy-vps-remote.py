@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deploy ClientOn na VPS via SSH (Paramiko). Requer VPS_ROOT_PASSWORD no ambiente."""
+"""Deploy ClientOn na VPS via SSH (Paramiko), com a chave scripts/.vps-deploy-key (fora do Git)."""
 from __future__ import annotations
 
 import os
@@ -27,6 +27,23 @@ def _load_password() -> str:
 
 
 PASSWORD = _load_password()
+SSH_KEY = os.environ.get("VPS_SSH_KEY") or os.path.join(os.path.dirname(os.path.abspath(__file__)), ".vps-deploy-key")
+
+
+def connect_client() -> paramiko.SSHClient:
+    """Conecta na VPS como root. Usa a chave; senha só se a chave não existir (login por senha é recusado no SSH)."""
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    if os.path.isfile(SSH_KEY):
+        client.connect(
+            HOST, username=USER, key_filename=SSH_KEY, look_for_keys=False, allow_agent=False,
+            timeout=30, banner_timeout=30,
+        )
+    elif PASSWORD:
+        client.connect(HOST, username=USER, password=PASSWORD, timeout=30, banner_timeout=30)
+    else:
+        raise SystemExit(f"Chave SSH não encontrada em {SSH_KEY} (ou defina VPS_SSH_KEY).")
+    return client
 REPO = os.environ.get(
     "REPO_URL", "https://github.com/fsouzameister-dotcom/projetoferramenta.git"
 )
@@ -89,14 +106,8 @@ echo "==> DEPLOY_OK"
 
 
 def run_remote(cmd: str, timeout: int = 1800) -> int:
-    if not PASSWORD:
-        print("Defina VPS_ROOT_PASSWORD no ambiente.", file=sys.stderr)
-        return 2
-
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     print(f"Conectando em {USER}@{HOST}...")
-    client.connect(HOST, username=USER, password=PASSWORD, timeout=30, banner_timeout=30)
+    client = connect_client()
 
     transport = client.get_transport()
     if transport:
